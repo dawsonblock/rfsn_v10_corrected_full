@@ -270,6 +270,7 @@ class RFSNRuntime:
             "task_id": task_id,
             "kv_cache_hit": kv_cache_hit,
             "sparse_success": sparse_success,
+            "dense_success": dense_success,
             "fallback_used": fallback_used,
             "num_active_blocks": int(num_active_blocks),
             "effective_sparsity": effective_sparsity,
