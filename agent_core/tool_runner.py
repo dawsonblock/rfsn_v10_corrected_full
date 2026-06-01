@@ -3,7 +3,6 @@ Command execution sandbox for safely running tools and scripts.
 """
 
 from __future__ import annotations
-
 from typing import List, Dict, Any, Optional, Tuple
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -13,10 +12,9 @@ import os
 import signal
 import threading
 from queue import Queue, Empty
-
+import shlex
 from .schemas import TaskState
 from .orchestrator import Orchestrator
-
 logger = __import__('logging').getLogger(__name__)
 
 
@@ -120,8 +118,11 @@ class ToolRunner:
         """
         command_lower = command.lower().strip()
         
-        # Check each rule
-        for rule in self.permission_rules:
+        # Check each rule - sort by pattern length (descending) for specificity
+        # Longer patterns are more specific and should be checked first
+        sorted_rules = sorted(self.permission_rules, key=lambda r: len(r.tool_pattern), reverse=True)
+        
+        for rule in sorted_rules:
             if rule.tool_pattern.lower() in command_lower:
                 return (rule.allowed, rule.requires_confirmation)
         
@@ -181,7 +182,7 @@ class ToolRunner:
         try:
             # Use subprocess with timeout and output capture
             process = subprocess.Popen(
-                command.split(),
+                shlex.split(command),
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
@@ -227,8 +228,8 @@ class ToolRunner:
             result = CommandResult(
                 command=command,
                 return_code=return_code,
-                stdout=strip_to_reasonable_length(stdout),
-                stderr=strip_to_reasonable_length(stderr),
+                stdout=ToolRunner._strip_to_reasonable_length(stdout),
+                stderr=ToolRunner._strip_to_reasonable_length(stderr),
                 duration_seconds=duration_seconds,
                 timed_out=timed_out,
                 killed_by_signal=killed_by_signal
