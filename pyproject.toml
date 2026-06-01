@@ -18,7 +18,7 @@ dev = [
 ]
 
 [tool.setuptools.packages.find]
-include = ["rfsn_v10*"]
+include = ["rfsn_v10*", "agent_core*", "tools*"]
 
 [tool.pytest.ini_options]
 addopts = "-q"

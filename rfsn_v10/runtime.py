@@ -68,12 +68,14 @@ class RFSNRuntime:
         block_size: int = 64,
         audit_mode: bool = False,
         top_k_ratio: float = 1.0,
+        use_compressed_on_miss: bool = False,
     ):
         self.kv_manager = kv_manager
         self.model_id = model_id
         self.block_size = block_size
         self.audit_mode = audit_mode
         self.top_k_ratio = top_k_ratio
+        self.use_compressed_on_miss = use_compressed_on_miss
         self._telemetry_log: list[TelemetryEvent] = []
 
     @staticmethod
@@ -133,13 +135,17 @@ class RFSNRuntime:
         # 1. Validate tensors
         if len(queries.shape) != 4:
             raise ValueError(f"queries must be 4D, got {queries.shape}")
+        if len(keys.shape) != 4:
+            raise ValueError(f"keys must be 4D, got {keys.shape}")
+        if len(values.shape) != 4:
+            raise ValueError(f"values must be 4D, got {values.shape}")
         if keys.shape != values.shape:
             raise ValueError(f"keys/values shape mismatch: {keys.shape} vs {values.shape}")
         if keys.shape[-1] != queries.shape[-1]:
             raise ValueError(f"head_dim mismatch: keys={keys.shape[-1]}, queries={queries.shape[-1]}")
 
         B, H, T_q, D = queries.shape
-        T_k = keys.shape[1] if len(keys.shape) == 3 else keys.shape[2]
+        T_k = keys.shape[2]  # keys is [B, H, T_k, D]
 
         effective_top_k = top_k_ratio if top_k_ratio is not None else self.top_k_ratio
 
@@ -193,6 +199,12 @@ class RFSNRuntime:
             mx.eval(sparse_output)
             sparse_success = (execution_mode == "sparse_compacted")
             termination_reason = execution_mode
+
+            # If attention already returned dense output, use it directly to avoid recomputation
+            if execution_mode.startswith("dense_"):
+                attn_output = sparse_output
+                dense_success = True
+                fallback_used = execution_mode not in {"dense_requested"}
         except Exception as e:
             termination_reason = f"sparse_failed: {e}"
 
@@ -279,6 +291,7 @@ class RFSNRuntime:
             "num_active_blocks": int(num_active_blocks),
             "effective_sparsity": effective_sparsity,
             "total_latency_ms": total_latency_ms,
+            "execution_mode": execution_mode,
         }
 
     def get_telemetry(self) -> list[TelemetryEvent]:

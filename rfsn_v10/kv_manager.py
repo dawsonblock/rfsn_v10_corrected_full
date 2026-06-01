@@ -55,6 +55,14 @@ class RFSNTurboQuantKVManager:
         cache_dir: str = ".rfsn_cache",
         group_size: int = 64,
     ):
+        # Validate parameters
+        if not (2 <= k_bits <= 8):
+            raise ValueError(f"k_bits must be between 2 and 8, got {k_bits}")
+        if not (2 <= v_bits <= 8):
+            raise ValueError(f"v_bits must be between 2 and 8, got {v_bits}")
+        if group_size <= 0:
+            raise ValueError(f"group_size must be positive, got {group_size}")
+            
         self.k_bits = k_bits
         self.v_bits = v_bits
         self.use_incoherent = use_incoherent
@@ -73,21 +81,28 @@ class RFSNTurboQuantKVManager:
     def _apply_signs_on_the_fly(self, x: mx.array, seed: int) -> mx.array:
         """Apply deterministic sign preconditioning (self-inverse).
 
-        Sets the global MLX random seed to *seed*, generates a random
-        mask of +1/-1, and multiplies element-wise.  Calling twice with
-        the same seed restores the original tensor because (+1)^2 = (-1)^2 = 1.
+        Uses hash-based deterministic signs instead of global RNG to avoid
+        contaminating global random state.
+        
+        Generates a deterministic mask of +1/-1 based on hash(index, seed),
+        and multiplies element-wise. Calling twice with the same seed
+        restores the original tensor.
         """
         shape = x.shape
         n = x.size
 
-        # Set seed for deterministic sign generation
-        mx.random.seed(seed)
-        random_vals = mx.random.uniform(shape=(n,))
-        signs = mx.where(
-            random_vals < 0.5,
-            mx.array(1.0, dtype=x.dtype),
-            mx.array(-1.0, dtype=x.dtype),
-        )
+        # Generate deterministic signs using hash to avoid global RNG mutation
+        signs_list = []
+        for i in range(n):
+            # Create a deterministic hash based on index and seed
+            hash_input = f"{i}:{seed}".encode('utf-8')
+            hash_val = int(hashlib.md5(hash_input).hexdigest(), 16)
+            # Convert hash to +1 or -1
+            sign_val = 1.0 if (hash_val % 2) == 0 else -1.0
+            signs_list.append(sign_val)
+        
+        signs = mx.array(signs_list, dtype=x.dtype).reshape(shape)
+        return x * signs
 
         return (x * signs.reshape(shape)).astype(x.dtype)
 
@@ -348,10 +363,6 @@ class RFSNTurboQuantKVManager:
                 f"token_count must be positive, got {token_count}"
             )
 
-        # Flatten for quantization
-        k_flat = keys.reshape(-1)
-        v_flat = values.reshape(-1)
-
         # Deterministic seed derived from cache identity for sign preconditioning
         seed = int(
             hashlib.sha256(
@@ -361,12 +372,19 @@ class RFSNTurboQuantKVManager:
         )
 
         # When use_incoherent, apply signs → WHT before quantization
-        # so that retrieve's WHT → signs cancels them out (both self-inverse)
+        # Apply to shaped tensors first, then flatten
         if self.use_incoherent:
-            k_flat = self._apply_signs_on_the_fly(k_flat, seed)
-            k_flat = self._apply_wht_pretransform(k_flat)
-            v_flat = self._apply_signs_on_the_fly(v_flat, seed)
-            v_flat = self._apply_wht_pretransform(v_flat)
+            k_pre = self._apply_signs_on_the_fly(keys, seed)
+            k_wht = self._apply_wht_pretransform(k_pre)
+            v_pre = self._apply_signs_on_the_fly(values, seed)
+            v_wht = self._apply_wht_pretransform(v_pre)
+            # Flatten for quantization
+            k_flat = k_wht.reshape(-1)
+            v_flat = v_wht.reshape(-1)
+        else:
+            # Flatten for quantization
+            k_flat = keys.reshape(-1)
+            v_flat = values.reshape(-1)
 
         # Quantize
         k_codes, k_scales = self._quantize(k_flat, self.k_bits)
@@ -393,6 +411,8 @@ class RFSNTurboQuantKVManager:
             v_n_values=v_n,
             token_count=token_count,
         )
+        # Set last_used timestamp for newly created cache
+        cache.last_used = time.monotonic()
 
         # Check memory budget
         cache_bytes = self._estimate_cache_bytes(cache)
@@ -451,6 +471,13 @@ class RFSNTurboQuantKVManager:
                 f"metadata mismatch: stored k_bits={cache.k_bits} "
                 f"v_bits={cache.v_bits}, current k_bits={self.k_bits} "
                 f"v_bits={self.v_bits}"
+            )
+        
+        # Validate group_size metadata
+        if cache.group_size != self.group_size:
+            raise ValueError(
+                f"metadata mismatch: stored group_size={cache.group_size} "
+                f"current group_size={self.group_size}"
             )
 
         # Dequantize K
