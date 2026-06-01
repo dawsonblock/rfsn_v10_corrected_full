@@ -57,15 +57,17 @@ def benchmark_attention(shape_q, shape_kv, top_k_ratio, block_size=64, iteration
     sparse_times = []
     active_blocks_list = []
     cosines = []
+    execution_modes = []
     for _ in range(iterations):
         t0 = time.monotonic()
-        out_sparse, n_active = AdaptiveBlockSparseAttention.execute(
+        out_sparse, n_active, execution_mode = AdaptiveBlockSparseAttention.execute(
             q, k, v, top_k_ratio=top_k_ratio, block_size=block_size,
         )
         mx.eval(out_sparse)
         t1 = time.monotonic()
         sparse_times.append(t1 - t0)
         active_blocks_list.append(n_active)
+        execution_modes.append(execution_mode)
 
         dense_out = mx.fast.scaled_dot_product_attention(q, k, v, scale=scale)
         mx.eval(dense_out)
@@ -81,6 +83,7 @@ def benchmark_attention(shape_q, shape_kv, top_k_ratio, block_size=64, iteration
         "speedup": (sum(dense_times) / len(dense_times)) / (sum(sparse_times) / len(sparse_times)) if sum(sparse_times) > 0 else 0,
         "avg_active_blocks": sum(active_blocks_list) / len(active_blocks_list),
         "avg_cosine_vs_dense": sum(cosines) / len(cosines),
+        "execution_mode": execution_modes[-1] if execution_modes else "unknown",
     }
 
 
