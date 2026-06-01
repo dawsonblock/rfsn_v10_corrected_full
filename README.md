@@ -148,6 +148,12 @@ python3 scripts/check_proof_regression.py \
     --output-md artifacts/proof/main8_1/regression_report.md
 ```
 
+Policy:
+- Tune thresholds in `scripts/proof_regression_thresholds.json` only when benchmark noise or hardware/runtime variance is proven to cause false positives across repeated runs.
+- Refresh baseline files in `benchmarks/proof_baselines/main8_1/` when performance or quality changes are intentional and accepted after review.
+- Do not update thresholds and baseline in the same change unless explicitly documenting why both are necessary.
+- KV latency thresholds are intentionally looser than quality thresholds because microbenchmark timing variance is higher than quality metric variance.
+
 ## Memory Profiling
 ```bash
 python3 scripts/profile_memory.py

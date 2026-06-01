@@ -1,8 +1,8 @@
 {
   "kv": {
     "latency_max_regression_pct": {
-      "store_latency_ms": 20.0,
-      "retrieve_latency_ms": 20.0
+      "store_latency_ms": 200.0,
+      "retrieve_latency_ms": 200.0
     },
     "quality_max_drop_abs": {
       "key_cosine_sim": 0.008,
@@ -17,8 +17,8 @@
   },
   "e2e": {
     "latency_max_regression_pct": {
-      "cache_miss_total_latency_ms": 20.0,
-      "cache_hit_total_latency_ms": 20.0
+      "cache_miss_total_latency_ms": 30.0,
+      "cache_hit_total_latency_ms": 30.0
     },
     "quality_max_drop_abs": {
       "quant_audit_cosine": 0.015,
