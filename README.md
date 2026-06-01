@@ -132,6 +132,20 @@ python3 benchmarks/benchmark_end_to_end.py
 ./scripts/run_proof_artifacts.sh
 # Optional custom output dir and iterations
 ./scripts/run_proof_artifacts.sh artifacts/proof/main8_1 3
+
+# Compare current proof run vs tracked baseline
+python3 scripts/compare_proof_runs.py \
+    --baseline-dir benchmarks/proof_baselines/main8_1 \
+    --current-dir artifacts/proof/main8_1 \
+    --output-json artifacts/proof/main8_1/trend_report.json \
+    --output-md artifacts/proof/main8_1/trend_report.md
+
+# Enforce regression gate (non-zero exit on threshold breach)
+python3 scripts/check_proof_regression.py \
+    --baseline-dir benchmarks/proof_baselines/main8_1 \
+    --current-dir artifacts/proof/main8_1 \
+    --output-json artifacts/proof/main8_1/regression_report.json \
+    --output-md artifacts/proof/main8_1/regression_report.md
 ```
 
 ## Memory Profiling

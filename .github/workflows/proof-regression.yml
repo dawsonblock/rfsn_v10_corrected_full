@@ -1,0 +1,58 @@
+name: Proof Regression Gate
+
+on:
+    push:
+        branches:
+            - main
+    pull_request:
+
+jobs:
+    proof-regression:
+        runs-on: macos-latest
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v4
+
+            - name: Setup Python
+              uses: actions/setup-python@v5
+              with:
+                  python-version: "3.12"
+
+            - name: Install dependencies
+              run: |
+                  python -m pip install --upgrade pip
+                  python -m pip install -e .
+
+            - name: Generate proof artifacts
+              run: |
+                  ./scripts/run_proof_artifacts.sh artifacts/proof/main8_1 3
+
+            - name: Compare proof trend
+              run: |
+                  python3 scripts/compare_proof_runs.py \
+                    --baseline-dir benchmarks/proof_baselines/main8_1 \
+                    --current-dir artifacts/proof/main8_1 \
+                    --strict-missing \
+                    --output-json artifacts/proof/main8_1/trend_report.json \
+                    --output-md artifacts/proof/main8_1/trend_report.md
+
+            - name: Enforce proof regression gate
+              run: |
+                  python3 scripts/check_proof_regression.py \
+                    --baseline-dir benchmarks/proof_baselines/main8_1 \
+                    --current-dir artifacts/proof/main8_1 \
+                    --strict-missing \
+                    --output-json artifacts/proof/main8_1/regression_report.json \
+                    --output-md artifacts/proof/main8_1/regression_report.md
+
+            - name: Upload proof reports
+              if: always()
+              uses: actions/upload-artifact@v4
+              with:
+                  name: proof-reports
+                  path: |
+                      artifacts/proof/main8_1/proof_summary.md
+                      artifacts/proof/main8_1/trend_report.json
+                      artifacts/proof/main8_1/trend_report.md
+                      artifacts/proof/main8_1/regression_report.json
+                      artifacts/proof/main8_1/regression_report.md

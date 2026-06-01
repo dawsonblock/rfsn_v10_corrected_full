@@ -6,6 +6,7 @@ from .repo_extractor import *
 from .test_runner import *
 from .log_parser import *
 from .patch_manager import *
+from .proof_regression import *
 
 __all__ = [
     # Repo Extractor
@@ -40,5 +41,15 @@ __all__ = [
     "create_patch_file",
     "apply_patch_file",
     "create_diff",
-    "apply_text_patch"
+    "apply_text_patch",
+
+    # Proof Regression
+    "DEFAULT_THRESHOLDS",
+    "Breach",
+    "merge_thresholds",
+    "load_json",
+    "load_thresholds_file",
+    "compare_section",
+    "compare_proof_dirs",
+    "report_to_markdown",
 ]
