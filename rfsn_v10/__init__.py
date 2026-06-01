@@ -6,6 +6,8 @@ from .attention import AdaptiveBlockSparseAttention
 from .runtime import RFSNRuntime, TelemetryEvent
 from .adaptive_sparsity import AdaptiveSparsityController, QualitySample
 from .memory_guard import MemoryGuard
+from .async_writer import AsyncWriter
+from .clickhouse_client import ClickHouseClient
 
 __all__ = [
     "BitPackedQuantizer",
@@ -17,4 +19,6 @@ __all__ = [
     "AdaptiveSparsityController",
     "QualitySample",
     "MemoryGuard",
+    "AsyncWriter",
+    "ClickHouseClient",
 ]

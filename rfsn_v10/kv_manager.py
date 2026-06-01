@@ -165,9 +165,8 @@ class RFSNTurboQuantKVManager:
 
         qmax = (1 << (bits - 1)) - 1
         abs_max = mx.max(mx.abs(x), axis=-1)
-        scales = abs_max / mx.maximum(
-            mx.array(float(qmax), dtype=x.dtype), mx.array(1e-8, dtype=x.dtype)
-        )
+        raw_scale = abs_max / float(qmax)
+        scales = mx.maximum(raw_scale, mx.array(1e-8, dtype=x.dtype))
 
         # Quantise: code = round(x / scale) + qmax  →  range [0, 2*qmax]
         codes = mx.round(x / scales.reshape(-1, 1)) + qmax
@@ -219,9 +218,9 @@ class RFSNTurboQuantKVManager:
         return x.reshape(-1)[:original_size]
 
     # ------------------------------------------------------------------
-    # Fused packed-dequant-WHT kernel
+    # Packed-dequant-WHT reconstruction path
     # ------------------------------------------------------------------
-    def _fused_packed_dequant_wht(
+    def _reconstruct_packed_dequant_wht(
         self,
         packed: mx.array,
         scales: mx.array,
@@ -232,7 +231,7 @@ class RFSNTurboQuantKVManager:
         use_incoherent: bool,
         out_dtype: mx.Dtype,
     ) -> mx.array:
-        """Fused kernel: unpack → dequant → reshape → WHT → optional signs.
+        """Packed-dequant-WHT reconstruction path: unpack → dequant → reshape → WHT → optional signs.
 
         Raises:
             ValueError: If any validation fails (out_dtype, shape product,

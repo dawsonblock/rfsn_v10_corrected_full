@@ -8,7 +8,7 @@ Validates:
 - Zero-bias behavior
 - Walsh-Hadamard self-inverse behavior
 - Deterministic randomized-sign preconditioning
-- Fused packed-dequant-WHT equivalence in FP32 proof mode
+- Packed-dequant-WHT reconstruction equivalence in FP32 proof mode
 - Store/retrieve quality bounds
 - Cache pinning memory-budget enforcement
 Run:
@@ -215,11 +215,11 @@ def test_wht_rejects_non_64_block(kv_manager: RFSNTurboQuantKVManager) -> None:
     with pytest.raises(ValueError, match="exactly 64"):
         kv_manager._apply_wht_pretransform(x, wht_block=32)
 # ==============================================================================
-# Fused Kernel Equivalence Tests
+# Packed-dequant-WHT Reconstruction Equivalence Tests
 # ==============================================================================
 @pytest.mark.parametrize("bits", [3, 8])
 @pytest.mark.parametrize("use_incoherent", [False, True])
-def test_fused_wht_matches_discrete_math(
+def test_reconstruct_wht_matches_discrete_math(
     kv_manager: RFSNTurboQuantKVManager,
     bits: int,
     use_incoherent: bool,
@@ -246,7 +246,7 @@ def test_fused_wht_matches_discrete_math(
             sequential_restored,
             seed,
         )
-    fused_restored = kv_manager._fused_packed_dequant_wht(
+    fused_restored = kv_manager._reconstruct_packed_dequant_wht(
         packed=packed_x,
         scales=s_x,
         n_values=n_x,
@@ -259,7 +259,7 @@ def test_fused_wht_matches_discrete_math(
     mx.eval(sequential_restored, fused_restored)
     diff = mx.max(mx.abs(sequential_restored - fused_restored)).item()
     assert diff < 1e-4, (
-        f"Fused kernel diverges from sequential math "
+        f"Packed-dequant-WHT reconstruction diverges from sequential math "
         f"(bits={bits}, use_incoherent={use_incoherent}). diff={diff}"
     )
 def test_fused_rejects_bad_packed_size(
