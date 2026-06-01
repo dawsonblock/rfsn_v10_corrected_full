@@ -208,7 +208,27 @@ class Orchestrator:
         for subtask in task.subtasks:
             result.extend(self.get_task_tree(subtask.task_id))
         return result
-    
+
+    def add_test_result(self, task_id: str, test_result: TestResult) -> bool:
+        """
+        Add a test result to a task.
+        
+        Args:
+            task_id: ID of task to add test result to
+            test_result: TestResult object to add
+            
+        Returns:
+            True if test result was added, False if task not found
+        """
+        task = self.tasks.get(task_id)
+        if not task:
+            logger.error(f"Task {task_id} not found")
+            return False
+        
+        task.test_results.append(test_result)
+        logger.info(f"Added test result '{test_result.test_name}' to task {task_id}")
+        return True
+
     def reset(self):
         """Reset the orchestrator to initial state."""
         self.tasks.clear()

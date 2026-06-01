@@ -27,7 +27,7 @@ class FileInfo:
         if self.is_file:
             self.extension = self.path.suffix.lower()
             if self.extension:
-                self.mimetype = mimetypes.guess_type(self.path)[0]
+                self.mime_type = mimetypes.guess_type(self.path)[0]
 
 
 @dataclass

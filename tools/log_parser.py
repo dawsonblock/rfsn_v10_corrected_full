@@ -10,7 +10,7 @@ from pathlib import Path
 import re
 import json
 
-from .schemas import TestResult, TestResultStatus
+from agent_core.schemas import TestResult, TestResultStatus
 
 logger = __import__('logging').getLogger(__name__)
 

@@ -12,8 +12,8 @@ import time
 import json
 import re
 
-from .schemas import TestResult, TestResultStatus
-from .tool_runner import ToolRunner, CommandResult
+from agent_core.schemas import TestResult, TestResultStatus
+from agent_core.tool_runner import ToolRunner, CommandResult
 
 logger = __import__('logging').getLogger(__name__)
 

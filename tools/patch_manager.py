@@ -154,7 +154,7 @@ def create_diff(old_file: Path, new_file: Path) -> str:
         return generate_unified_diff(old_file, old_content, new_content)
     except Exception as e:
         logger.error(f"Failed to create diff: {e}")
-        return "")
+        return ""
 
 
 def apply_text_patch(file_path: Path, old_text: str, new_text: str) -> bool:
