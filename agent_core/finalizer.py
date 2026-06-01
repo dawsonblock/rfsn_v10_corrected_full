@@ -276,5 +276,5 @@ class Finalizer:
 
 def finalize_task(task_state: TaskState, verdict: AgentVerdict) -> FinalOutput:
     """Convenience function to finalize a task."""
-    finalizer = Finalizer(__import__('orchestrator').Orchestrator())
+    finalizer = Finalizer(Orchestrator())
     return finalizer.finalize_task(task_state, verdict)
