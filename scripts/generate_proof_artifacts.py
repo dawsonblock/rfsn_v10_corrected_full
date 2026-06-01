@@ -146,7 +146,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Generate proof artifacts")
     parser.add_argument(
         "--profile",
-        default="main8_1",
+        default="main10",
         help="Proof profile name for output labeling/default paths",
     )
     parser.add_argument(

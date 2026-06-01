@@ -100,7 +100,7 @@ def _plot_with_matplotlib(kv_runs: list[dict], e2e_runs: list[dict], output_dir:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Generate benchmark plot artifacts")
-    parser.add_argument("--input-dir", default="artifacts/proof/main8_1")
+    parser.add_argument("--input-dir", default="artifacts/proof/main10")
     parser.add_argument("--output-dir", default="results/plots")
     args = parser.parse_args()
 

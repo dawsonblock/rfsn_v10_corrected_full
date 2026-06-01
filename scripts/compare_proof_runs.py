@@ -19,7 +19,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Compare proof artifact runs")
     parser.add_argument(
         "--profile",
-        default="main8_1",
+        default="main10",
         help="Proof profile name used to derive default directories",
     )
     parser.add_argument(
