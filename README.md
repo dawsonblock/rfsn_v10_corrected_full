@@ -127,6 +127,11 @@ python3 benchmarks/benchmark_bitpack.py
 python3 benchmarks/benchmark_kv_cache.py
 python3 benchmarks/benchmark_attention.py
 python3 benchmarks/benchmark_end_to_end.py
+
+# Generate proof artifacts (JSON + summary report)
+./scripts/run_proof_artifacts.sh
+# Optional custom output dir and iterations
+./scripts/run_proof_artifacts.sh artifacts/proof/main8_1 3
 ```
 
 ## Memory Profiling
