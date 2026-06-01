@@ -13,6 +13,7 @@ import signal
 import threading
 from queue import Queue, Empty
 import shlex
+import re
 from .schemas import TaskState
 from .orchestrator import Orchestrator
 logger = __import__('logging').getLogger(__name__)
@@ -117,17 +118,48 @@ class ToolRunner:
             Tuple of (is_allowed, requires_confirmation)
         """
         command_lower = command.lower().strip()
+        try:
+            command_tokens = [t.lower() for t in shlex.split(command)]
+        except ValueError:
+            return (False, False)
         
         # Check each rule - sort by pattern length (descending) for specificity
         # Longer patterns are more specific and should be checked first
         sorted_rules = sorted(self.permission_rules, key=lambda r: len(r.tool_pattern), reverse=True)
         
         for rule in sorted_rules:
-            if rule.tool_pattern.lower() in command_lower:
+            pattern = rule.tool_pattern.lower().strip()
+            pattern_tokens = pattern.split()
+            if pattern_tokens and len(command_tokens) >= len(pattern_tokens):
+                if command_tokens[:len(pattern_tokens)] == pattern_tokens:
+                    return (rule.allowed, rule.requires_confirmation)
+
+            # Fallback for single-token patterns and symbolic operators.
+            if len(pattern_tokens) == 1:
+                token = re.escape(pattern_tokens[0])
+                if re.search(rf"(^|\s){token}($|\s)", command_lower):
+                    return (rule.allowed, rule.requires_confirmation)
+
+            if pattern in {">", "<", "|", "&&", "||"} and pattern in command:
                 return (rule.allowed, rule.requires_confirmation)
         
         # Default: not allowed if no matching rule
         return (False, False)
+
+    def _resolve_workspace_cwd(self, cwd: Optional[Path]) -> Optional[Path]:
+        """Resolve cwd and enforce that it stays within workspace_root."""
+        try:
+            root = self.workspace_root.resolve()
+            candidate = (cwd or self.workspace_root).resolve()
+        except Exception:
+            return None
+
+        try:
+            candidate.relative_to(root)
+        except ValueError:
+            return None
+
+        return candidate if candidate.exists() else root
     
     def run_command(self, command: str, timeout: Optional[float] = None,
                    cwd: Optional[Path] = None, 
@@ -170,9 +202,16 @@ class ToolRunner:
             )
         
         # Set up working directory
-        work_dir = cwd or self.workspace_root
-        if not work_dir.exists():
-            work_dir = self.workspace_root
+        work_dir = self._resolve_workspace_cwd(cwd)
+        if work_dir is None:
+            return CommandResult(
+                command=command,
+                return_code=-4,
+                stdout="",
+                stderr="Working directory must resolve inside workspace_root",
+                duration_seconds=0.0,
+                timed_out=False,
+            )
         
         # Set up environment
         run_env = env.copy() if env else os.environ.copy()

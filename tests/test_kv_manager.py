@@ -232,3 +232,16 @@ def test_store_replaces_existing_entry(kv_manager):
     k_rec, v_rec = kv_manager.retrieve("replace_test", out_dtype=mx.float32)
     mx.eval(k_rec, v_rec)
     assert cosine_similarity(k2, k_rec) > 0.95
+
+
+def test_estimate_compressed_bytes_for_shape_is_positive(kv_manager):
+    shape = (1, 8, 512, 64)
+    estimated = kv_manager.estimate_compressed_bytes_for_shape(shape)
+    assert estimated > 0
+
+
+def test_estimate_compressed_bytes_reduces_with_higher_bits_for_packing(kv_manager):
+    shape = (1, 8, 512, 64)
+    bytes_8_8 = kv_manager.estimate_compressed_bytes_for_shape(shape, k_bits=8, v_bits=8)
+    bytes_8_3 = kv_manager.estimate_compressed_bytes_for_shape(shape, k_bits=8, v_bits=3)
+    assert bytes_8_3 < bytes_8_8

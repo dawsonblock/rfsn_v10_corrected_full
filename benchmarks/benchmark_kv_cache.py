@@ -37,6 +37,10 @@ def rel_mae(a: mx.array, b: mx.array) -> float:
     return (mx.mean(mx.abs(a - b)) / denom).item()
 
 
+def max_abs_error(a: mx.array, b: mx.array) -> float:
+    return mx.max(mx.abs(a - b)).item()
+
+
 def benchmark_kv(shape, k_bits, v_bits, use_incoherent, iterations=5):
     mx.random.seed(42)
     import tempfile
@@ -60,8 +64,12 @@ def benchmark_kv(shape, k_bits, v_bits, use_incoherent, iterations=5):
 
         # Retrieve benchmark
         retrieve_times = []
-        cosines = []
-        rel_maes = []
+        key_cosines = []
+        key_rel_maes = []
+        key_max_abs = []
+        value_cosines = []
+        value_rel_maes = []
+        value_max_abs = []
         for _ in range(iterations):
             t0 = time.monotonic()
             result = mgr.retrieve("bench", out_dtype=mx.float32)
@@ -69,8 +77,12 @@ def benchmark_kv(shape, k_bits, v_bits, use_incoherent, iterations=5):
             mx.eval(k_rec, v_rec)
             t1 = time.monotonic()
             retrieve_times.append(t1 - t0)
-            cosines.append(cosine_similarity(k, k_rec))
-            rel_maes.append(rel_mae(k, k_rec))
+            key_cosines.append(cosine_similarity(k, k_rec))
+            key_rel_maes.append(rel_mae(k, k_rec))
+            key_max_abs.append(max_abs_error(k, k_rec))
+            value_cosines.append(cosine_similarity(v, v_rec))
+            value_rel_maes.append(rel_mae(v, v_rec))
+            value_max_abs.append(max_abs_error(v, v_rec))
 
         cache = mgr.active_caches["bench"]
         original_bytes = k.size * 4 + v.size * 4
@@ -87,8 +99,12 @@ def benchmark_kv(shape, k_bits, v_bits, use_incoherent, iterations=5):
             "original_bytes": original_bytes,
             "packed_bytes": packed_bytes,
             "compression_ratio": packed_bytes / original_bytes,
-            "key_cosine_sim": sum(cosines) / len(cosines),
-            "key_rel_mae": sum(rel_maes) / len(rel_maes),
+            "key_cosine_sim": sum(key_cosines) / len(key_cosines),
+            "key_rel_mae": sum(key_rel_maes) / len(key_rel_maes),
+            "key_max_abs_error": sum(key_max_abs) / len(key_max_abs),
+            "value_cosine_sim": sum(value_cosines) / len(value_cosines),
+            "value_rel_mae": sum(value_rel_maes) / len(value_rel_maes),
+            "value_max_abs_error": sum(value_max_abs) / len(value_max_abs),
         }
 
 
@@ -116,7 +132,8 @@ def main():
                   f"store={r['store_latency_ms']:.2f}ms "
                   f"retrieve={r['retrieve_latency_ms']:.2f}ms "
                   f"ratio={r['compression_ratio']:.3f} "
-                  f"cosine={r['key_cosine_sim']:.4f}")
+                f"k_cos={r['key_cosine_sim']:.4f} "
+                f"v_cos={r['value_cosine_sim']:.4f}")
             results["runs"].append(r)
 
     print("\n" + json.dumps(results, indent=2))

@@ -6,3 +6,4 @@ build/
 .pytest_cache/
 .mypy_cache/
 .rfsn_cache/
+.kilo/

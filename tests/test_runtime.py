@@ -155,6 +155,9 @@ def test_runtime_audit_mode_records_metrics(runtime_with_audit):
     assert len(telemetry) == 1
     event = telemetry[0]
     assert event.audit_enabled is True
+    assert event.quant_audit_cosine is not None
+    assert event.quant_audit_rel_mae is not None
+    assert event.quant_audit_max_abs_error is not None
     # When audit is on, sparse and dense both run, so we get audit metrics
     # (though at top_k_ratio=0.5, sparse != dense, so values may differ)
 

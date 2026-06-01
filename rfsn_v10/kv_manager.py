@@ -95,30 +95,28 @@ class RFSNTurboQuantKVManager:
         shape/seed/dtype combinations.
         """
         shape = x.shape
-        n = x.size
-        
+
         # Check cache first
         cache_key = (shape, seed, x.dtype)
         if cache_key in self._sign_cache:
             signs = self._sign_cache[cache_key]
             return x * signs
-        
-        # Generate signs using vectorized approach where possible
-        # Create indices array
-        indices = mx.arange(n, dtype=mx.uint32)
-        
-        # For now, we'll still use a loop but in a more MX-friendly way
-        # In a production implementation, this would be done in a custom kernel
-        signs_list = []
-        for i in range(n):
-            # Create a deterministic hash based on index and seed
-            hash_input = f"{i}:{seed}".encode('utf-8')
-            hash_val = int(hashlib.md5(hash_input).hexdigest(), 16)
-            # Convert hash to +1 or -1
-            sign_val = 1.0 if (hash_val % 2) == 0 else -1.0
-            signs_list.append(sign_val)
-        
-        signs = mx.array(signs_list, dtype=x.dtype).reshape(shape)
+
+        # Vectorized deterministic hash-like mixing (SplitMix-style) over indices.
+        n = x.size
+        seed_u32 = mx.array(seed & 0xFFFFFFFF, dtype=mx.uint32)
+        idx = mx.arange(n, dtype=mx.uint32)
+        z = idx ^ seed_u32
+        z = z + mx.array(0x9E3779B9, dtype=mx.uint32)
+        z = (z ^ (z >> 16)) * mx.array(0x85EBCA6B, dtype=mx.uint32)
+        z = (z ^ (z >> 13)) * mx.array(0xC2B2AE35, dtype=mx.uint32)
+        z = z ^ (z >> 16)
+        parity = z & mx.array(1, dtype=mx.uint32)
+        signs = mx.where(
+            parity == 0,
+            mx.array(1.0, dtype=x.dtype),
+            mx.array(-1.0, dtype=x.dtype),
+        ).reshape(shape)
         
         # Cache the result
         # Limit cache size to prevent memory issues
@@ -126,6 +124,44 @@ class RFSNTurboQuantKVManager:
             self._sign_cache[cache_key] = signs
         
         return x * signs
+
+    def estimate_compressed_bytes_for_shape(
+        self,
+        shape: tuple,
+        k_bits: Optional[int] = None,
+        v_bits: Optional[int] = None,
+        group_size: Optional[int] = None,
+    ) -> int:
+        """Estimate compressed KV cache footprint for a given KV shape.
+
+        Includes packed K/V codes, K/V scales, and fixed metadata overhead.
+        """
+        if len(shape) != 4:
+            raise ValueError(f"Expected KV shape [B,H,T,D], got {shape}")
+
+        k_bits = self.k_bits if k_bits is None else k_bits
+        v_bits = self.v_bits if v_bits is None else v_bits
+        group_size = self.group_size if group_size is None else group_size
+
+        if not (2 <= k_bits <= 8 and 2 <= v_bits <= 8):
+            raise ValueError("k_bits and v_bits must both be in [2, 8]")
+        if group_size <= 0:
+            raise ValueError("group_size must be positive")
+
+        n_values = math.prod(shape)
+
+        def packed_words(count: int, bits: int) -> int:
+            codes_per_word = 32 // bits
+            return (count + codes_per_word - 1) // codes_per_word
+
+        n_groups = (n_values + group_size - 1) // group_size
+        k_packed_bytes = packed_words(n_values, k_bits) * 4
+        v_packed_bytes = packed_words(n_values, v_bits) * 4
+        k_scale_bytes = n_groups * 4
+        v_scale_bytes = n_groups * 4
+        metadata_overhead = 256
+
+        return k_packed_bytes + v_packed_bytes + k_scale_bytes + v_scale_bytes + metadata_overhead
 
     # ------------------------------------------------------------------
     # Walsh-Hadamard transform (self-inverse when normalised)

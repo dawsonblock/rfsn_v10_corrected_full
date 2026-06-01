@@ -76,3 +76,5 @@ def test_create_tables_includes_execution_mode(monkeypatch):
     ddl = "\n".join(captured)
     assert "CREATE TABLE IF NOT EXISTS rfsn_attention_events" in ddl
     assert "execution_mode String" in ddl
+    assert "quant_audit_cosine Nullable(Float64)" in ddl
+    assert "sparse_audit_cosine Nullable(Float64)" in ddl

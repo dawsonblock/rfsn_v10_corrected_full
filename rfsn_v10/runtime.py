@@ -16,14 +16,12 @@ from __future__ import annotations
 import math
 import time
 import uuid
-from dataclasses import dataclass, field
-from typing import Optional, Dict, Any, Callable
+from dataclasses import dataclass
+from typing import Optional
 
 import mlx.core as mx
 
-from .bitpack import BitPackedQuantizer
-from .clickhouse_client import ClickHouseClient
-from .kv_manager import RFSNTurboQuantKVManager, TurboQuantKVCache
+from .kv_manager import RFSNTurboQuantKVManager
 from .adaptive_sparsity import AdaptiveSparsityController
 from .memory_guard import MemoryGuard
 from .attention import AdaptiveBlockSparseAttention
@@ -57,6 +55,12 @@ class TelemetryEvent:
     audit_cosine: Optional[float]
     audit_rel_mae: Optional[float]
     audit_max_abs_error: Optional[float]
+    quant_audit_cosine: Optional[float]
+    quant_audit_rel_mae: Optional[float]
+    quant_audit_max_abs_error: Optional[float]
+    sparse_audit_cosine: Optional[float]
+    sparse_audit_rel_mae: Optional[float]
+    sparse_audit_max_abs_error: Optional[float]
     execution_mode: str
     termination_reason: str
 
@@ -193,24 +197,11 @@ class RFSNRuntime:
             
             # Check memory pressure before storing
             if self.memory_guard is not None:
-                # Estimate the memory this cache entry will use
-                estimated_cache_bytes = self.kv_manager._estimate_cache_bytes(
-                    TurboQuantKVCache(
-                        k_packed=mx.array([0]),  # dummy values for estimation
-                        k_scales=mx.array([0]),
-                        v_packed=mx.array([0]),
-                        v_scales=mx.array([0]),
-                        shape=tuple(keys.shape),
-                        k_bits=self.kv_manager.k_bits,
-                        v_bits=self.kv_manager.v_bits,
-                        group_size=self.kv_manager.group_size,
-                        use_incoherent=self.kv_manager.use_incoherent,
-                        format_version="rfsn_v10",
-                        seed=0,
-                        k_n_values=keys.size // 32 * (32 // self.kv_manager.k_bits),  # approximate
-                        v_n_values=values.size // 32 * (32 // self.kv_manager.v_bits),  # approximate
-                        token_count=T_k,
-                    )
+                estimated_cache_bytes = self.kv_manager.estimate_compressed_bytes_for_shape(
+                    shape=tuple(keys.shape),
+                    k_bits=self.kv_manager.k_bits,
+                    v_bits=self.kv_manager.v_bits,
+                    group_size=self.kv_manager.group_size,
                 )
                 
                 # Enforce memory safety - this will trigger eviction if needed
@@ -298,6 +289,12 @@ class RFSNRuntime:
         audit_cosine = None
         audit_rel_mae = None
         audit_max_abs_error = None
+        quant_audit_cosine = None
+        quant_audit_rel_mae = None
+        quant_audit_max_abs_error = None
+        sparse_audit_cosine = None
+        sparse_audit_rel_mae = None
+        sparse_audit_max_abs_error = None
         if self.audit_mode:
             # Compute dense attention from original keys/values for quantization error
             original_dense_output = mx.fast.scaled_dot_product_attention(
@@ -314,21 +311,21 @@ class RFSNRuntime:
             mx.eval(working_dense_output)
             
             # Quantization error: original dense vs working dense
-            quant_cosine = self._cosine_similarity(original_dense_output, working_dense_output)
-            quant_rel_mae = self._rel_mae(original_dense_output, working_dense_output)
-            quant_max_abs_error = self._max_abs_error(original_dense_output, working_dense_output)
+            quant_audit_cosine = self._cosine_similarity(original_dense_output, working_dense_output)
+            quant_audit_rel_mae = self._rel_mae(original_dense_output, working_dense_output)
+            quant_audit_max_abs_error = self._max_abs_error(original_dense_output, working_dense_output)
             
             # Sparsity error: working dense vs working sparse (if sparse succeeded)
             if sparse_success and sparse_output is not None:
-                sparse_cosine = self._cosine_similarity(working_dense_output, sparse_output)
-                sparse_rel_mae = self._rel_mae(working_dense_output, sparse_output)
-                sparse_max_abs_error = self._max_abs_error(working_dense_output, sparse_output)
+                sparse_audit_cosine = self._cosine_similarity(working_dense_output, sparse_output)
+                sparse_audit_rel_mae = self._rel_mae(working_dense_output, sparse_output)
+                sparse_audit_max_abs_error = self._max_abs_error(working_dense_output, sparse_output)
                 
                 # For telemetry, we'll report the sparsity error as the main audit metrics
                 # (this maintains backward compatibility with existing telemetry expectations)
-                audit_cosine = sparse_cosine
-                audit_rel_mae = sparse_rel_mae
-                audit_max_abs_error = sparse_max_abs_error
+                audit_cosine = sparse_audit_cosine
+                audit_rel_mae = sparse_audit_rel_mae
+                audit_max_abs_error = sparse_audit_max_abs_error
                 
                 # We could also store quantization error in separate telemetry fields if needed
                 # For now, we're focusing on getting the basic split working
@@ -383,6 +380,12 @@ class RFSNRuntime:
             audit_cosine=audit_cosine,
             audit_rel_mae=audit_rel_mae,
             audit_max_abs_error=audit_max_abs_error,
+            quant_audit_cosine=quant_audit_cosine,
+            quant_audit_rel_mae=quant_audit_rel_mae,
+            quant_audit_max_abs_error=quant_audit_max_abs_error,
+            sparse_audit_cosine=sparse_audit_cosine,
+            sparse_audit_rel_mae=sparse_audit_rel_mae,
+            sparse_audit_max_abs_error=sparse_audit_max_abs_error,
             execution_mode=execution_mode,
             termination_reason=termination_reason,
         )

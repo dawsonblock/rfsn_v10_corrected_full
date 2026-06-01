@@ -28,7 +28,16 @@ def get_metadata() -> dict:
     }
 
 
-def benchmark_e2e(shape_q, shape_kv, k_bits, v_bits, use_incoherent, top_k_ratio, iterations=5):
+def benchmark_e2e(
+    shape_q,
+    shape_kv,
+    k_bits,
+    v_bits,
+    use_incoherent,
+    top_k_ratio,
+    use_compressed_on_miss=False,
+    iterations=5,
+):
     mx.random.seed(42)
     with tempfile.TemporaryDirectory() as td:
         mgr = RFSNTurboQuantKVManager(
@@ -38,6 +47,7 @@ def benchmark_e2e(shape_q, shape_kv, k_bits, v_bits, use_incoherent, top_k_ratio
         runtime = RFSNRuntime(
             kv_manager=mgr, model_id="bench_model", block_size=64,
             audit_mode=True, top_k_ratio=top_k_ratio,
+            use_compressed_on_miss=use_compressed_on_miss,
         )
 
         q = mx.random.normal(shape_q)
@@ -45,18 +55,24 @@ def benchmark_e2e(shape_q, shape_kv, k_bits, v_bits, use_incoherent, top_k_ratio
         v = mx.random.normal(shape_kv)
         mx.eval(q, k, v)
 
-        timings = []
+        # First run is cache-miss path by construction.
+        _, miss_info = runtime.execute_decode_step(
+            skill_pattern="bench", layer_id="l0", batch_id="b1",
+            queries=q, keys=k, values=v, top_k_ratio=top_k_ratio,
+        )
+
+        hit_timings = []
+        hit_infos = []
         for _ in range(iterations):
-            output, info = runtime.execute_decode_step(
+            _, info = runtime.execute_decode_step(
                 skill_pattern="bench", layer_id="l0", batch_id="b1",
                 queries=q, keys=k, values=v, top_k_ratio=top_k_ratio,
             )
-            timings.append(info["total_latency_ms"])
+            hit_timings.append(info["total_latency_ms"])
+            hit_infos.append(info)
 
         telemetry = runtime.get_telemetry()
-        avg_cosine = None
-        if telemetry and telemetry[-1].audit_cosine is not None:
-            avg_cosine = telemetry[-1].audit_cosine
+        latest = telemetry[-1] if telemetry else None
 
         return {
             "shape_q": str(shape_q),
@@ -64,10 +80,15 @@ def benchmark_e2e(shape_q, shape_kv, k_bits, v_bits, use_incoherent, top_k_ratio
             "k_bits": k_bits,
             "v_bits": v_bits,
             "top_k_ratio": top_k_ratio,
-            "avg_latency_ms": sum(timings) / len(timings),
-            "kv_cache_hit": telemetry[-1].kv_cache_hit if telemetry else None,
-            "audit_cosine": avg_cosine,
-            "effective_sparsity": telemetry[-1].effective_sparsity if telemetry else None,
+            "use_compressed_on_miss": use_compressed_on_miss,
+            "cache_miss_total_latency_ms": miss_info["total_latency_ms"],
+            "cache_hit_total_latency_ms": sum(hit_timings) / len(hit_timings),
+            "cache_hit_execution_mode": hit_infos[-1]["execution_mode"] if hit_infos else None,
+            "kv_cache_hit": latest.kv_cache_hit if latest else None,
+            "audit_cosine": latest.audit_cosine if latest else None,
+            "quant_audit_cosine": latest.quant_audit_cosine if latest else None,
+            "sparse_audit_cosine": latest.sparse_audit_cosine if latest else None,
+            "effective_sparsity": latest.effective_sparsity if latest else None,
         }
 
 
@@ -79,24 +100,41 @@ def main():
     print(json.dumps(meta, indent=2))
     print()
 
-    shape_q = (1, 8, 1, 64)
+    shape_q_decode = (1, 8, 1, 64)
+    shape_q_dense = (1, 8, 8, 64)
     shape_kv = (1, 8, 2048, 64)
     configs = [
-        (8, 3, True, 0.25),
-        (8, 3, True, 0.50),
-        (8, 3, True, 0.75),
-        (8, 3, True, 1.0),
-        (8, 3, False, 0.50),
+        ("cache_miss_full_precision_path", shape_q_decode, 8, 3, True, 0.50, False),
+        ("cache_miss_use_compressed_on_miss_path", shape_q_decode, 8, 3, True, 0.50, True),
+        ("cache_hit_compressed_path", shape_q_decode, 8, 3, True, 0.50, True),
+        ("sparse_decode_path", shape_q_decode, 8, 3, True, 0.25, True),
+        ("dense_decode_path", shape_q_dense, 8, 3, True, 0.25, True),
     ]
 
     results = {"metadata": meta, "runs": []}
 
-    for k_bits, v_bits, use_inc, ratio in configs:
-        r = benchmark_e2e(shape_q, shape_kv, k_bits, v_bits, use_inc, ratio)
-        print(f"  k={k_bits}b v={v_bits}b incoherent={use_inc} top_k={ratio}: "
-              f"latency={r['avg_latency_ms']:.2f}ms "
-              f"cosine={r['audit_cosine']:.4f} "
-              f"sparsity={r['effective_sparsity']:.2f}")
+    def fmt_metric(value):
+        return "n/a" if value is None else f"{value:.4f}"
+
+    for scenario, shape_q, k_bits, v_bits, use_inc, ratio, use_compressed_on_miss in configs:
+        r = benchmark_e2e(
+            shape_q,
+            shape_kv,
+            k_bits,
+            v_bits,
+            use_inc,
+            ratio,
+            use_compressed_on_miss=use_compressed_on_miss,
+        )
+        print(
+            f"  {scenario}: "
+            f"miss={r['cache_miss_total_latency_ms']:.2f}ms "
+            f"hit={r['cache_hit_total_latency_ms']:.2f}ms "
+            f"mode={r['cache_hit_execution_mode']} "
+            f"quant_cos={fmt_metric(r['quant_audit_cosine'])} "
+            f"sparse_cos={fmt_metric(r['sparse_audit_cosine'])}"
+        )
+        r["scenario"] = scenario
         results["runs"].append(r)
 
     print("\n" + json.dumps(results, indent=2))
