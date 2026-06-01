@@ -1,4 +1,24 @@
-# RFSN v10 - Alpha Stabilization Build
+# RFSN v10 - Main 10 Custom Kernel Alpha
+
+## Status: Main 10 Custom Kernel Alpha
+
+Verified:
+- static compile
+- non-MLX tests
+- proof regression tooling
+- generated plots from baseline data
+
+Requires Apple Silicon validation:
+- MLX bitpack tests
+- KV manager tests
+- kernel equivalence tests
+- runtime audit tests
+- real model benchmark
+
+Claim boundary:
+- custom Metal kernel alpha path
+- reference equivalence tests
+- production validation pending
 
 ## Overview
 RFSN v10 is an alpha quantized KV-cache + decode-time sparse-attention runtime for MLX/Apple Silicon. This build focuses on compile correctness and behavior stabilization of the core runtime path.
@@ -16,11 +36,11 @@ RFSN v10 is an alpha quantized KV-cache + decode-time sparse-attention runtime f
 - `clickhouse_client.py` - HTTP-based ClickHouse client for telemetry ingestion
 
 ### Test Suite
-- `tests/test_bitpack.py` - 20 tests (roundtrip, stress, rejection cases)
-- `tests/test_kv_manager.py` - 17 tests (shapes, distributions, modes, corruption)
+- `tests/test_bitpack.py` - 25 tests (roundtrip, stress, rejection cases)
+- `tests/test_kv_manager.py` - 25 tests (shapes, distributions, modes, corruption)
 - `tests/test_metal_kernel_math.py` - 133 tests (bitpack, quantization, WHT, fused kernel, KV store/retrieve)
-- `tests/test_attention.py` - 7 tests (sparse attention correctness, fallback, validation)
-- `tests/test_runtime.py` - 9 tests (orchestrator, telemetry, cache behavior)
+- `tests/test_attention.py` - 9 tests (sparse attention correctness, fallback, validation)
+- `tests/test_runtime.py` - 12 tests (orchestrator, telemetry, cache behavior)
 - `tests/test_long_context.py` - 5 tests (long sequence smoke tests)
 
 ### Benchmarks
@@ -178,10 +198,11 @@ python3 scripts/profile_memory.py
 
 ## Implementation Status
 ✅ Core modules compile and integrate in alpha scope
-✅ Benchmarks scripts are present
+✅ Benchmark scripts and proof plots are present
 ✅ Custom kernel alpha route and fallback policy are implemented
 ✅ Telemetry layer is implemented with batched writer support
 ⚠ MLX-dependent quality and performance validation is environment-dependent
+⚠ Sparse quality remains warning-scoped for deployment policy
 ⚠ Production hardening and end-to-end real-model validation remain in progress
 ❌ Disk persistence (planned for future)
 ❌ Partial dequantization (optional optimization)

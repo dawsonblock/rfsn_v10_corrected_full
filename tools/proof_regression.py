@@ -37,6 +37,11 @@ DEFAULT_THRESHOLDS: dict[str, Any] = {
             "audit_cosine": 0.03,
         },
     },
+    "absolute_quality_min": {
+        "absolute_sparse_audit_cosine_min": 0.90,
+        "absolute_quant_audit_cosine_min": 0.95,
+        "absolute_value_cosine_min": 0.90,
+    },
 }
 
 
@@ -333,6 +338,7 @@ def compare_proof_dirs(
     current_dir: Path,
     thresholds: dict[str, Any],
     strict_missing: bool = True,
+    strict_absolute: bool = False,
 ) -> dict[str, Any]:
     baseline_kv = load_json(baseline_dir / "kv_cache_runs.json")
     baseline_e2e = load_json(baseline_dir / "e2e_scenarios.json")
@@ -342,12 +348,96 @@ def compare_proof_dirs(
     kv_section = compare_section("kv", baseline_kv, current_kv, thresholds, strict_missing)
     e2e_section = compare_section("e2e", baseline_e2e, current_e2e, thresholds, strict_missing)
 
-    total_breaches = len(kv_section["breaches"]) + len(e2e_section["breaches"])
+    absolute_cfg = thresholds.get("absolute_quality_min", {})
+    absolute_checks = [
+        (
+            "absolute_sparse_audit_cosine_min",
+            current_e2e,
+            "sparse_audit_cosine",
+            "e2e",
+            "Sparse quality",
+        ),
+        (
+            "absolute_quant_audit_cosine_min",
+            current_e2e,
+            "quant_audit_cosine",
+            "e2e",
+            "Quant quality",
+        ),
+        (
+            "absolute_value_cosine_min",
+            current_kv,
+            "value_cosine_sim",
+            "kv",
+            "KV value quality",
+        ),
+    ]
+
+    absolute_quality: dict[str, Any] = {}
+    absolute_warnings: list[dict[str, Any]] = []
+    absolute_breaches: list[dict[str, Any]] = []
+
+    for key, payload, metric, section, label in absolute_checks:
+        threshold = absolute_cfg.get(key)
+        if threshold is None:
+            continue
+
+        values = [
+            _get_float(run, metric)
+            for run in payload.get("runs", [])
+            if _get_float(run, metric) is not None
+        ]
+        if not values:
+            absolute_quality[key] = {
+                "label": label,
+                "metric": metric,
+                "threshold": float(threshold),
+                "status": "unknown",
+                "min_value": None,
+            }
+            continue
+
+        min_value = min(values)
+        status = "pass" if min_value >= float(threshold) else "warn"
+        absolute_quality[key] = {
+            "label": label,
+            "metric": metric,
+            "threshold": float(threshold),
+            "status": status,
+            "min_value": min_value,
+        }
+
+        if status == "warn":
+            warning = {
+                "section": section,
+                "metric": metric,
+                "rule": "absolute_quality_min",
+                "threshold": float(threshold),
+                "observed": min_value,
+                "details": (
+                    f"{label} below absolute minimum: "
+                    f"{metric} min {min_value:.6f} < {float(threshold):.6f}"
+                ),
+            }
+            absolute_warnings.append(warning)
+            if strict_absolute:
+                absolute_breaches.append(warning)
+
+    total_breaches = (
+        len(kv_section["breaches"]) +
+        len(e2e_section["breaches"]) +
+        (len(absolute_breaches) if strict_absolute else 0)
+    )
     return {
         "baseline_dir": str(baseline_dir),
         "current_dir": str(current_dir),
         "thresholds": thresholds,
         "strict_missing": strict_missing,
+        "strict_absolute": strict_absolute,
+        "absolute_quality": absolute_quality,
+        "absolute_warnings": absolute_warnings,
+        "absolute_breaches": absolute_breaches,
+        "warning_unsafe_for_llm_deployment": len(absolute_warnings) > 0,
         "sections": {
             "kv": kv_section,
             "e2e": e2e_section,
@@ -363,9 +453,33 @@ def report_to_markdown(report: dict[str, Any]) -> str:
         f"- Baseline: {report['baseline_dir']}",
         f"- Current: {report['current_dir']}",
         f"- Strict missing scenarios: {report['strict_missing']}",
+        f"- Strict absolute minima: {report.get('strict_absolute', False)}",
         f"- Total breaches: {report['total_breaches']}",
         "",
     ]
+
+    absolute_quality = report.get("absolute_quality", {})
+    if absolute_quality:
+        lines.extend(["## Absolute Quality", ""])
+        for key, item in absolute_quality.items():
+            min_value = item.get("min_value")
+            min_str = "n/a" if min_value is None else f"{min_value:.6f}"
+            lines.append(
+                f"- {item['label']}: {item['status']} "
+                f"(min={min_str}, threshold={item['threshold']:.6f})"
+            )
+        if report.get("warning_unsafe_for_llm_deployment"):
+            lines.append("- WARNING_UNSAFE_FOR_LLM_DEPLOYMENT")
+        lines.append("")
+
+    absolute_breaches = report.get("absolute_breaches", [])
+    if absolute_breaches:
+        lines.extend(["## Absolute Quality Breaches", ""])
+        for breach in absolute_breaches:
+            lines.append(
+                f"- {breach['metric']} | {breach['details']}"
+            )
+        lines.append("")
 
     for section_name, section in report["sections"].items():
         lines.extend(

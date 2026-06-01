@@ -23,6 +23,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from benchmarks.benchmark_kv_cache import benchmark_kv  # noqa: E402
 from benchmarks.benchmark_end_to_end import benchmark_e2e  # noqa: E402
+from tools.proof_regression import load_thresholds_file  # noqa: E402
 
 
 KV_SHAPES = [
@@ -91,6 +92,42 @@ def write_summary(output_dir: Path, kv_payload: dict, e2e_payload: dict, profile
     best_sparse = next((r for r in e2e_runs if r["scenario"] == "sparse_decode_path"), None)
     best_dense = next((r for r in e2e_runs if r["scenario"] == "dense_decode_path"), None)
 
+    thresholds = load_thresholds_file(REPO_ROOT / "scripts/proof_regression_thresholds.json")
+    absolute_cfg = thresholds.get("absolute_quality_min", {})
+
+    def _min_metric(runs: list[dict], metric: str) -> float | None:
+        values = []
+        for run in runs:
+            value = run.get(metric)
+            if value is None:
+                continue
+            try:
+                values.append(float(value))
+            except (TypeError, ValueError):
+                continue
+        return min(values) if values else None
+
+    def _status(min_value: float | None, threshold: float) -> str:
+        if min_value is None:
+            return "fail"
+        if min_value >= threshold:
+            return "pass"
+        return "warn"
+
+    sparse_threshold = float(absolute_cfg.get("absolute_sparse_audit_cosine_min", 0.90))
+    quant_threshold = float(absolute_cfg.get("absolute_quant_audit_cosine_min", 0.95))
+    value_threshold = float(absolute_cfg.get("absolute_value_cosine_min", 0.90))
+
+    sparse_min = _min_metric(e2e_runs, "sparse_audit_cosine")
+    quant_min = _min_metric(e2e_runs, "quant_audit_cosine")
+    value_min = _min_metric(kv_runs, "value_cosine_sim")
+
+    sparse_status = _status(sparse_min, sparse_threshold)
+    quant_status = _status(quant_min, quant_threshold)
+    value_status = _status(value_min, value_threshold)
+
+    unsafe_for_llm = any(status in {"warn", "fail"} for status in (sparse_status, quant_status, value_status))
+
     lines = [
         f"# {profile} Proof Summary",
         "",
@@ -133,6 +170,21 @@ def write_summary(output_dir: Path, kv_payload: dict, e2e_payload: dict, profile
         )
 
     lines.extend([
+        "",
+        "## Absolute Quality",
+        (
+            f"- Sparse quality: {sparse_status} "
+            f"(min={sparse_min if sparse_min is not None else 'n/a'}, threshold={sparse_threshold:.3f})"
+        ),
+        (
+            f"- Quant quality: {quant_status} "
+            f"(min={quant_min if quant_min is not None else 'n/a'}, threshold={quant_threshold:.3f})"
+        ),
+        (
+            f"- Value quality: {value_status} "
+            f"(min={value_min if value_min is not None else 'n/a'}, threshold={value_threshold:.3f})"
+        ),
+        "- WARNING_UNSAFE_FOR_LLM_DEPLOYMENT" if unsafe_for_llm else "- Deployment quality warning: none",
         "",
         "## Next Checks",
         "- Compare these artifacts against previous runs for trend regressions.",

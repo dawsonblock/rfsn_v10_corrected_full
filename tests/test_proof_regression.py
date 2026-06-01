@@ -221,3 +221,125 @@ def test_regression_report_missing_scenario_is_breach_when_strict(tmp_path):
     )
 
     assert report["total_breaches"] > 0
+
+
+def test_absolute_quality_min_emits_warning_without_breach(tmp_path):
+    baseline_dir = tmp_path / "baseline"
+    current_dir = tmp_path / "current"
+    baseline_dir.mkdir()
+    current_dir.mkdir()
+
+    _write_payload(
+        baseline_dir / "kv_cache_runs.json",
+        "kv_case",
+        {
+            "retrieve_latency_ms": 10.0,
+            "store_latency_ms": 8.0,
+            "key_cosine_sim": 0.999,
+            "value_cosine_sim": 0.910,
+        },
+    )
+    _write_payload(
+        current_dir / "kv_cache_runs.json",
+        "kv_case",
+        {
+            "retrieve_latency_ms": 10.0,
+            "store_latency_ms": 8.0,
+            "key_cosine_sim": 0.999,
+            "value_cosine_sim": 0.891,
+        },
+    )
+
+    _write_payload(
+        baseline_dir / "e2e_scenarios.json",
+        "e2e_case",
+        {
+            "cache_miss_total_latency_ms": 20.0,
+            "cache_hit_total_latency_ms": 5.0,
+            "quant_audit_cosine": 0.97,
+            "sparse_audit_cosine": 0.91,
+        },
+    )
+    _write_payload(
+        current_dir / "e2e_scenarios.json",
+        "e2e_case",
+        {
+            "cache_miss_total_latency_ms": 20.0,
+            "cache_hit_total_latency_ms": 5.0,
+            "quant_audit_cosine": 0.97,
+            "sparse_audit_cosine": 0.89,
+        },
+    )
+
+    report = compare_proof_dirs(
+        baseline_dir=baseline_dir,
+        current_dir=current_dir,
+        thresholds=merge_thresholds(None),
+        strict_missing=True,
+        strict_absolute=False,
+    )
+
+    assert report["warning_unsafe_for_llm_deployment"] is True
+    assert len(report["absolute_warnings"]) >= 1
+    assert report["total_breaches"] == 0
+
+
+def test_absolute_quality_min_can_be_strict_breach(tmp_path):
+    baseline_dir = tmp_path / "baseline"
+    current_dir = tmp_path / "current"
+    baseline_dir.mkdir()
+    current_dir.mkdir()
+
+    _write_payload(
+        baseline_dir / "kv_cache_runs.json",
+        "kv_case",
+        {
+            "retrieve_latency_ms": 10.0,
+            "store_latency_ms": 8.0,
+            "key_cosine_sim": 0.999,
+            "value_cosine_sim": 0.910,
+        },
+    )
+    _write_payload(
+        current_dir / "kv_cache_runs.json",
+        "kv_case",
+        {
+            "retrieve_latency_ms": 10.0,
+            "store_latency_ms": 8.0,
+            "key_cosine_sim": 0.999,
+            "value_cosine_sim": 0.891,
+        },
+    )
+
+    _write_payload(
+        baseline_dir / "e2e_scenarios.json",
+        "e2e_case",
+        {
+            "cache_miss_total_latency_ms": 20.0,
+            "cache_hit_total_latency_ms": 5.0,
+            "quant_audit_cosine": 0.97,
+            "sparse_audit_cosine": 0.91,
+        },
+    )
+    _write_payload(
+        current_dir / "e2e_scenarios.json",
+        "e2e_case",
+        {
+            "cache_miss_total_latency_ms": 20.0,
+            "cache_hit_total_latency_ms": 5.0,
+            "quant_audit_cosine": 0.97,
+            "sparse_audit_cosine": 0.89,
+        },
+    )
+
+    report = compare_proof_dirs(
+        baseline_dir=baseline_dir,
+        current_dir=current_dir,
+        thresholds=merge_thresholds(None),
+        strict_missing=True,
+        strict_absolute=True,
+    )
+
+    assert report["warning_unsafe_for_llm_deployment"] is True
+    assert len(report["absolute_breaches"]) >= 1
+    assert report["total_breaches"] >= 1

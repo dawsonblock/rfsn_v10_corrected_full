@@ -53,6 +53,11 @@ def main() -> None:
         default=True,
         help="Treat missing baseline scenarios in current run as breaches",
     )
+    parser.add_argument(
+        "--strict-absolute",
+        action="store_true",
+        help="Treat absolute quality minima warnings as hard breaches",
+    )
     args = parser.parse_args()
 
     baseline_dir = Path(args.baseline_dir) if args.baseline_dir else Path(f"benchmarks/proof_baselines/{args.profile}")
@@ -64,6 +69,7 @@ def main() -> None:
         current_dir=current_dir,
         thresholds=thresholds,
         strict_missing=args.strict_missing,
+        strict_absolute=args.strict_absolute,
     )
 
     report_json = json.dumps(report, indent=2)
