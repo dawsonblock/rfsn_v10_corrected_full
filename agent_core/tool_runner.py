@@ -301,5 +301,5 @@ def run_command_safely(command: str, timeout: Optional[float] = None,
     
     Creates a temporary ToolRunner instance for one-off command execution.
     """
-    runner = ToolRunner(__import__('orchestrator').Orchestrator())
+    runner = ToolRunner(Orchestrator())
     return runner.run_command(command, timeout=timeout, cwd=cwd, require_confirmation=require_confirmation)

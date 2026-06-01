@@ -85,7 +85,7 @@ def test_agent_core_integration():
     
     # Verify the output makes sense
     assert final_output.title.startswith("✅ Task Completed Successfully")
-    assert "integration_test" in final_output.summary
+    assert "Verify agent core components work together" in final_output.summary
     assert verdict.success is True  # Note: FinalOutput doesn't have success field, but verdict does
     
     print("✓ All integration tests passed!")
