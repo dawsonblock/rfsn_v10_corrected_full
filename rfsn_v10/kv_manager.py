@@ -13,6 +13,7 @@ import math
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
+from threading import RLock, get_ident
 from typing import Optional, Tuple
 
 from .compat import mx
@@ -98,7 +99,8 @@ class RFSNTurboQuantKVManager:
         self.cache_dir = Path(cache_dir)
         self.group_size = group_size
         # Cache for sign masks to avoid regenerating for same shape/seed/dtype.
-        self._sign_cache: dict[tuple[tuple[int, ...], int, mx.Dtype], mx.array] = {}
+        self._sign_cache: dict[tuple[tuple[int, ...], int, mx.Dtype, int], mx.array] = {}
+        self._sign_cache_lock = RLock()
         self.active_caches: dict[str, TurboQuantKVCache] = {}
         self._total_estimated_bytes = 0
         self._pinned_bytes = 0
@@ -134,9 +136,11 @@ class RFSNTurboQuantKVManager:
         shape = x.shape
 
         # Check cache first
-        cache_key = (shape, seed, x.dtype)
-        if cache_key in self._sign_cache:
-            signs = self._sign_cache[cache_key]
+        # MLX arrays are stream/thread-bound; keep cache entries thread-local.
+        cache_key = (shape, seed, x.dtype, get_ident())
+        with self._sign_cache_lock:
+            signs = self._sign_cache.get(cache_key)
+        if signs is not None:
             return x * signs
 
         # Vectorized deterministic hash-like mixing (SplitMix-style) over indices.
@@ -155,10 +159,12 @@ class RFSNTurboQuantKVManager:
             mx.array(-1.0, dtype=x.dtype),
         ).reshape(shape)
         
-        # Cache the result
-        # Limit cache size to prevent memory issues
-        if len(self._sign_cache) < 128:  # Reasonable limit
-            self._sign_cache[cache_key] = signs
+        # Cache the result (bounded) with lock to avoid concurrent mutation races.
+        with self._sign_cache_lock:
+            if cache_key not in self._sign_cache and len(self._sign_cache) < 128:
+                self._sign_cache[cache_key] = signs
+            else:
+                signs = self._sign_cache.get(cache_key, signs)
         
         return x * signs
 

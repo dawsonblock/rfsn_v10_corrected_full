@@ -5,6 +5,8 @@ Covers distribution tests, mode tests, corruption tests, and multi-shape tests.
 """
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
+
 import pytest
 
 mx = pytest.importorskip("mlx.core")
@@ -300,3 +302,24 @@ def test_sign_cache_is_instance_scoped(tmp_path):
 
     assert len(manager_a._sign_cache) == 1
     assert len(manager_b._sign_cache) == 0
+
+
+def test_sign_cache_is_thread_safe(tmp_path):
+    manager = RFSNTurboQuantKVManager(
+        cache_dir=str(tmp_path / "threaded"),
+        use_incoherent=True,
+    )
+
+    shape = (1, 2, 16, 8)
+    x = mx.ones(shape)
+
+    def _worker() -> None:
+        _ = manager._apply_signs_on_the_fly(x, seed=777)
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        list(executor.map(lambda _: _worker(), range(64)))
+
+    assert 1 <= len(manager._sign_cache) <= 8
+    y = manager._apply_signs_on_the_fly(x, seed=777)
+    assert 2 <= len(manager._sign_cache) <= 9
+    assert mx.sum(y).item() != 0.0
