@@ -45,6 +45,7 @@ class AsyncWriter:
         max_queue_size: int = 10000,
         max_retries: int = 3,
         retry_backoff_sec: float = 1.0,
+        backpressure_policy: str = "DISCARD_CURRENT_BATCH",
     ):
         """
         Args:
@@ -54,6 +55,8 @@ class AsyncWriter:
             max_queue_size: Maximum number of batches in queue.
             max_retries: Number of retry attempts for failed writes.
             retry_backoff_sec: Base backoff time between retries (seconds).
+            backpressure_policy: Behavior when queue is full. Supported values:
+                "DISCARD_CURRENT_BATCH" (default), "DROP_OLDEST_BATCH".
         """
         self.client = client
         self.batch_size = batch_size
@@ -61,6 +64,7 @@ class AsyncWriter:
         self.max_queue_size = max_queue_size
         self.max_retries = max_retries
         self.retry_backoff_sec = retry_backoff_sec
+        self.backpressure_policy = backpressure_policy.upper()
         
         # Threading primitives
         self._queue: queue.Queue[Optional[TelemetryBatch]] = queue.Queue(maxsize=max_queue_size)
@@ -119,9 +123,23 @@ class AsyncWriter:
                 try:
                     self._queue.put_nowait(batch_to_write)
                 except queue.Full:
-                    # This shouldn't happen with proper sizing, but handle gracefully
-                    self._events_dropped += len(batch_to_write.events)
-                    self._warn_backpressure("queue full during batch flush")
+                    if self.backpressure_policy == "DROP_OLDEST_BATCH":
+                        try:
+                            dropped_batch = self._queue.get_nowait()
+                            if dropped_batch is not None:
+                                self._events_dropped += len(dropped_batch.events)
+                            self._queue.put_nowait(batch_to_write)
+                            self._warn_backpressure("queue full; dropped oldest batch")
+                        except queue.Empty:
+                            self._events_dropped += len(batch_to_write.events)
+                            self._warn_backpressure("queue full during batch flush")
+                        except queue.Full:
+                            self._events_dropped += len(batch_to_write.events)
+                            self._warn_backpressure("queue still full after dropping oldest batch")
+                    else:
+                        # Default policy: discard the current batch.
+                        self._events_dropped += len(batch_to_write.events)
+                        self._warn_backpressure("queue full during batch flush")
     
     def _warn_backpressure(self, reason: str) -> None:
         """Emit a backpressure warning, rate-limited to once per 10 seconds."""

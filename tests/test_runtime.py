@@ -263,7 +263,15 @@ def test_runtime_use_compressed_on_miss_assigns_retrieved_kv(kv_manager, monkeyp
     def fake_store(cache_key, keys, values, token_count):
         return None
 
-    def fake_execute(queries, keys, values, top_k_ratio, block_size, kv_is_strictly_past):
+    def fake_execute(
+        queries,
+        keys,
+        values,
+        top_k_ratio,
+        block_size,
+        kv_is_strictly_past,
+        memory_guard=None,
+    ):
         state["keys_seen"] = keys
         state["values_seen"] = values
         return mx.zeros_like(queries), 1, "sparse_compacted"

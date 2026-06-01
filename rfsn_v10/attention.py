@@ -18,9 +18,11 @@ causal masking. This module is designed for decode, not prefill.
 from __future__ import annotations
 
 import math
-from typing import Literal, Tuple
+from typing import Literal, Optional, Tuple
 
 import mlx.core as mx
+
+from .memory_guard import MemoryGuard
 
 ExecutionMode = Literal[
     "sparse_compacted",
@@ -33,6 +35,19 @@ ExecutionMode = Literal[
 
 class AdaptiveBlockSparseAttention:
     """Block-sparse attention with block selection and compacted KV dispatch."""
+
+    @staticmethod
+    def _dtype_nbytes(dtype: mx.Dtype) -> int:
+        """Best-effort byte width for MLX dtypes used in this project."""
+        dtype_name = str(dtype)
+        if "float16" in dtype_name or "bfloat16" in dtype_name:
+            return 2
+        if "float32" in dtype_name:
+            return 4
+        if "float64" in dtype_name:
+            return 8
+        # Conservative default for unknown/experimental dtypes.
+        return 4
 
     @staticmethod
     def _ceil_div(a: int, b: int) -> int:
@@ -48,6 +63,7 @@ class AdaptiveBlockSparseAttention:
         top_k_ratio: float,
         block_size: int,
         consensus_mix: float,
+        memory_guard: Optional[MemoryGuard] = None,
     ) -> Tuple[int, int, int, int, int]:
         if len(queries.shape) != 4:
             raise ValueError(f"queries must be [B,H,T_q,D], got {queries.shape}")
@@ -57,6 +73,11 @@ class AdaptiveBlockSparseAttention:
             raise ValueError(f"values must be [B,H,T_k,D], got {values.shape}")
         if keys.shape != values.shape:
             raise ValueError(f"keys/values shape mismatch: {keys.shape} vs {values.shape}")
+        if not (queries.dtype == keys.dtype == values.dtype):
+            raise ValueError(
+                "queries/keys/values dtype mismatch: "
+                f"{queries.dtype} vs {keys.dtype} vs {values.dtype}"
+            )
 
         B, H, T_k, D = keys.shape
         Bq, Hq, T_q, Dq = queries.shape
@@ -77,6 +98,14 @@ class AdaptiveBlockSparseAttention:
             raise ValueError(f"top_k_ratio must be in (0, 1], got {top_k_ratio}")
         if not math.isfinite(float(consensus_mix)):
             raise ValueError(f"consensus_mix must be finite, got {consensus_mix}")
+
+        if memory_guard is not None:
+            bytes_per_elem = AdaptiveBlockSparseAttention._dtype_nbytes(keys.dtype)
+            estimated_bytes = int((B * H * (T_q + (2 * T_k)) * D) * bytes_per_elem)
+            if memory_guard.check_pressure(estimated_bytes):
+                raise MemoryError(
+                    f"attention memory guard triggered for estimated_bytes={estimated_bytes}"
+                )
 
         return B, H, T_q, T_k, D
 
@@ -108,6 +137,7 @@ class AdaptiveBlockSparseAttention:
         block_size: int = 64,
         kv_is_strictly_past: bool = True,
         consensus_mix: float = 0.7,
+        memory_guard: Optional[MemoryGuard] = None,
     ) -> Tuple[mx.array, int, ExecutionMode]:
         """
         Execute hardware-aware block-sparse scaled dot-product attention.
@@ -139,6 +169,7 @@ class AdaptiveBlockSparseAttention:
             top_k_ratio,
             block_size,
             consensus_mix,
+            memory_guard,
         )
 
         scale = 1.0 / math.sqrt(D)

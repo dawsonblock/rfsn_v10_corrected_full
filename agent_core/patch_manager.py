@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 import difflib
 import uuid
+import shutil
 
 from .schemas import PatchPlan, FileChange
 from .orchestrator import Orchestrator
@@ -152,46 +153,19 @@ class PatchManager:
             file_changes=plan.file_changes.copy()
         )
         
-        backup_dir = None
         if create_backups:
-            import tempfile
-            backup_dir = Path(tempfile.mkdtemp(prefix="rfsn_patch_backup_"))
-            applied_patch.backup_paths.append(backup_dir)
-            logger.info(f"Created backup directory: {backup_dir}")
+            snapshot_root = self._create_rollback_snapshot(plan.file_changes)
+            applied_patch.backup_paths.append(snapshot_root)
         
-        # Apply each file change
         all_success = True
-        error_messages = []
-        
-        for file_change in plan.file_changes:
-            try:
-                # Create backup if requested
-                if create_backups and backup_dir and file_change.change_type in ["modified", "deleted"]:
-                    file_path = Path(file_change.file_path)
-                    if file_path.exists():
-                        backup_file = backup_dir / file_path.relative_to(self.orchestrator.workspace_root 
-                                                                      if hasattr(self.orchestrator, 'workspace_root') 
-                                                                      else Path.cwd())
-                        backup_file.parent.mkdir(parents=True, exist_ok=True)
-                        
-                        if file_change.change_type == "deleted" or file_change.old_content is not None:
-                            content_to_backup = file_change.old_content or file_path.read_text(encoding="utf-8")
-                            backup_file.write_text(content_to_backup, encoding="utf-8")
-                            applied_patch.backup_paths.append(backup_file)
-                
-                # Apply the change
-                success, error_message = self.apply_file_change(file_change)
-                if not success:
-                    all_success = False
-                    error_messages.append(f"{file_change.file_path}: {error_message}")
-                    logger.error(f"Failed to apply change to {file_change.file_path}: {error_message}")
-                else:
-                    logger.info(f"Applied change to {file_change.file_path}: {file_change.change_type}")
-                    
-            except Exception as e:
-                all_success = False
-                error_messages.append(f"{file_change.file_path}: {str(e)}")
-                logger.error(f"Exception applying change to {file_change.file_path}: {e}")
+        error_messages: list[str] = []
+
+        try:
+            self.transactional_apply(plan)
+        except Exception as e:
+            all_success = False
+            error_messages.append(str(e))
+            logger.error(f"Failed to apply patch plan {plan.plan_id}: {e}")
         
         # Record the result
         applied_patch.success = all_success
@@ -206,6 +180,57 @@ class PatchManager:
             logger.error(f"Failed to apply patch plan {plan.plan_id}: {applied_patch.error_message}")
         
         return applied_patch
+
+    def _create_rollback_snapshot(self, file_changes: List[FileChange]) -> Path:
+        """Create rollback snapshot for files that currently exist."""
+        snapshot_root = Path.cwd() / ".tmp" / "rollback_snapshot" / str(uuid.uuid4())
+        snapshot_root.mkdir(parents=True, exist_ok=True)
+
+        for file_change in file_changes:
+            file_path = Path(file_change.file_path)
+            if file_path.exists() and file_path.is_file():
+                backup_path = snapshot_root / file_path.as_posix().lstrip("/")
+                backup_path.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(file_path, backup_path)
+
+        return snapshot_root
+
+    def _restore_from_snapshot(
+        self,
+        snapshot_root: Path,
+        file_changes: List[FileChange],
+        existing_paths_before: set[Path],
+    ) -> None:
+        """Restore all files from snapshot and remove files created during failed apply."""
+        for file_change in file_changes:
+            file_path = Path(file_change.file_path)
+            backup_path = snapshot_root / file_path.as_posix().lstrip("/")
+            if file_path in existing_paths_before:
+                if backup_path.exists():
+                    file_path.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(backup_path, file_path)
+            elif file_path.exists():
+                file_path.unlink()
+
+    def transactional_apply(self, plan: PatchPlan) -> None:
+        """Apply all file changes atomically, rolling back on the first failure."""
+        snapshot_root = self._create_rollback_snapshot(plan.file_changes)
+        existing_paths_before = {
+            Path(file_change.file_path)
+            for file_change in plan.file_changes
+            if Path(file_change.file_path).exists()
+        }
+
+        try:
+            for file_change in plan.file_changes:
+                success, error_message = self.apply_file_change(file_change)
+                if not success:
+                    raise RuntimeError(f"{file_change.file_path}: {error_message}")
+        except Exception:
+            self._restore_from_snapshot(snapshot_root, plan.file_changes, existing_paths_before)
+            raise
+        finally:
+            shutil.rmtree(snapshot_root, ignore_errors=True)
     
     def generate_patch_from_plan(self, plan: PatchPlan) -> str:
         """

@@ -243,6 +243,7 @@ class RFSNRuntime:
                 top_k_ratio=effective_top_k,
                 block_size=self.block_size,
                 kv_is_strictly_past=True,
+                memory_guard=self.memory_guard,
             )
             mx.eval(sparse_output)
             sparse_success = (execution_mode == "sparse_compacted")

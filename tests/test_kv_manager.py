@@ -245,3 +245,20 @@ def test_estimate_compressed_bytes_reduces_with_higher_bits_for_packing(kv_manag
     bytes_8_8 = kv_manager.estimate_compressed_bytes_for_shape(shape, k_bits=8, v_bits=8)
     bytes_8_3 = kv_manager.estimate_compressed_bytes_for_shape(shape, k_bits=8, v_bits=3)
     assert bytes_8_3 < bytes_8_8
+
+
+def test_sign_cache_is_instance_scoped(tmp_path):
+    manager_a = RFSNTurboQuantKVManager(
+        cache_dir=str(tmp_path / "a"),
+        use_incoherent=True,
+    )
+    manager_b = RFSNTurboQuantKVManager(
+        cache_dir=str(tmp_path / "b"),
+        use_incoherent=True,
+    )
+
+    shape = (1, 2, 4, 8)
+    _ = manager_a._apply_signs_on_the_fly(mx.ones(shape), seed=123)
+
+    assert len(manager_a._sign_cache) == 1
+    assert len(manager_b._sign_cache) == 0

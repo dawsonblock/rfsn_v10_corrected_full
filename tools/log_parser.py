@@ -236,6 +236,53 @@ class LogParser:
                 pass
         
         return analysis
+
+    def parse_json_report(self, json_path: Path) -> LogAnalysis:
+        """Parse pytest --json-report output into structured analysis."""
+        data = json.loads(json_path.read_text(encoding="utf-8"))
+        analysis = LogAnalysis(log_source=f"pytest-json:{json_path}")
+
+        summary = data.get("summary", {})
+        analysis.passed_tests = int(summary.get("passed", 0))
+        analysis.failed_tests = int(summary.get("failed", 0))
+        analysis.skipped_tests = int(summary.get("skipped", 0))
+        analysis.error_tests = int(summary.get("error", 0))
+        analysis.total_tests = (
+            analysis.passed_tests
+            + analysis.failed_tests
+            + analysis.skipped_tests
+            + analysis.error_tests
+        )
+        analysis.duration_seconds = float(summary.get("duration", 0.0) or 0.0)
+
+        for test_item in data.get("tests", []):
+            outcome = str(test_item.get("outcome", "")).lower()
+            if outcome not in {"failed", "error"}:
+                continue
+
+            nodeid = test_item.get("nodeid", "unknown_test")
+            call_info = test_item.get("call", {}) or {}
+            longrepr = call_info.get("longrepr") or test_item.get("longrepr") or ""
+            traceback_lines = str(longrepr).splitlines()
+            message = traceback_lines[-1] if traceback_lines else "pytest json failure"
+
+            failure = ParsedFailure(
+                test_name=nodeid,
+                failure_type="exception" if outcome == "error" else "assertion",
+                message=message[:500],
+                traceback=traceback_lines[-20:],
+            )
+
+            line = int(call_info.get("lineno", 0) or 0)
+            if line > 0:
+                failure.line_number = line
+            path = test_item.get("path")
+            if path:
+                failure.file_path = Path(path)
+
+            analysis.failures.append(failure)
+
+        return analysis
     
     def parse_traceback(self, traceback_text: str) -> List[ParsedFailure]:
         """

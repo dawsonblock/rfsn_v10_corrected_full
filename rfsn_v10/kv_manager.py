@@ -44,9 +44,6 @@ class TurboQuantKVCache:
 
 class RFSNTurboQuantKVManager:
     """TurboQuant KV cache manager with grouped symmetric quantization."""
-    
-    # Cache for sign masks to avoid regenerating for same shape/seed/dtype
-    _sign_cache = {}
 
     def __init__(
         self,
@@ -73,6 +70,8 @@ class RFSNTurboQuantKVManager:
         self.max_pinned_memory_gb = max_pinned_memory_gb
         self.cache_dir = Path(cache_dir)
         self.group_size = group_size
+        # Cache for sign masks to avoid regenerating for same shape/seed/dtype.
+        self._sign_cache: dict[tuple[tuple[int, ...], int, mx.Dtype], mx.array] = {}
         self.active_caches: dict[str, TurboQuantKVCache] = {}
         self._total_estimated_bytes = 0
         self._pinned_bytes = 0

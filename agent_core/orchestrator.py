@@ -8,8 +8,10 @@ from typing import Dict, List, Optional, Callable
 from datetime import datetime
 import asyncio
 import logging
+import pickle
+from pathlib import Path
 
-from .schemas import TaskState, TaskStatus, Priority, AgentVerdict
+from .schemas import TaskState, TaskStatus, Priority, AgentVerdict, TestResult
 
 logger = logging.getLogger(__name__)
 
@@ -26,10 +28,15 @@ class Orchestrator:
     - Collecting results and generating verdicts
     """
     
-    def __init__(self):
+    def __init__(self, auto_save_path: Optional[str | Path] = None):
         self.tasks: Dict[str, TaskState] = {}
         self.root_tasks: List[TaskState] = []
+        self.auto_save_path = Path(auto_save_path) if auto_save_path else None
         logger.info("Orchestrator initialized")
+
+    def _persist_if_configured(self) -> None:
+        if self.auto_save_path is not None:
+            self.save_state(self.auto_save_path)
     
     def create_task(self, description: str, priority: Priority = Priority.MEDIUM,
                    parent_task_id: Optional[str] = None) -> TaskState:
@@ -60,6 +67,8 @@ class Orchestrator:
                 logger.warning(f"Parent task {parent_task_id} not found")
         else:
             self.root_tasks.append(task)
+
+        self._persist_if_configured()
         
         logger.info(f"Created task {task.task_id}: {description}")
         return task
@@ -85,6 +94,7 @@ class Orchestrator:
         
         task.status = TaskStatus.IN_PROGRESS
         task.started_at = datetime.now()
+        self._persist_if_configured()
         logger.info(f"Started task {task_id}: {task.description}")
         return True
     
@@ -110,6 +120,7 @@ class Orchestrator:
         
         task.status = TaskStatus.COMPLETED if success else TaskStatus.FAILED
         task.completed_at = datetime.now()
+        self._persist_if_configured()
         logger.info(f"Completed task {task_id}: {task.description} (success: {success})")
         
         # If all subtasks are complete, we could auto-complete parent
@@ -135,6 +146,7 @@ class Orchestrator:
         task.status = TaskStatus.FAILED
         task.error_message = error_message
         task.completed_at = datetime.now()
+        self._persist_if_configured()
         logger.error(f"Failed task {task_id}: {task.description} - {error_message}")
         return True
     
@@ -159,6 +171,7 @@ class Orchestrator:
         
         task.status = TaskStatus.CANCELLED
         task.completed_at = datetime.now()
+        self._persist_if_configured()
         logger.info(f"Cancelled task {task_id}: {task.description}")
         return True
     
@@ -226,11 +239,41 @@ class Orchestrator:
             return False
         
         task.test_results.append(test_result)
+        self._persist_if_configured()
         logger.info(f"Added test result '{test_result.test_name}' to task {task_id}")
         return True
+
+    def save_state(self, filepath: str | Path) -> None:
+        """Persist orchestrator task state to disk."""
+        path = Path(filepath)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "tasks": self.tasks,
+            "root_task_ids": [task.task_id for task in self.root_tasks],
+        }
+        with path.open("wb") as f:
+            pickle.dump(payload, f)
+
+    def load_state(self, filepath: str | Path) -> None:
+        """Load orchestrator task state from disk."""
+        path = Path(filepath)
+        with path.open("rb") as f:
+            payload = pickle.load(f)
+
+        loaded_tasks = payload.get("tasks", {})
+        root_task_ids = payload.get("root_task_ids", [])
+
+        if not isinstance(loaded_tasks, dict):
+            raise ValueError("Invalid state payload: tasks must be a dictionary")
+
+        self.tasks = loaded_tasks
+        self.root_tasks = [
+            task for task_id, task in self.tasks.items() if task_id in root_task_ids
+        ]
 
     def reset(self):
         """Reset the orchestrator to initial state."""
         self.tasks.clear()
         self.root_tasks.clear()
+        self._persist_if_configured()
         logger.info("Orchestrator reset")

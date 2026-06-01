@@ -11,9 +11,11 @@ import subprocess
 import time
 import json
 import re
+import tempfile
 
 from agent_core.schemas import TestResult, TestResultStatus
 from agent_core.tool_runner import ToolRunner, CommandResult
+from tools.log_parser import LogParser
 
 logger = __import__('logging').getLogger(__name__)
 
@@ -150,6 +152,66 @@ class TestRunner:
             test_results=test_results,
             raw_output=command_result.stdout + "\n" + command_result.stderr
         )
+
+    def run_pytest_json(self, test_path: str | Path = ".",
+                        timeout: float = 120.0,
+                        extra_args: Optional[List[str]] = None) -> TestSuiteResult:
+        """Run pytest with --json-report and parse structured output."""
+        start_time = time.time()
+        with tempfile.TemporaryDirectory(prefix="rfsn_pytest_json_") as td:
+            report_path = Path(td) / "pytest-report.json"
+            args = [
+                "pytest",
+                "-q",
+                "--json-report",
+                f"--json-report-file={report_path}",
+            ]
+            if extra_args:
+                args.extend(extra_args)
+            args.append(str(test_path))
+
+            command_result = self.tool_runner.run_command(
+                " ".join(args),
+                timeout=timeout,
+                require_confirmation=False,
+            )
+
+            if not report_path.exists():
+                # Fallback to legacy parser if plugin/report is unavailable.
+                return self.run_pytest(test_path=test_path, timeout=timeout, extra_args=extra_args)
+
+            parser = LogParser()
+            analysis = parser.parse_json_report(report_path)
+            test_results: List[TestResult] = []
+
+            for failure in analysis.failures:
+                status = (
+                    TestResultStatus.ERROR
+                    if failure.failure_type == "exception"
+                    else TestResultStatus.FAILED
+                )
+                test_results.append(
+                    TestResult(
+                        test_name=failure.test_name,
+                        status=status,
+                        duration_ms=0.0,
+                        message=failure.message,
+                        traceback="\n".join(failure.traceback) if failure.traceback else None,
+                    )
+                )
+
+            elapsed = time.time() - start_time
+            return TestSuiteResult(
+                suite_name=f"pytest-json:{test_path}",
+                total_tests=analysis.total_tests,
+                passed_tests=analysis.passed_tests,
+                failed_tests=analysis.failed_tests,
+                skipped_tests=analysis.skipped_tests,
+                error_tests=analysis.error_tests,
+                duration_seconds=elapsed,
+                test_results=test_results,
+                raw_output=command_result.stdout + "\n" + command_result.stderr,
+            )
     
     def run_compile_check(self, language: str, source_path: str | Path = ".",
                          timeout: float = 30.0) -> TestSuiteResult:
