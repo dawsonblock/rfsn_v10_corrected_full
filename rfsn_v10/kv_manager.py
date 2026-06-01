@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional, Tuple
 
-import mlx.core as mx
+from .compat import mx
 
 from .bitpack import BitPackedQuantizer
 
@@ -32,7 +32,8 @@ class TurboQuantKVCache:
     k_bits: int
     v_bits: int
     group_size: int
-    use_incoherent: bool
+    use_wht: bool
+    use_incoherent_signs: bool
     format_version: str
     seed: int = 0
     k_n_values: int = 0
@@ -40,6 +41,16 @@ class TurboQuantKVCache:
     token_count: int = 0
     pinned: bool = False
     last_used: float = 0.0
+
+    @property
+    def use_incoherent(self) -> bool:
+        return self.use_wht and self.use_incoherent_signs
+
+    @use_incoherent.setter
+    def use_incoherent(self, value: bool) -> None:
+        enabled = bool(value)
+        self.use_wht = enabled
+        self.use_incoherent_signs = enabled
 
 
 class RFSNTurboQuantKVManager:
@@ -49,7 +60,9 @@ class RFSNTurboQuantKVManager:
         self,
         k_bits: int = 8,
         v_bits: int = 3,
-        use_incoherent: bool = True,
+        use_wht: Optional[bool] = None,
+        use_incoherent_signs: Optional[bool] = None,
+        use_incoherent: Optional[bool] = None,
         max_memory_gb: float = 1.0,
         max_pinned_memory_gb: float = 0.5,
         cache_dir: str = ".rfsn_cache",
@@ -63,9 +76,20 @@ class RFSNTurboQuantKVManager:
         if group_size <= 0:
             raise ValueError(f"group_size must be positive, got {group_size}")
             
+        if use_wht is None and use_incoherent_signs is None:
+            legacy = True if use_incoherent is None else bool(use_incoherent)
+            use_wht = legacy
+            use_incoherent_signs = legacy
+        else:
+            use_wht = True if use_wht is None else bool(use_wht)
+            use_incoherent_signs = (
+                True if use_incoherent_signs is None else bool(use_incoherent_signs)
+            )
+
         self.k_bits = k_bits
         self.v_bits = v_bits
-        self.use_incoherent = use_incoherent
+        self.use_wht = bool(use_wht)
+        self.use_incoherent_signs = bool(use_incoherent_signs)
         self.max_memory_gb = max_memory_gb
         self.max_pinned_memory_gb = max_pinned_memory_gb
         self.cache_dir = Path(cache_dir)
@@ -76,6 +100,16 @@ class RFSNTurboQuantKVManager:
         self._total_estimated_bytes = 0
         self._pinned_bytes = 0
         self.cache_dir.mkdir(parents=True, exist_ok=True)
+
+    @property
+    def use_incoherent(self) -> bool:
+        return self.use_wht and self.use_incoherent_signs
+
+    @use_incoherent.setter
+    def use_incoherent(self, value: bool) -> None:
+        enabled = bool(value)
+        self.use_wht = enabled
+        self.use_incoherent_signs = enabled
 
     # ------------------------------------------------------------------
     # Randomized sign preconditioning (deterministic, self-inverse)
@@ -302,7 +336,8 @@ class RFSNTurboQuantKVManager:
         shape: tuple,
         bits: int,
         seed: int,
-        use_incoherent: bool,
+        use_wht: bool,
+        use_incoherent_signs: bool,
         out_dtype: mx.Dtype,
     ) -> mx.array:
         """Packed-dequant-WHT reconstruction path: unpack → dequant → reshape → WHT → optional signs.
@@ -344,11 +379,10 @@ class RFSNTurboQuantKVManager:
         # Reshape
         x = x.reshape(shape)
 
-        # Apply WHT
-        x = self._apply_wht_pretransform(x)
+        if use_wht:
+            x = self._apply_wht_pretransform(x)
 
-        # Apply signs (if use_incoherent)
-        if use_incoherent:
+        if use_incoherent_signs:
             x = self._apply_signs_on_the_fly(x, seed)
 
         return x.astype(out_dtype)
@@ -427,20 +461,21 @@ class RFSNTurboQuantKVManager:
             16,
         )
 
-        # When use_incoherent, apply signs → WHT before quantization
-        # Apply to shaped tensors first, then flatten
-        if self.use_incoherent:
+        # Apply optional sign preconditioning and optional WHT before quantization.
+        if self.use_incoherent_signs:
             k_pre = self._apply_signs_on_the_fly(keys, seed)
-            k_wht = self._apply_wht_pretransform(k_pre)
             v_pre = self._apply_signs_on_the_fly(values, seed)
-            v_wht = self._apply_wht_pretransform(v_pre)
-            # Flatten for quantization
-            k_flat = k_wht.reshape(-1)
-            v_flat = v_wht.reshape(-1)
         else:
-            # Flatten for quantization
-            k_flat = keys.reshape(-1)
-            v_flat = values.reshape(-1)
+            k_pre = keys
+            v_pre = values
+
+        if self.use_wht:
+            k_pre = self._apply_wht_pretransform(k_pre)
+            v_pre = self._apply_wht_pretransform(v_pre)
+
+        # Flatten for quantization
+        k_flat = k_pre.reshape(-1)
+        v_flat = v_pre.reshape(-1)
 
         # Quantize
         k_codes, k_scales = self._quantize(k_flat, self.k_bits)
@@ -460,7 +495,8 @@ class RFSNTurboQuantKVManager:
             k_bits=self.k_bits,
             v_bits=self.v_bits,
             group_size=self.group_size,
-            use_incoherent=self.use_incoherent,
+            use_wht=self.use_wht,
+            use_incoherent_signs=self.use_incoherent_signs,
             format_version="rfsn_v10",
             seed=seed,
             k_n_values=k_n,
@@ -545,8 +581,9 @@ class RFSNTurboQuantKVManager:
         )
         k_rec = k_rec.reshape(cache.shape)
 
-        if cache.use_incoherent:
+        if cache.use_wht:
             k_rec = self._apply_wht_pretransform(k_rec)
+        if cache.use_incoherent_signs:
             k_rec = self._apply_signs_on_the_fly(k_rec, cache.seed)
 
         # Dequantize V
@@ -558,8 +595,9 @@ class RFSNTurboQuantKVManager:
         )
         v_rec = v_rec.reshape(cache.shape)
 
-        if cache.use_incoherent:
+        if cache.use_wht:
             v_rec = self._apply_wht_pretransform(v_rec)
+        if cache.use_incoherent_signs:
             v_rec = self._apply_signs_on_the_fly(v_rec, cache.seed)
 
         return k_rec.astype(out_dtype), v_rec.astype(out_dtype)

@@ -6,7 +6,8 @@ Covers distribution tests, mode tests, corruption tests, and multi-shape tests.
 from __future__ import annotations
 
 import pytest
-import mlx.core as mx
+
+mx = pytest.importorskip("mlx.core")
 
 from rfsn_v10.kv_manager import RFSNTurboQuantKVManager, TurboQuantKVCache
 
@@ -167,6 +168,43 @@ def test_different_k_v_bits(tmp_path):
     assert cosine_similarity(k, k_rec) > 0.95
     # 3-bit values will be coarser
     assert cosine_similarity(v, v_rec) > 0.75
+
+
+@pytest.mark.parametrize(
+    "use_wht,use_incoherent_signs",
+    [
+        (False, False),
+        (False, True),
+        (True, False),
+        (True, True),
+    ],
+)
+def test_split_transform_flags_roundtrip(tmp_path, use_wht, use_incoherent_signs):
+    manager = RFSNTurboQuantKVManager(
+        k_bits=8,
+        v_bits=3,
+        use_wht=use_wht,
+        use_incoherent_signs=use_incoherent_signs,
+        max_memory_gb=0.5,
+        max_pinned_memory_gb=0.1,
+        cache_dir=str(tmp_path),
+    )
+
+    mx.random.seed(42)
+    shape = (1, 8, 256, 64)
+    k = mx.random.normal(shape)
+    v = mx.random.normal(shape)
+
+    manager.store("split_flags", k, v, 256)
+    cache = manager.active_caches["split_flags"]
+    assert cache.use_wht is use_wht
+    assert cache.use_incoherent_signs is use_incoherent_signs
+
+    k_rec, v_rec = manager.retrieve("split_flags", out_dtype=mx.float32)
+    mx.eval(k_rec, v_rec)
+    assert k_rec.shape == shape
+    assert v_rec.shape == shape
+    assert cosine_similarity(k, k_rec) > 0.70
 
 
 def test_out_dtype_float16(kv_manager_plain):

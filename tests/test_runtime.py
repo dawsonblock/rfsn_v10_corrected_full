@@ -5,7 +5,8 @@ RFSN v10 - Runtime Orchestrator Tests.
 from __future__ import annotations
 
 import pytest
-import mlx.core as mx
+
+mx = pytest.importorskip("mlx.core")
 
 from rfsn_v10.bitpack import BitPackedQuantizer
 from rfsn_v10.kv_manager import RFSNTurboQuantKVManager

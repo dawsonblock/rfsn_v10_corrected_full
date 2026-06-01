@@ -1,15 +1,28 @@
-"""RFSN v10 — Quantized KV-cache + decode-time sparse-attention runtime for MLX/Apple Silicon."""
+"""RFSN v10 package surface with lazy MLX-dependent imports."""
 
-from .bitpack import BitPackedQuantizer
-from .kv_manager import RFSNTurboQuantKVManager, TurboQuantKVCache
-from .attention import AdaptiveBlockSparseAttention, ExecutionMode
-from .runtime import RFSNRuntime, TelemetryEvent
-from .adaptive_sparsity import AdaptiveSparsityController, QualitySample
-from .memory_guard import MemoryGuard
-from .async_writer import AsyncWriter
-from .clickhouse_client import ClickHouseClient
+from __future__ import annotations
+
+from importlib import import_module
+
+from .compat import MLX_AVAILABLE
+
+_LAZY_IMPORTS = {
+    "BitPackedQuantizer": ".bitpack",
+    "RFSNTurboQuantKVManager": ".kv_manager",
+    "TurboQuantKVCache": ".kv_manager",
+    "AdaptiveBlockSparseAttention": ".attention",
+    "ExecutionMode": ".attention",
+    "RFSNRuntime": ".runtime",
+    "TelemetryEvent": ".runtime",
+    "AdaptiveSparsityController": ".adaptive_sparsity",
+    "QualitySample": ".adaptive_sparsity",
+    "MemoryGuard": ".memory_guard",
+    "AsyncWriter": ".async_writer",
+    "ClickHouseClient": ".clickhouse_client",
+}
 
 __all__ = [
+    "MLX_AVAILABLE",
     "BitPackedQuantizer",
     "RFSNTurboQuantKVManager",
     "TurboQuantKVCache",
@@ -23,3 +36,13 @@ __all__ = [
     "AsyncWriter",
     "ClickHouseClient",
 ]
+
+
+def __getattr__(name: str):
+    module_name = _LAZY_IMPORTS.get(name)
+    if module_name is None:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    module = import_module(module_name, package=__name__)
+    value = getattr(module, name)
+    globals()[name] = value
+    return value

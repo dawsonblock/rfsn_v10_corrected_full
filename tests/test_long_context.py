@@ -9,8 +9,9 @@ from __future__ import annotations
 import math
 import tempfile
 
-import mlx.core as mx
 import pytest
+
+mx = pytest.importorskip("mlx.core")
 
 from rfsn_v10.kv_manager import RFSNTurboQuantKVManager
 from rfsn_v10.runtime import RFSNRuntime

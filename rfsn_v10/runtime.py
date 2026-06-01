@@ -19,7 +19,7 @@ import uuid
 from dataclasses import dataclass
 from typing import Optional
 
-import mlx.core as mx
+from .compat import mx
 
 from .kv_manager import RFSNTurboQuantKVManager
 from .adaptive_sparsity import AdaptiveSparsityController
@@ -100,14 +100,26 @@ class RFSNRuntime:
         k_bits: int,
         v_bits: int,
         group_size: int,
-        use_incoherent: bool,
         format_version: str,
+        use_wht: Optional[bool] = None,
+        use_incoherent_signs: Optional[bool] = None,
+        use_incoherent: Optional[bool] = None,
     ) -> str:
+        if use_wht is None and use_incoherent_signs is None:
+            legacy = True if use_incoherent is None else bool(use_incoherent)
+            use_wht = legacy
+            use_incoherent_signs = legacy
+        else:
+            use_wht = True if use_wht is None else bool(use_wht)
+            use_incoherent_signs = (
+                True if use_incoherent_signs is None else bool(use_incoherent_signs)
+            )
+
         return "|".join([
             model_id, layer_id, batch_id, skill_pattern,
             "x".join(str(d) for d in shape),
             str(dtype), str(k_bits), str(v_bits),
-            str(group_size), str(use_incoherent),
+            str(group_size), str(use_wht), str(use_incoherent_signs),
             format_version,
         ])
 
@@ -177,7 +189,8 @@ class RFSNRuntime:
             k_bits=self.kv_manager.k_bits,
             v_bits=self.kv_manager.v_bits,
             group_size=self.kv_manager.group_size,
-            use_incoherent=self.kv_manager.use_incoherent,
+            use_wht=self.kv_manager.use_wht,
+            use_incoherent_signs=self.kv_manager.use_incoherent_signs,
             format_version="rfsn_v10",
         )
 

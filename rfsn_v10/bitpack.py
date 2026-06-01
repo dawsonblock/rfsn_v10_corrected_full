@@ -7,7 +7,7 @@ Supports bit widths 2-8 with exact roundtrip guarantees.
 """
 from __future__ import annotations
 
-import mlx.core as mx
+from .compat import mx
 
 # Version-safe float dtype detection
 FLOAT_DTYPES = {
@@ -118,19 +118,10 @@ class BitPackedQuantizer:
                 f"for {n_values} values at {bits} bits, got {packed.size}"
             )
 
-        # Extract codes from packed words
-        packed_view = packed[:required_words]
-        packed_view = packed_view.reshape(-1, 1)
-
-        codes = mx.zeros(
-            (required_words, codes_per_word), dtype=mx.uint32
-        )
-
-        for i in range(codes_per_word):
-            mask = mx.array(
-                ((1 << bits) - 1) << (i * bits), dtype=mx.uint32
-            )
-            shift = mx.array(i * bits, dtype=mx.uint32)
-            codes[:, i] = (packed_view[:, 0] & mask) >> shift
+        # Vectorized extraction of all code slots in one broadcasted op.
+        packed_view = packed[:required_words].reshape(-1, 1).astype(mx.uint32)
+        shifts = (mx.arange(codes_per_word, dtype=mx.uint32) * bits).reshape(1, -1)
+        mask = mx.array((1 << bits) - 1, dtype=mx.uint32)
+        codes = (packed_view >> shifts) & mask
 
         return codes.reshape(-1)[:n_values]

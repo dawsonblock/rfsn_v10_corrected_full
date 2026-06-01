@@ -20,7 +20,7 @@ from __future__ import annotations
 import math
 from typing import Literal, Optional, Tuple
 
-import mlx.core as mx
+from .compat import mx
 
 from .memory_guard import MemoryGuard
 

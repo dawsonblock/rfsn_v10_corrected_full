@@ -4,7 +4,8 @@ RFSN v10 - Attention Correctness Tests.
 """
 
 import pytest
-import mlx.core as mx
+
+mx = pytest.importorskip("mlx.core")
 
 from rfsn_v10.attention import AdaptiveBlockSparseAttention
 
