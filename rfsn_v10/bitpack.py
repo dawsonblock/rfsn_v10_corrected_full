@@ -9,6 +9,16 @@ from __future__ import annotations
 
 import mlx.core as mx
 
+# Version-safe float dtype detection
+FLOAT_DTYPES = {
+    dt for dt in [
+        getattr(mx, "float16", None),
+        getattr(mx, "float32", None),
+        getattr(mx, "bfloat16", None),
+    ]
+    if dt is not None
+}
+
 
 class BitPackedQuantizer:
     """Pack and unpack integer codes into compact bit representations."""
@@ -35,7 +45,7 @@ class BitPackedQuantizer:
             raise ValueError("Cannot pack empty array")
 
         # Handle float inputs: check integer-valued
-        if x.dtype in (mx.float32, mx.float16, mx.bfloat16):
+        if x.dtype in FLOAT_DTYPES:
             x_rounded = mx.round(x)
             if not mx.all(x == x_rounded).item():
                 raise ValueError(

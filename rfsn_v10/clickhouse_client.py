@@ -9,10 +9,8 @@ from __future__ import annotations
 
 import json
 import time
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from urllib import request, parse, error
-
-import mlx.core as mx
 
 
 class ClickHouseClient:
@@ -226,20 +224,20 @@ class ClickHouseClient:
                     line_parts.append('NULL')
                 else:
                     line_parts.append(str(value))
-            lines.append(f"({', '.join(line_parts)})")
-        
-        if not lines:
-            return
-        
-        # Determine table based on event structure (simplified - in practice you'd route differently)
-        # For now, assume all events go to attention_events table
-        # In a real implementation, you'd have different tables for different event types
-        columns = ", ".join(events[0].keys())
-        values = "), (".join(lines)
-        query = f"""
-            INSERT INTO rfsn_attention_events ({columns}) 
-            VALUES {values}
-        """
+        lines.append(f"({', '.join(line_parts)})")
+    
+    if not lines:
+        return
+    
+    # Determine table based on event structure (simplified - in practice you'd route differently)
+    # For now, assume all events go to attention_events table
+    # In a real implementation, you'd have different tables for different event types
+    columns = ", ".join(events[0].keys())
+    values = ", ".join(lines)
+    query = f"""
+        INSERT INTO rfsn_attention_events ({columns}) 
+        VALUES {values}
+    """
         
         self._execute_query(query)
     

@@ -1,7 +1,7 @@
 """RFSN v10 Runtime Orchestrator.
 
 Integration layer between the KV cache manager, sparse attention engine,
-and telemetry subsystem.  Coordinates a single decode step by:
+memory guard, and telemetry subsystem. Coordinates a single decode step by:
 
 1. Validating input tensors
 2. Generating a composite cache key for KV retrieval/storage
@@ -17,12 +17,13 @@ import math
 import time
 import uuid
 from dataclasses import dataclass, field
-from typing import Optional, Dict, Any
-
-import mlx.core as mx
+from typing import Optional, Dict, Any, Callable
 
 from .bitpack import BitPackedQuantizer
+from .clickhouse_client import ClickHouseClient
 from .kv_manager import RFSNTurboQuantKVManager, TurboQuantKVCache
+from .adaptive_sparsity import AdaptiveSparsityController
+from .memory_guard import MemoryGuard
 from .attention import AdaptiveBlockSparseAttention
 
 
@@ -69,6 +70,8 @@ class RFSNRuntime:
         audit_mode: bool = False,
         top_k_ratio: float = 1.0,
         use_compressed_on_miss: bool = False,
+        adaptive_sparsity_controller: Optional[AdaptiveSparsityController] = None,
+        memory_guard: Optional[MemoryGuard] = None,
     ):
         self.kv_manager = kv_manager
         self.model_id = model_id
@@ -76,6 +79,8 @@ class RFSNRuntime:
         self.audit_mode = audit_mode
         self.top_k_ratio = top_k_ratio
         self.use_compressed_on_miss = use_compressed_on_miss
+        self.adaptive_sparsity_controller = adaptive_sparsity_controller
+        self.memory_guard = memory_guard
         self._telemetry_log: list[TelemetryEvent] = []
 
     @staticmethod
@@ -147,7 +152,11 @@ class RFSNRuntime:
         B, H, T_q, D = queries.shape
         T_k = keys.shape[2]  # keys is [B, H, T_k, D]
 
-        effective_top_k = top_k_ratio if top_k_ratio is not None else self.top_k_ratio
+        # Use adaptive sparsity controller if available, otherwise use fixed top_k_ratio
+        if self.adaptive_sparsity_controller is not None:
+            effective_top_k = self.adaptive_sparsity_controller.get_top_k_ratio()
+        else:
+            effective_top_k = self.top_k_ratio
 
         # 2. Generate composite cache key
         cache_key = self._make_cache_key(
@@ -164,6 +173,11 @@ class RFSNRuntime:
             format_version="rfsn_v10",
         )
 
+        # Store original keys/values for quantization error measurement in audit mode
+        if self.audit_mode:
+            self.original_keys = keys
+            self.original_values = values
+
         # 3-4. Try retrieve or store
         t_retrieve_start = time.monotonic()
         kv_result = self.kv_manager.retrieve(cache_key, out_dtype=keys.dtype)
@@ -172,8 +186,45 @@ class RFSNRuntime:
         kv_cache_hit = kv_result is not None
         if not kv_cache_hit:
             t_store_start = time.monotonic()
+            
+            # Check memory pressure before storing
+            if self.memory_guard is not None:
+                # Estimate the memory this cache entry will use
+                estimated_cache_bytes = self.kv_manager._estimate_cache_bytes(
+                    TurboQuantKVCache(
+                        k_packed=mx.array([0]),  # dummy values for estimation
+                        k_scales=mx.array([0]),
+                        v_packed=mx.array([0]),
+                        v_scales=mx.array([0]),
+                        shape=tuple(keys.shape),
+                        k_bits=self.kv_manager.k_bits,
+                        v_bits=self.kv_manager.v_bits,
+                        group_size=self.kv_manager.group_size,
+                        use_incoherent=self.kv_manager.use_incoherent,
+                        format_version="rfsn_v10",
+                        seed=0,
+                        k_n_values=keys.size // 32 * (32 // self.kv_manager.k_bits),  # approximate
+                        v_n_values=values.size // 32 * (32 // self.kv_manager.v_bits),  # approximate
+                        token_count=T_k,
+                    )
+                )
+                
+                # Enforce memory safety - this will trigger eviction if needed
+                bytes_freed = self.memory_guard.enforce_safety(estimated_cache_bytes)
+                if bytes_freed > 0:
+                    # Log that eviction occurred due to memory pressure
+                    pass  # Could add to telemetry if desired
+            
             self.kv_manager.store(cache_key, keys, values, T_k)
             store_latency_ms = (time.monotonic() - t_store_start) * 1000.0
+            
+            # Optionally retrieve compressed KV to verify storage worked correctly
+            if self.use_compressed_on_miss:
+                t_retrieve_check_start = time.monotonic()
+                kv_result = self.kv_manager.retrieve(cache_key, out_dtype=keys.dtype)
+                retrieve_check_latency_ms = (time.monotonic() - t_retrieve_check_start) * 1000.0
+                # Note: We're not adding the check latency to retrieve_latency_ms to avoid complicating metrics
+                # but we could if desired for more accurate telemetry
         else:
             store_latency_ms = 0.0
             keys, values = kv_result
@@ -236,14 +287,62 @@ class RFSNRuntime:
 
         attention_latency_ms = (time.monotonic() - t_attn_start) * 1000.0
 
-        # 8. Audit comparison
+        # 8. Audit comparison - split into quantization and sparsity errors
         audit_cosine = None
         audit_rel_mae = None
         audit_max_abs_error = None
-        if self.audit_mode and sparse_success and dense_success and sparse_output is not None:
-            audit_cosine = self._cosine_similarity(sparse_output, dense_output)
-            audit_rel_mae = self._rel_mae(sparse_output, dense_output)
-            audit_max_abs_error = self._max_abs_error(sparse_output, dense_output)
+        if self.audit_mode:
+            # Compute dense attention from original keys/values for quantization error
+            original_dense_output = mx.fast.scaled_dot_product_attention(
+                queries, self.original_keys, self.original_values,
+                scale=1.0 / math.sqrt(D),
+            )
+            mx.eval(original_dense_output)
+            
+            # Compute dense attention from working keys/values (after storage/retrieval)
+            working_dense_output = mx.fast.scaled_dot_product_attention(
+                queries, keys, values,
+                scale=1.0 / math.sqrt(D),
+            )
+            mx.eval(working_dense_output)
+            
+            # Quantization error: original dense vs working dense
+            quant_cosine = self._cosine_similarity(original_dense_output, working_dense_output)
+            quant_rel_mae = self._rel_mae(original_dense_output, working_dense_output)
+            quant_max_abs_error = self._max_abs_error(original_dense_output, working_dense_output)
+            
+            # Sparsity error: working dense vs working sparse (if sparse succeeded)
+            if sparse_success and sparse_output is not None:
+                sparse_cosine = self._cosine_similarity(working_dense_output, sparse_output)
+                sparse_rel_mae = self._rel_mae(working_dense_output, sparse_output)
+                sparse_max_abs_error = self._max_abs_error(working_dense_output, sparse_output)
+                
+                # For telemetry, we'll report the sparsity error as the main audit metrics
+                # (this maintains backward compatibility with existing telemetry expectations)
+                audit_cosine = sparse_cosine
+                audit_rel_mae = sparse_rel_mae
+                audit_max_abs_error = sparse_max_abs_error
+                
+                # We could also store quantization error in separate telemetry fields if needed
+                # For now, we're focusing on getting the basic split working
+            else:
+                # If sparse didn't succeed, fall back to comparing sparse vs dense outputs
+                # (this maintains existing behavior for backward compatibility)
+                if sparse_output is not None and dense_output is not None:
+                    audit_cosine = self._cosine_similarity(sparse_output, dense_output)
+                    audit_rel_mae = self._rel_mae(sparse_output, dense_output)
+                     audit_max_abs_error = self._max_abs_error(sparse_output, dense_output)
+        
+        # Update adaptive sparsity controller if available and in audit mode
+        if self.adaptive_sparsity_controller is not None and self.audit_mode:
+            self.adaptive_sparsity_controller.update(
+                audit_cosine=audit_cosine,
+                rel_mae=audit_rel_mae,
+                latency_ms=attention_latency_ms,
+                fallback_occurred=fallback_used,
+                sparse_success=sparse_success,
+                pattern=skill_pattern,
+            )
 
         total_latency_ms = (time.monotonic() - t_start) * 1000.0
 

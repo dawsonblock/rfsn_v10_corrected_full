@@ -44,6 +44,9 @@ class TurboQuantKVCache:
 
 class RFSNTurboQuantKVManager:
     """TurboQuant KV cache manager with grouped symmetric quantization."""
+    
+    # Cache for sign masks to avoid regenerating for same shape/seed/dtype
+    _sign_cache = {}
 
     def __init__(
         self,
@@ -87,11 +90,25 @@ class RFSNTurboQuantKVManager:
         Generates a deterministic mask of +1/-1 based on hash(index, seed),
         and multiplies element-wise. Calling twice with the same seed
         restores the original tensor.
+        
+        Includes caching to avoid regenerating sign masks for identical
+        shape/seed/dtype combinations.
         """
         shape = x.shape
         n = x.size
-
-        # Generate deterministic signs using hash to avoid global RNG mutation
+        
+        # Check cache first
+        cache_key = (shape, seed, x.dtype)
+        if cache_key in self._sign_cache:
+            signs = self._sign_cache[cache_key]
+            return x * signs
+        
+        # Generate signs using vectorized approach where possible
+        # Create indices array
+        indices = mx.arange(n, dtype=mx.uint32)
+        
+        # For now, we'll still use a loop but in a more MX-friendly way
+        # In a production implementation, this would be done in a custom kernel
         signs_list = []
         for i in range(n):
             # Create a deterministic hash based on index and seed
@@ -102,9 +119,13 @@ class RFSNTurboQuantKVManager:
             signs_list.append(sign_val)
         
         signs = mx.array(signs_list, dtype=x.dtype).reshape(shape)
+        
+        # Cache the result
+        # Limit cache size to prevent memory issues
+        if len(self._sign_cache) < 128:  # Reasonable limit
+            self._sign_cache[cache_key] = signs
+        
         return x * signs
-
-        return (x * signs.reshape(shape)).astype(x.dtype)
 
     # ------------------------------------------------------------------
     # Walsh-Hadamard transform (self-inverse when normalised)

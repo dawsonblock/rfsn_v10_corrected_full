@@ -161,17 +161,19 @@ class AsyncWriter:
     
     def _worker_loop(self) -> None:
         """Main worker loop: processes batches from the queue."""
-        while not self._stop_event.is_set():
+        while True:
             try:
-                # Get batch with timeout to allow checking stop_event
+                # Get batch with timeout to allow checking stop_event when queue is empty
                 batch = self._queue.get(timeout=0.1)
                 if batch is None:  # Sentinel value for shutdown
                     break
                     
                 self._write_batch_with_retries(batch)
                 self._queue.task_done()
-                
             except queue.Empty:
+                # If queue is empty and we're supposed to stop, exit
+                if self._stop_event.is_set():
+                    break
                 continue
             except Exception as e:
                 # Log but don't crash the worker thread
@@ -223,7 +225,11 @@ class AsyncWriter:
         if self._stop_event.is_set():
             return
             
-        self._stop_event.set()
+        # Send sentinel to wake up worker
+        try:
+            self._queue.put_nowait(None)
+        except queue.Full:
+            pass  # Will try again on next iteration
         
         # Cancel flush timer
         if self._flush_timer:
@@ -234,15 +240,12 @@ class AsyncWriter:
             if self._current_batch and self._current_batch.events:
                 self._flush_current_batch()
         
-        # Send sentinel to wake up worker
-        try:
-            self._queue.put_nowait(None)
-        except queue.Full:
-            pass  # Worker will check stop_event eventually
-        
-        # Wait for worker to finish
+        # Wait for worker to finish processing the sentinel and any queued items
         if self._worker_thread:
             self._worker_thread.join(timeout=timeout_sec)
+        
+        # Now set the stop event to prevent any further work
+        self._stop_event.set()
         
         # Close client
         self.client.close()
