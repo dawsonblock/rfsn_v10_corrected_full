@@ -129,12 +129,15 @@ def main():
     for shape in shapes:
         for k_bits, v_bits, use_inc in configs:
             r = benchmark_kv(shape, k_bits, v_bits, use_inc)
-            print(f"  {shape} k={k_bits}b v={v_bits}b incoherent={use_inc}: "
-                  f"store={r['store_latency_ms']:.2f}ms "
-                  f"retrieve={r['retrieve_latency_ms']:.2f}ms "
-                  f"ratio={r['compression_ratio']:.3f} "
+            line = (
+                f"  {shape} k={k_bits}b v={v_bits}b incoherent={use_inc}: "
+                f"store={r['store_latency_ms']:.2f}ms "
+                f"retrieve={r['retrieve_latency_ms']:.2f}ms "
+                f"ratio={r['compression_ratio']:.3f} "
                 f"k_cos={r['key_cosine_sim']:.4f} "
-                f"v_cos={r['value_cosine_sim']:.4f}")
+                f"v_cos={r['value_cosine_sim']:.4f}"
+            )
+            print(line)
             results["runs"].append(r)
 
     print("\n" + json.dumps(results, indent=2))

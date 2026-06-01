@@ -6,18 +6,15 @@ Measures full decode pipeline: KV store + sparse attention + audit.
 from __future__ import annotations
 
 import json
-import math
 import platform
 from statistics import median
 import tempfile
-import time
 from datetime import datetime, timezone
 
 import mlx.core as mx
 
 from rfsn_v10.kv_manager import RFSNTurboQuantKVManager
 from rfsn_v10.runtime import RFSNRuntime
-from rfsn_v10.attention import AdaptiveBlockSparseAttention
 
 
 def get_metadata() -> dict:

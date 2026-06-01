@@ -21,8 +21,8 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from benchmarks.benchmark_kv_cache import benchmark_kv
-from benchmarks.benchmark_end_to_end import benchmark_e2e
+from benchmarks.benchmark_kv_cache import benchmark_kv  # noqa: E402
+from benchmarks.benchmark_end_to_end import benchmark_e2e  # noqa: E402
 
 
 KV_SHAPES = [
