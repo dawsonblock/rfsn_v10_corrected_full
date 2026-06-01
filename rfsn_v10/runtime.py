@@ -213,8 +213,9 @@ class RFSNRuntime:
                 termination_reason = f"catastrophic_failure: {e}"
                 raise RuntimeError(f"All attention paths failed: {e}")
 
-            if sparse_success and attn_output is None:
-                attn_output = sparse_output
+        # Use sparse output if it succeeded and dense didn't override
+        if sparse_success and attn_output is None:
+            attn_output = sparse_output
 
         if attn_output is None:
             raise RuntimeError("No valid attention output produced")
