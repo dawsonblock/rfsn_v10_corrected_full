@@ -157,7 +157,7 @@ def main() -> None:
     parser.add_argument(
         "--iterations",
         type=int,
-        default=3,
+        default=5,
         help="Iterations per scenario",
     )
     args = parser.parse_args()

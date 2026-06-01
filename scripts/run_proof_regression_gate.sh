@@ -4,7 +4,7 @@ set -euo pipefail
 PROFILE=${4:-main10}
 OUTPUT_DIR=${1:-artifacts/proof/$PROFILE}
 BASELINE_DIR=${2:-benchmarks/proof_baselines/$PROFILE}
-ITERATIONS=${3:-3}
+ITERATIONS=${3:-5}
 
 python3 scripts/generate_proof_artifacts.py \
   --profile "$PROFILE" \
