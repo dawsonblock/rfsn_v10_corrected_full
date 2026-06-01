@@ -89,13 +89,15 @@ def test_agent_core_integration():
     assert verdict.success is True  # Note: FinalOutput doesn't have success field, but verdict does
     
     print("✓ All integration tests passed!")
-    return True
 
 if __name__ == "__main__":
+    import sys
     try:
         test_agent_core_integration()
         print("\n🎉 All Agent Core integration tests passed!")
+        sys.exit(0)
     except Exception as e:
         print(f"\n❌ Integration test failed: {e}")
         import traceback
         traceback.print_exc()
+        sys.exit(1)

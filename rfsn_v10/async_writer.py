@@ -14,8 +14,6 @@ from dataclasses import dataclass, field
 from typing import Optional, List, Callable
 from datetime import datetime, timezone
 
-import mlx.core as mx
-
 from .clickhouse_client import ClickHouseClient
 
 
@@ -224,12 +222,9 @@ class AsyncWriter:
         """
         if self._stop_event.is_set():
             return
-            
-        # Send sentinel to wake up worker
-        try:
-            self._queue.put_nowait(None)
-        except queue.Full:
-            pass  # Will try again on next iteration
+
+        deadline = time.monotonic() + timeout_sec
+        self._stop_event.set()
         
         # Cancel flush timer
         if self._flush_timer:
@@ -239,13 +234,22 @@ class AsyncWriter:
         with self._lock:
             if self._current_batch and self._current_batch.events:
                 self._flush_current_batch()
+
+        # Send sentinel to wake up worker after all pending batches are queued.
+        while True:
+            try:
+                self._queue.put_nowait(None)
+                break
+            except queue.Full:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+                time.sleep(min(0.05, remaining))
         
         # Wait for worker to finish processing the sentinel and any queued items
         if self._worker_thread:
-            self._worker_thread.join(timeout=timeout_sec)
-        
-        # Now set the stop event to prevent any further work
-        self._stop_event.set()
+            remaining = max(0.0, deadline - time.monotonic())
+            self._worker_thread.join(timeout=remaining)
         
         # Close client
         self.client.close()

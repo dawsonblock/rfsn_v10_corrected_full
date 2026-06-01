@@ -113,6 +113,7 @@ class ClickHouseClient:
                     audit_cosine Float64,
                     audit_rel_mae Float64,
                     audit_max_abs_error Float64,
+                    execution_mode String,
                     termination_reason String,
                     timestamp DateTime DEFAULT now()
                 ) ENGINE = MergeTree()
@@ -207,38 +208,12 @@ class ClickHouseClient:
         """
         if not events:
             return
-        
-        # Convert events to JSON lines format for ClickHouse
-        lines = []
-        for event in events:
-            # Flatten the event for insertion
-            line_parts = []
-            for key, value in event.items():
-                if isinstance(value, str):
-                    # Escape single quotes in strings
-                    escaped = value.replace("'", "\\'")
-                    line_parts.append(f"'{escaped}'")
-                elif isinstance(value, (bool,)):
-                    line_parts.append('1' if value else '0')
-                elif value is None:
-                    line_parts.append('NULL')
-                else:
-                    line_parts.append(str(value))
-        lines.append(f"({', '.join(line_parts)})")
-    
-    if not lines:
-        return
-    
-    # Determine table based on event structure (simplified - in practice you'd route differently)
-    # For now, assume all events go to attention_events table
-    # In a real implementation, you'd have different tables for different event types
-    columns = ", ".join(events[0].keys())
-    values = ", ".join(lines)
-    query = f"""
-        INSERT INTO rfsn_attention_events ({columns}) 
-        VALUES {values}
-    """
-        
+
+        payload = "\n".join(
+            json.dumps(event, default=str, separators=(",", ":"))
+            for event in events
+        )
+        query = "INSERT INTO rfsn_attention_events FORMAT JSONEachRow\n" + payload
         self._execute_query(query)
     
     def close(self) -> None:

@@ -11,6 +11,7 @@ from rfsn_v10.bitpack import BitPackedQuantizer
 from rfsn_v10.kv_manager import RFSNTurboQuantKVManager
 from rfsn_v10.attention import AdaptiveBlockSparseAttention
 from rfsn_v10.runtime import RFSNRuntime, TelemetryEvent
+import rfsn_v10.runtime as runtime_module
 
 
 @pytest.fixture
@@ -227,5 +228,57 @@ def test_runtime_dense_fallback_for_prefill(runtime):
     )
 
     assert output.shape == q.shape
-    # Dense fallback should succeed
-    assert info["dense_success"] is True or info["sparse_success"] is True
+    assert info["execution_mode"] == "dense_prefill"
+    assert info["dense_success"] is True
+    assert info["sparse_success"] is False
+
+
+def test_runtime_use_compressed_on_miss_assigns_retrieved_kv(kv_manager, monkeypatch):
+    runtime = RFSNRuntime(
+        kv_manager=kv_manager,
+        model_id="test_model",
+        block_size=64,
+        audit_mode=False,
+        top_k_ratio=0.5,
+        use_compressed_on_miss=True,
+    )
+
+    q = mx.random.normal((1, 4, 1, 64))
+    k = mx.random.normal((1, 4, 128, 64))
+    v = mx.random.normal((1, 4, 128, 64))
+    compressed_k = mx.zeros_like(k)
+    compressed_v = mx.zeros_like(v)
+
+    state = {"retrieve_calls": 0, "keys_seen": None, "values_seen": None}
+
+    def fake_retrieve(cache_key, out_dtype=None):
+        state["retrieve_calls"] += 1
+        if state["retrieve_calls"] == 1:
+            return None
+        return compressed_k, compressed_v
+
+    def fake_store(cache_key, keys, values, token_count):
+        return None
+
+    def fake_execute(queries, keys, values, top_k_ratio, block_size, kv_is_strictly_past):
+        state["keys_seen"] = keys
+        state["values_seen"] = values
+        return mx.zeros_like(queries), 1, "sparse_compacted"
+
+    monkeypatch.setattr(kv_manager, "retrieve", fake_retrieve)
+    monkeypatch.setattr(kv_manager, "store", fake_store)
+    monkeypatch.setattr(runtime_module.AdaptiveBlockSparseAttention, "execute", fake_execute)
+
+    _, info = runtime.execute_decode_step(
+        skill_pattern="compressed_miss",
+        layer_id="l0",
+        batch_id="b1",
+        queries=q,
+        keys=k,
+        values=v,
+    )
+
+    assert info["kv_cache_hit"] is False
+    assert state["retrieve_calls"] == 2
+    assert mx.allclose(state["keys_seen"], compressed_k).item()
+    assert mx.allclose(state["values_seen"], compressed_v).item()

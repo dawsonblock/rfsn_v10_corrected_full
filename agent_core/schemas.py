@@ -37,6 +37,9 @@ class TestResultStatus(Enum):
     ERROR = "error"
 
 
+TestResultStatus.__test__ = False
+
+
 @dataclass
 class TestResult:
     """Result of executing a single test."""
@@ -51,6 +54,9 @@ class TestResult:
     @property
     def passed(self) -> bool:
         return self.status == TestResultStatus.PASSED
+
+
+TestResult.__test__ = False
 
 
 @dataclass

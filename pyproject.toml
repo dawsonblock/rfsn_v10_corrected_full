@@ -18,7 +18,10 @@ dev = [
 ]
 
 [tool.setuptools.packages.find]
-include = ["rfsn_v10*", "agent_core*", "tools*"]
+include = ["rfsn_v10", "agent_core", "tools"]
+
+[tool.setuptools.exclude-package-data]
+"*" = ["*.pyc", "__pycache__/*"]
 
 [tool.pytest.ini_options]
 addopts = "-q"

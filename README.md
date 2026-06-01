@@ -1,13 +1,13 @@
-# RFSN v10 - Complete Implementation
+# RFSN v10 - Alpha Stabilization Build
 
 ## Overview
-RFSN v10 is a production-grade quantized KV-cache + decode-time sparse-attention runtime for MLX/Apple Silicon. It implements the full stack from bit-packing to runtime orchestration with telemetry.
+RFSN v10 is an alpha quantized KV-cache + decode-time sparse-attention runtime for MLX/Apple Silicon. This build focuses on compile correctness and behavior stabilization of the core runtime path.
 
 ## Components
 
 ### Core Modules
 - `bitpack.py` - Bit-packed quantizer (2-8 bit widths) with exact roundtrip guarantees
-- `kv_manager.py` - TurboQuant KV manager with grouped symmetric quantization, WHT preconditioning, and fused kernel
+- `kv_manager.py` - TurboQuant KV manager with grouped symmetric quantization and WHT preconditioning
 - `attention.py` - Adaptive block-sparse attention with decode-only sparse path and prefill dense fallback
 - `runtime.py` - Orchestrator integrating KV cache, sparse attention, audit mode, and telemetry
 - `adaptive_sparsity.py` - Controller that adjusts top_k_ratio based on real quality signals
@@ -42,7 +42,7 @@ RFSN v10 is a production-grade quantized KV-cache + decode-time sparse-attention
 - **Adaptive Sparsity**: Quality-based top_k_ratio adjustment using audit signals
 - **Memory Safety**: MLX memory monitoring with automatic eviction under pressure
 - **Telemetry**: Async writer with batching, retries, and ClickHouse backend
-- **Testing**: 198 deterministic tests covering all components
+- **Testing**: Deterministic unit coverage across core components
 - **Benchmarks**: Performance measurements with hardware/software metadata
 
 ## Requirements
@@ -135,7 +135,7 @@ python3 scripts/profile_memory.py
 ```
 
 ## Design Notes
-- All tests are deterministic and run in <2 seconds on Apple Silicon
+- Tests are deterministic; wall-clock runtime depends on hardware and MLX availability
 - Sparse attention is decode-only (T_q=1) with prefill dense fallback
 - KV cache uses grouped symmetric quantization with WHT preconditioning
 - Telemetry is written asynchronously to prevent inference stalls
@@ -143,14 +143,13 @@ python3 scripts/profile_memory.py
 - Benchmarks include hardware/software metadata for reproducibility
 
 ## Implementation Status
-✅ All core components implemented and tested
-✅ 198/198 tests passing
-✅ Benchmarks scripts ready
-✅ Memory safety mechanisms in place
-✅ Telemetry layer implemented
+✅ Core modules compile and integrate in alpha scope
+✅ Benchmarks scripts are present
+✅ Telemetry layer is implemented with batched writer support
+⚠ MLX-dependent quality and performance validation is environment-dependent
+⚠ Production hardening and end-to-end real-model validation remain in progress
 ❌ Disk persistence (planned for future)
 ❌ Partial dequantization (optional optimization)
-❌ Real LLM validation (requires model download)
 
 ## Next Steps
 1. Run benchmarks to get performance numbers on your hardware

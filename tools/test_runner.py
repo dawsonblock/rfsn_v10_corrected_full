@@ -40,6 +40,9 @@ class TestSuiteResult:
         return self.failed_tests == 0 and self.error_tests == 0
 
 
+TestSuiteResult.__test__ = False
+
+
 class TestRunner:
     """
     Utilities for running tests and parsing results.
@@ -50,6 +53,8 @@ class TestRunner:
     - Compile/check syntax (various languages)
     - Custom test commands
     """
+
+    __test__ = False
     
     def __init__(self, workspace_root: Optional[Path] = None):
         self.workspace_root = workspace_root or Path.cwd()

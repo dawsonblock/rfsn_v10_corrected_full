@@ -19,6 +19,8 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Optional, Dict, Any, Callable
 
+import mlx.core as mx
+
 from .bitpack import BitPackedQuantizer
 from .clickhouse_client import ClickHouseClient
 from .kv_manager import RFSNTurboQuantKVManager, TurboQuantKVCache
@@ -152,8 +154,10 @@ class RFSNRuntime:
         B, H, T_q, D = queries.shape
         T_k = keys.shape[2]  # keys is [B, H, T_k, D]
 
-        # Use adaptive sparsity controller if available, otherwise use fixed top_k_ratio
-        if self.adaptive_sparsity_controller is not None:
+        # Per-call override has highest priority, then adaptive controller, then default.
+        if top_k_ratio is not None:
+            effective_top_k = top_k_ratio
+        elif self.adaptive_sparsity_controller is not None:
             effective_top_k = self.adaptive_sparsity_controller.get_top_k_ratio()
         else:
             effective_top_k = self.top_k_ratio
@@ -223,6 +227,8 @@ class RFSNRuntime:
                 t_retrieve_check_start = time.monotonic()
                 kv_result = self.kv_manager.retrieve(cache_key, out_dtype=keys.dtype)
                 retrieve_check_latency_ms = (time.monotonic() - t_retrieve_check_start) * 1000.0
+                if kv_result is not None:
+                    keys, values = kv_result
                 # Note: We're not adding the check latency to retrieve_latency_ms to avoid complicating metrics
                 # but we could if desired for more accurate telemetry
         else:
@@ -259,7 +265,8 @@ class RFSNRuntime:
         except Exception as e:
             termination_reason = f"sparse_failed: {e}"
 
-        if not sparse_success or self.audit_mode:
+        already_dense_output = execution_mode.startswith("dense_")
+        if ((not sparse_success and not already_dense_output) or self.audit_mode):
             # 6. Dense fallback / audit
             try:
                 dense_output = mx.fast.scaled_dot_product_attention(
@@ -331,7 +338,7 @@ class RFSNRuntime:
                 if sparse_output is not None and dense_output is not None:
                     audit_cosine = self._cosine_similarity(sparse_output, dense_output)
                     audit_rel_mae = self._rel_mae(sparse_output, dense_output)
-                     audit_max_abs_error = self._max_abs_error(sparse_output, dense_output)
+                    audit_max_abs_error = self._max_abs_error(sparse_output, dense_output)
         
         # Update adaptive sparsity controller if available and in audit mode
         if self.adaptive_sparsity_controller is not None and self.audit_mode:
