@@ -262,13 +262,13 @@ def test_reconstruct_wht_matches_discrete_math(
         f"Packed-dequant-WHT reconstruction diverges from sequential math "
         f"(bits={bits}, use_incoherent={use_incoherent}). diff={diff}"
     )
-def test_fused_rejects_bad_packed_size(
+def test_reconstruct_packed_dequant_wht_rejects_bad_packed_size(
     kv_manager: RFSNTurboQuantKVManager,
 ) -> None:
     packed = mx.array([0], dtype=mx.uint32)
     scales = mx.ones((2,), dtype=mx.float32)
     with pytest.raises(ValueError, match="Packed buffer too small"):
-        kv_manager._fused_packed_dequant_wht(
+        kv_manager._reconstruct_packed_dequant_wht(
             packed=packed,
             scales=scales,
             n_values=100,
@@ -278,13 +278,13 @@ def test_fused_rejects_bad_packed_size(
             use_incoherent=False,
             out_dtype=mx.float32,
         )
-def test_fused_rejects_bad_scale_count(
+def test_reconstruct_packed_dequant_wht_rejects_bad_scale_count(
     kv_manager: RFSNTurboQuantKVManager,
 ) -> None:
     q = mx.array([0, 1, 2, 3, 4], dtype=mx.uint32)
     packed, n = BitPackedQuantizer.pack(q, 3)
     with pytest.raises(ValueError, match="Scale count mismatch"):
-        kv_manager._fused_packed_dequant_wht(
+        kv_manager._reconstruct_packed_dequant_wht(
             packed=packed,
             scales=mx.array([], dtype=mx.float32),
             n_values=n,
@@ -294,14 +294,14 @@ def test_fused_rejects_bad_scale_count(
             use_incoherent=False,
             out_dtype=mx.float32,
         )
-def test_fused_rejects_bad_shape_product(
+def test_reconstruct_packed_dequant_wht_rejects_bad_shape_product(
     kv_manager: RFSNTurboQuantKVManager,
 ) -> None:
     q = mx.array([0, 1, 2, 3, 4], dtype=mx.uint32)
     packed, n = BitPackedQuantizer.pack(q, 3)
     scales = mx.ones((1,), dtype=mx.float32)
     with pytest.raises(ValueError, match="Shape product"):
-        kv_manager._fused_packed_dequant_wht(
+        kv_manager._reconstruct_packed_dequant_wht(
             packed=packed,
             scales=scales,
             n_values=n,
@@ -311,14 +311,14 @@ def test_fused_rejects_bad_shape_product(
             use_incoherent=False,
             out_dtype=mx.float32,
         )
-def test_fused_rejects_bad_out_dtype(
+def test_reconstruct_packed_dequant_wht_rejects_bad_out_dtype(
     kv_manager: RFSNTurboQuantKVManager,
 ) -> None:
     q = mx.array([0, 1, 2, 3, 4], dtype=mx.uint32)
     packed, n = BitPackedQuantizer.pack(q, 3)
     scales = mx.ones((1,), dtype=mx.float32)
     with pytest.raises(ValueError, match="out_dtype"):
-        kv_manager._fused_packed_dequant_wht(
+        kv_manager._reconstruct_packed_dequant_wht(
             packed=packed,
             scales=scales,
             n_values=n,
