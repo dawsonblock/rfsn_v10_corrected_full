@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import platform
+from statistics import median
 import time
 from datetime import datetime, timezone
 
@@ -94,8 +95,8 @@ def benchmark_kv(shape, k_bits, v_bits, use_incoherent, iterations=5):
             "k_bits": k_bits,
             "v_bits": v_bits,
             "use_incoherent": use_incoherent,
-            "store_latency_ms": (sum(store_times) / len(store_times)) * 1000.0,
-            "retrieve_latency_ms": (sum(retrieve_times) / len(retrieve_times)) * 1000.0,
+            "store_latency_ms": float(median(store_times) * 1000.0),
+            "retrieve_latency_ms": float(median(retrieve_times) * 1000.0),
             "original_bytes": original_bytes,
             "packed_bytes": packed_bytes,
             "compression_ratio": packed_bytes / original_bytes,

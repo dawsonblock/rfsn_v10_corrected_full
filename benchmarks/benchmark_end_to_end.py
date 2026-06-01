@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import math
 import platform
+from statistics import median
 import tempfile
 import time
 from datetime import datetime, timezone
@@ -55,17 +56,38 @@ def benchmark_e2e(
         v = mx.random.normal(shape_kv)
         mx.eval(q, k, v)
 
-        # First run is cache-miss path by construction.
-        _, miss_info = runtime.execute_decode_step(
-            skill_pattern="bench", layer_id="l0", batch_id="b1",
-            queries=q, keys=k, values=v, top_k_ratio=top_k_ratio,
-        )
+        # Measure cache-miss latency across distinct batch_ids to reduce noise.
+        miss_timings = []
+        miss_info = None
+        for i in range(iterations):
+            _, miss_info = runtime.execute_decode_step(
+                skill_pattern="bench",
+                layer_id="l0",
+                batch_id=f"b_miss_{i}",
+                queries=q,
+                keys=k,
+                values=v,
+                top_k_ratio=top_k_ratio,
+            )
+            miss_timings.append(miss_info["total_latency_ms"])
 
         hit_timings = []
         hit_infos = []
+
+        # Seed a dedicated cache key for hit-path timing.
+        runtime.execute_decode_step(
+            skill_pattern="bench",
+            layer_id="l0",
+            batch_id="b_hit",
+            queries=q,
+            keys=k,
+            values=v,
+            top_k_ratio=top_k_ratio,
+        )
+
         for _ in range(iterations):
             _, info = runtime.execute_decode_step(
-                skill_pattern="bench", layer_id="l0", batch_id="b1",
+                skill_pattern="bench", layer_id="l0", batch_id="b_hit",
                 queries=q, keys=k, values=v, top_k_ratio=top_k_ratio,
             )
             hit_timings.append(info["total_latency_ms"])
@@ -81,8 +103,8 @@ def benchmark_e2e(
             "v_bits": v_bits,
             "top_k_ratio": top_k_ratio,
             "use_compressed_on_miss": use_compressed_on_miss,
-            "cache_miss_total_latency_ms": miss_info["total_latency_ms"],
-            "cache_hit_total_latency_ms": sum(hit_timings) / len(hit_timings),
+            "cache_miss_total_latency_ms": float(median(miss_timings)),
+            "cache_hit_total_latency_ms": float(median(hit_timings)),
             "cache_hit_execution_mode": hit_infos[-1]["execution_mode"] if hit_infos else None,
             "kv_cache_hit": latest.kv_cache_hit if latest else None,
             "audit_cosine": latest.audit_cosine if latest else None,
