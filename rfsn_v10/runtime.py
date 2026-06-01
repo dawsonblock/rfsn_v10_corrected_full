@@ -76,6 +76,7 @@ class RFSNRuntime:
         audit_mode: bool = False,
         top_k_ratio: float = 1.0,
         use_compressed_on_miss: bool = False,
+        use_custom_kernel: Optional[bool] = None,
         adaptive_sparsity_controller: Optional[AdaptiveSparsityController] = None,
         memory_guard: Optional[MemoryGuard] = None,
     ):
@@ -85,6 +86,8 @@ class RFSNRuntime:
         self.audit_mode = audit_mode
         self.top_k_ratio = top_k_ratio
         self.use_compressed_on_miss = use_compressed_on_miss
+        if use_custom_kernel is not None:
+            self.kv_manager.use_custom_kernel = bool(use_custom_kernel)
         self.adaptive_sparsity_controller = adaptive_sparsity_controller
         self.memory_guard = memory_guard
         self._telemetry_log: list[TelemetryEvent] = []
@@ -178,6 +181,14 @@ class RFSNRuntime:
         else:
             effective_top_k = self.top_k_ratio
 
+        quantized_enabled = True
+        sparse_enabled = True
+        if self.memory_guard is not None:
+            quantized_enabled = not self.memory_guard.should_disable_quantized()
+            sparse_enabled = not self.memory_guard.should_disable_sparse()
+
+        effective_attention_top_k = effective_top_k if sparse_enabled else 1.0
+
         # 2. Generate composite cache key
         cache_key = self._make_cache_key(
             model_id=self.model_id,
@@ -200,44 +211,40 @@ class RFSNRuntime:
             self.original_values = values
 
         # 3-4. Try retrieve or store
-        t_retrieve_start = time.monotonic()
-        kv_result = self.kv_manager.retrieve(cache_key, out_dtype=keys.dtype)
-        retrieve_latency_ms = (time.monotonic() - t_retrieve_start) * 1000.0
+        retrieve_latency_ms = 0.0
+        store_latency_ms = 0.0
+        kv_cache_hit = False
+        if quantized_enabled:
+            t_retrieve_start = time.monotonic()
+            kv_result = self.kv_manager.retrieve(cache_key, out_dtype=keys.dtype)
+            retrieve_latency_ms = (time.monotonic() - t_retrieve_start) * 1000.0
 
-        kv_cache_hit = kv_result is not None
-        if not kv_cache_hit:
-            t_store_start = time.monotonic()
-            
-            # Check memory pressure before storing
-            if self.memory_guard is not None:
-                estimated_cache_bytes = self.kv_manager.estimate_compressed_bytes_for_shape(
-                    shape=tuple(keys.shape),
-                    k_bits=self.kv_manager.k_bits,
-                    v_bits=self.kv_manager.v_bits,
-                    group_size=self.kv_manager.group_size,
-                )
-                
-                # Enforce memory safety - this will trigger eviction if needed
-                bytes_freed = self.memory_guard.enforce_safety(estimated_cache_bytes)
-                if bytes_freed > 0:
-                    # Log that eviction occurred due to memory pressure
-                    pass  # Could add to telemetry if desired
-            
-            self.kv_manager.store(cache_key, keys, values, T_k)
-            store_latency_ms = (time.monotonic() - t_store_start) * 1000.0
-            
-            # Optionally retrieve compressed KV to verify storage worked correctly
-            if self.use_compressed_on_miss:
-                t_retrieve_check_start = time.monotonic()
-                kv_result = self.kv_manager.retrieve(cache_key, out_dtype=keys.dtype)
-                retrieve_check_latency_ms = (time.monotonic() - t_retrieve_check_start) * 1000.0
-                if kv_result is not None:
-                    keys, values = kv_result
-                # Note: We're not adding the check latency to retrieve_latency_ms to avoid complicating metrics
-                # but we could if desired for more accurate telemetry
+            kv_cache_hit = kv_result is not None
+            if not kv_cache_hit:
+                t_store_start = time.monotonic()
+
+                if self.memory_guard is not None:
+                    estimated_cache_bytes = self.kv_manager.estimate_compressed_bytes_for_shape(
+                        shape=tuple(keys.shape),
+                        k_bits=self.kv_manager.k_bits,
+                        v_bits=self.kv_manager.v_bits,
+                        group_size=self.kv_manager.group_size,
+                    )
+                    self.memory_guard.enforce_safety(estimated_cache_bytes)
+
+                self.kv_manager.store(cache_key, keys, values, T_k)
+                store_latency_ms = (time.monotonic() - t_store_start) * 1000.0
+
+                if self.use_compressed_on_miss:
+                    t_retrieve_check_start = time.monotonic()
+                    kv_result = self.kv_manager.retrieve(cache_key, out_dtype=keys.dtype)
+                    retrieve_latency_ms += (time.monotonic() - t_retrieve_check_start) * 1000.0
+                    if kv_result is not None:
+                        keys, values = kv_result
+            else:
+                keys, values = kv_result
         else:
-            store_latency_ms = 0.0
-            keys, values = kv_result
+            self.kv_manager.last_reconstruction_kernel = "quantized_disabled"
 
         # 5. Try sparse attention
         t_attn_start = time.monotonic()
@@ -253,7 +260,7 @@ class RFSNRuntime:
         try:
             sparse_output, num_active_blocks, execution_mode = AdaptiveBlockSparseAttention.execute(
                 queries, keys, values,
-                top_k_ratio=effective_top_k,
+                top_k_ratio=effective_attention_top_k,
                 block_size=self.block_size,
                 kv_is_strictly_past=True,
                 memory_guard=self.memory_guard,
@@ -408,6 +415,9 @@ class RFSNRuntime:
         return attn_output, {
             "task_id": task_id,
             "kv_cache_hit": kv_cache_hit,
+            "kv_reconstruction_kernel": self.kv_manager.last_reconstruction_kernel,
+            "quantized_enabled": quantized_enabled,
+            "sparse_enabled": sparse_enabled,
             "sparse_success": sparse_success,
             "dense_success": dense_success,
             "fallback_used": fallback_used,

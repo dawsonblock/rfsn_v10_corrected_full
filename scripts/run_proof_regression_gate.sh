@@ -1,15 +1,21 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-OUTPUT_DIR=${1:-artifacts/proof/main8_1}
-BASELINE_DIR=${2:-benchmarks/proof_baselines/main8_1}
+PROFILE=${4:-main8_1}
+OUTPUT_DIR=${1:-artifacts/proof/$PROFILE}
+BASELINE_DIR=${2:-benchmarks/proof_baselines/$PROFILE}
 ITERATIONS=${3:-3}
 
 python3 scripts/generate_proof_artifacts.py \
   --output-dir "$OUTPUT_DIR" \
   --iterations "$ITERATIONS"
 
+python3 scripts/generate_plots.py \
+  --input-dir "$OUTPUT_DIR" \
+  --output-dir results/plots
+
 python3 scripts/check_proof_regression.py \
+  --profile "$PROFILE" \
   --baseline-dir "$BASELINE_DIR" \
   --current-dir "$OUTPUT_DIR" \
   --strict-missing \

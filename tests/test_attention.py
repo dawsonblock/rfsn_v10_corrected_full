@@ -88,6 +88,47 @@ def test_sparse_attention_dense_fallback_when_kv_not_strictly_past():
     assert mode == "dense_not_strictly_past"
 
 
+def test_sparse_attention_reserves_recent_and_sink_blocks_with_budget():
+    # T_k=512 => 8 blocks; top_k_ratio=0.25 => budget 2 blocks
+    q = mx.random.normal((1, 4, 1, 64))
+    k = mx.random.normal((1, 4, 512, 64))
+    v = mx.random.normal((1, 4, 512, 64))
+
+    out, active, mode = AdaptiveBlockSparseAttention.execute(
+        q,
+        k,
+        v,
+        top_k_ratio=0.25,
+        reserved_sink_blocks=1,
+        reserved_recent_blocks=1,
+    )
+    mx.eval(out)
+
+    assert out.shape == q.shape
+    assert mode == "sparse_compacted"
+    assert active == 2
+
+
+def test_sparse_attention_reservation_counts_clip_safely():
+    q = mx.random.normal((1, 4, 1, 64))
+    k = mx.random.normal((1, 4, 256, 64))  # 4 blocks
+    v = mx.random.normal((1, 4, 256, 64))
+
+    out, active, mode = AdaptiveBlockSparseAttention.execute(
+        q,
+        k,
+        v,
+        top_k_ratio=0.5,  # budget 2 blocks
+        reserved_sink_blocks=10,
+        reserved_recent_blocks=10,
+    )
+    mx.eval(out)
+
+    assert out.shape == q.shape
+    assert mode == "sparse_compacted"
+    assert active == 2
+
+
 def test_sparse_attention_rejects_bad_rank():
     q = mx.random.normal((1, 4, 64))
     k = mx.random.normal((1, 4, 512, 64))

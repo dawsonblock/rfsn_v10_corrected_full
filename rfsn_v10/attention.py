@@ -137,6 +137,8 @@ class AdaptiveBlockSparseAttention:
         block_size: int = 64,
         kv_is_strictly_past: bool = True,
         consensus_mix: float = 0.7,
+        reserved_sink_blocks: int = 0,
+        reserved_recent_blocks: int = 0,
         memory_guard: Optional[MemoryGuard] = None,
     ) -> Tuple[mx.array, int, ExecutionMode]:
         """
@@ -152,6 +154,8 @@ class AdaptiveBlockSparseAttention:
                 If false, dense fallback is used.
             consensus_mix: Blend between max-head recall and mean-head consensus.
                 1.0 = pure max across heads; 0.0 = pure mean across heads.
+            reserved_sink_blocks: Number of earliest blocks to always retain.
+            reserved_recent_blocks: Number of most recent blocks to always retain.
 
         Returns:
             (attention_output, num_active_blocks, execution_mode)
@@ -238,8 +242,41 @@ class AdaptiveBlockSparseAttention:
         unordered_topk_idx = mx.argpartition(global_block_scores, kth, axis=-1)[..., kth:]
         topk_block_idx = mx.sort(unordered_topk_idx, axis=-1)  # chronological order
 
+        sink_count = max(0, int(reserved_sink_blocks))
+        recent_count = max(0, int(reserved_recent_blocks))
+        if sink_count > 0 or recent_count > 0:
+            selected_blocks_per_batch: list[list[int]] = []
+            all_indices = list(range(num_blocks))
+
+            for b in range(B):
+                score_selected = [int(v.item()) for v in topk_block_idx[b, 0]]
+
+                reserved: list[int] = []
+                for offset in range(recent_count):
+                    idx = num_blocks - 1 - offset
+                    if idx >= 0 and idx not in reserved:
+                        reserved.append(idx)
+                for idx in range(min(sink_count, num_blocks)):
+                    if idx not in reserved:
+                        reserved.append(idx)
+
+                ordered: list[int] = []
+                seen: set[int] = set()
+                for idx in reserved + score_selected + all_indices:
+                    if idx not in seen:
+                        seen.add(idx)
+                        ordered.append(idx)
+                    if len(ordered) >= k_active:
+                        break
+
+                selected_blocks_per_batch.append(sorted(ordered[:k_active]))
+
+            topk_block_idx = mx.array(selected_blocks_per_batch, dtype=mx.uint32).reshape(B, k_active)
+        else:
+            topk_block_idx = topk_block_idx.reshape(B, k_active).astype(mx.uint32)
+
         offsets = mx.arange(block_size, dtype=mx.uint32)
-        base_indices = topk_block_idx.reshape(B, k_active, 1).astype(mx.uint32) * block_size
+        base_indices = topk_block_idx.reshape(B, k_active, 1) * block_size
         token_indices = (base_indices + offsets).reshape(B, -1)
 
         # Padding-safe compaction:

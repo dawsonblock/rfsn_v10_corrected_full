@@ -18,13 +18,18 @@ from tools.proof_regression import compare_proof_dirs, load_thresholds_file, rep
 def main() -> None:
     parser = argparse.ArgumentParser(description="Proof regression gate")
     parser.add_argument(
+        "--profile",
+        default="main8_1",
+        help="Proof profile name used to derive default directories",
+    )
+    parser.add_argument(
         "--baseline-dir",
-        default="benchmarks/proof_baselines/main8_1",
+        default="",
         help="Directory with baseline proof artifacts",
     )
     parser.add_argument(
         "--current-dir",
-        default="artifacts/proof/main8_1",
+        default="",
         help="Directory with current proof artifacts",
     )
     parser.add_argument(
@@ -50,8 +55,8 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    baseline_dir = Path(args.baseline_dir)
-    current_dir = Path(args.current_dir)
+    baseline_dir = Path(args.baseline_dir) if args.baseline_dir else Path(f"benchmarks/proof_baselines/{args.profile}")
+    current_dir = Path(args.current_dir) if args.current_dir else Path(f"artifacts/proof/{args.profile}")
     thresholds = load_thresholds_file(Path(args.thresholds_file) if args.thresholds_file else None)
 
     report = compare_proof_dirs(

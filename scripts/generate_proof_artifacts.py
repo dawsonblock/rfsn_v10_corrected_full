@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate Main 8.1 proof artifacts for benchmark scenarios.
+"""Generate proof artifacts for benchmark scenarios.
 
 Outputs:
 - kv_cache_runs.json
@@ -83,7 +83,7 @@ def run_e2e_benchmarks(iterations: int) -> dict:
     return {"metadata": _metadata(), "iterations": iterations, "runs": runs}
 
 
-def write_summary(output_dir: Path, kv_payload: dict, e2e_payload: dict) -> None:
+def write_summary(output_dir: Path, kv_payload: dict, e2e_payload: dict, profile: str) -> None:
     kv_runs = kv_payload["runs"]
     e2e_runs = e2e_payload["runs"]
 
@@ -92,7 +92,7 @@ def write_summary(output_dir: Path, kv_payload: dict, e2e_payload: dict) -> None
     best_dense = next((r for r in e2e_runs if r["scenario"] == "dense_decode_path"), None)
 
     lines = [
-        "# Main 8.1 Proof Summary",
+        f"# {profile} Proof Summary",
         "",
         f"Generated: {_metadata()['timestamp']}",
         "",
@@ -143,10 +143,15 @@ def write_summary(output_dir: Path, kv_payload: dict, e2e_payload: dict) -> None
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Generate Main 8.1 proof artifacts")
+    parser = argparse.ArgumentParser(description="Generate proof artifacts")
+    parser.add_argument(
+        "--profile",
+        default="main8_1",
+        help="Proof profile name for output labeling/default paths",
+    )
     parser.add_argument(
         "--output-dir",
-        default="artifacts/proof/main8_1",
+        default="",
         help="Directory where JSON/Markdown artifacts are written",
     )
     parser.add_argument(
@@ -157,7 +162,7 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    output_dir = Path(args.output_dir)
+    output_dir = Path(args.output_dir) if args.output_dir else Path(f"artifacts/proof/{args.profile}")
     output_dir.mkdir(parents=True, exist_ok=True)
 
     kv_payload = run_kv_benchmarks(iterations=args.iterations)
@@ -169,7 +174,7 @@ def main() -> None:
     (output_dir / "e2e_scenarios.json").write_text(
         json.dumps(e2e_payload, indent=2) + "\n", encoding="utf-8"
     )
-    write_summary(output_dir, kv_payload, e2e_payload)
+    write_summary(output_dir, kv_payload, e2e_payload, profile=args.profile)
 
     print(f"Wrote proof artifacts to {output_dir}")
 

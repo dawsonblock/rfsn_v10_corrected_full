@@ -18,6 +18,7 @@ from typing import Optional, Tuple
 from .compat import mx
 
 from .bitpack import BitPackedQuantizer
+from .kernels import KernelRouteError, custom_kernel_supported, reconstruct_packed_dequant_wht_custom
 
 
 @dataclass
@@ -63,6 +64,7 @@ class RFSNTurboQuantKVManager:
         use_wht: Optional[bool] = None,
         use_incoherent_signs: Optional[bool] = None,
         use_incoherent: Optional[bool] = None,
+        use_custom_kernel: bool = True,
         max_memory_gb: float = 1.0,
         max_pinned_memory_gb: float = 0.5,
         cache_dir: str = ".rfsn_cache",
@@ -90,6 +92,7 @@ class RFSNTurboQuantKVManager:
         self.v_bits = v_bits
         self.use_wht = bool(use_wht)
         self.use_incoherent_signs = bool(use_incoherent_signs)
+        self.use_custom_kernel = bool(use_custom_kernel)
         self.max_memory_gb = max_memory_gb
         self.max_pinned_memory_gb = max_pinned_memory_gb
         self.cache_dir = Path(cache_dir)
@@ -99,6 +102,7 @@ class RFSNTurboQuantKVManager:
         self.active_caches: dict[str, TurboQuantKVCache] = {}
         self._total_estimated_bytes = 0
         self._pinned_bytes = 0
+        self.last_reconstruction_kernel = "sequential"
         self.cache_dir.mkdir(parents=True, exist_ok=True)
 
     @property
@@ -336,9 +340,10 @@ class RFSNTurboQuantKVManager:
         shape: tuple,
         bits: int,
         seed: int,
-        use_wht: bool,
-        use_incoherent_signs: bool,
-        out_dtype: mx.Dtype,
+        use_wht: Optional[bool] = None,
+        use_incoherent_signs: Optional[bool] = None,
+        out_dtype: mx.Dtype = mx.float32,
+        use_incoherent: Optional[bool] = None,
     ) -> mx.array:
         """Packed-dequant-WHT reconstruction path: unpack → dequant → reshape → WHT → optional signs.
 
@@ -379,6 +384,14 @@ class RFSNTurboQuantKVManager:
         # Reshape
         x = x.reshape(shape)
 
+        if use_wht is None and use_incoherent_signs is None:
+            legacy = False if use_incoherent is None else bool(use_incoherent)
+            use_wht = True
+            use_incoherent_signs = legacy
+        else:
+            use_wht = bool(use_wht)
+            use_incoherent_signs = bool(use_incoherent_signs)
+
         if use_wht:
             x = self._apply_wht_pretransform(x)
 
@@ -386,6 +399,59 @@ class RFSNTurboQuantKVManager:
             x = self._apply_signs_on_the_fly(x, seed)
 
         return x.astype(out_dtype)
+
+    def _reconstruct_cached_tensor(
+        self,
+        packed: mx.array,
+        scales: mx.array,
+        n_values: int,
+        shape: tuple,
+        bits: int,
+        seed: int,
+        use_wht: bool,
+        use_incoherent_signs: bool,
+        out_dtype: mx.Dtype,
+    ) -> mx.array:
+        if self.use_custom_kernel:
+            supported, reason = custom_kernel_supported(
+                shape=shape,
+                out_dtype=out_dtype,
+                use_wht=use_wht,
+                use_incoherent_signs=use_incoherent_signs,
+            )
+            if supported:
+                try:
+                    self.last_reconstruction_kernel = "custom"
+                    return reconstruct_packed_dequant_wht_custom(
+                        packed=packed,
+                        scales=scales,
+                        n_values=n_values,
+                        shape=shape,
+                        bits=bits,
+                        seed=seed,
+                        out_dtype=out_dtype,
+                        dequantize_fn=self._dequantize_unsigned,
+                        wht_fn=self._apply_wht_pretransform,
+                        signs_fn=self._apply_signs_on_the_fly,
+                    )
+                except KernelRouteError:
+                    self.last_reconstruction_kernel = "sequential_fallback"
+            else:
+                self.last_reconstruction_kernel = f"sequential_fallback:{reason}"
+        else:
+            self.last_reconstruction_kernel = "sequential"
+
+        return self._reconstruct_packed_dequant_wht(
+            packed=packed,
+            scales=scales,
+            n_values=n_values,
+            shape=shape,
+            bits=bits,
+            seed=seed,
+            use_wht=use_wht,
+            use_incoherent_signs=use_incoherent_signs,
+            out_dtype=out_dtype,
+        )
 
     # ------------------------------------------------------------------
     # Memory estimation
@@ -572,35 +638,31 @@ class RFSNTurboQuantKVManager:
                 f"current group_size={self.group_size}"
             )
 
-        # Dequantize K
-        k_codes = BitPackedQuantizer.unpack(
-            cache.k_packed, cache.k_n_values, cache.k_bits
+        k_rec = self._reconstruct_cached_tensor(
+            packed=cache.k_packed,
+            scales=cache.k_scales,
+            n_values=cache.k_n_values,
+            shape=cache.shape,
+            bits=cache.k_bits,
+            seed=cache.seed,
+            use_wht=cache.use_wht,
+            use_incoherent_signs=cache.use_incoherent_signs,
+            out_dtype=out_dtype,
         )
-        k_rec = self._dequantize_unsigned(
-            k_codes, cache.k_scales, cache.k_bits
+
+        v_rec = self._reconstruct_cached_tensor(
+            packed=cache.v_packed,
+            scales=cache.v_scales,
+            n_values=cache.v_n_values,
+            shape=cache.shape,
+            bits=cache.v_bits,
+            seed=cache.seed,
+            use_wht=cache.use_wht,
+            use_incoherent_signs=cache.use_incoherent_signs,
+            out_dtype=out_dtype,
         )
-        k_rec = k_rec.reshape(cache.shape)
 
-        if cache.use_wht:
-            k_rec = self._apply_wht_pretransform(k_rec)
-        if cache.use_incoherent_signs:
-            k_rec = self._apply_signs_on_the_fly(k_rec, cache.seed)
-
-        # Dequantize V
-        v_codes = BitPackedQuantizer.unpack(
-            cache.v_packed, cache.v_n_values, cache.v_bits
-        )
-        v_rec = self._dequantize_unsigned(
-            v_codes, cache.v_scales, cache.v_bits
-        )
-        v_rec = v_rec.reshape(cache.shape)
-
-        if cache.use_wht:
-            v_rec = self._apply_wht_pretransform(v_rec)
-        if cache.use_incoherent_signs:
-            v_rec = self._apply_signs_on_the_fly(v_rec, cache.seed)
-
-        return k_rec.astype(out_dtype), v_rec.astype(out_dtype)
+        return k_rec, v_rec
 
     # ------------------------------------------------------------------
     # Pin cache (budget enforcement)

@@ -130,29 +130,38 @@ python3 benchmarks/benchmark_end_to_end.py
 
 # Generate proof artifacts (JSON + summary report)
 ./scripts/run_proof_artifacts.sh
-# Optional custom output dir and iterations
-./scripts/run_proof_artifacts.sh artifacts/proof/main8_1 3
+# Optional custom output dir, iterations, and profile
+./scripts/run_proof_artifacts.sh artifacts/proof/main10 3 main10
 
 # Compare current proof run vs tracked baseline
 python3 scripts/compare_proof_runs.py \
-    --baseline-dir benchmarks/proof_baselines/main8_1 \
-    --current-dir artifacts/proof/main8_1 \
-    --output-json artifacts/proof/main8_1/trend_report.json \
-    --output-md artifacts/proof/main8_1/trend_report.md
+    --profile main10 \
+    --baseline-dir benchmarks/proof_baselines/main10 \
+    --current-dir artifacts/proof/main10 \
+    --output-json artifacts/proof/main10/trend_report.json \
+    --output-md artifacts/proof/main10/trend_report.md
 
 # Enforce regression gate (non-zero exit on threshold breach)
 python3 scripts/check_proof_regression.py \
-    --baseline-dir benchmarks/proof_baselines/main8_1 \
-    --current-dir artifacts/proof/main8_1 \
-    --output-json artifacts/proof/main8_1/regression_report.json \
-    --output-md artifacts/proof/main8_1/regression_report.md
+    --profile main10 \
+    --baseline-dir benchmarks/proof_baselines/main10 \
+    --current-dir artifacts/proof/main10 \
+    --output-json artifacts/proof/main10/regression_report.json \
+    --output-md artifacts/proof/main10/regression_report.md
+
+# Generate plot artifacts from proof JSON
+python3 scripts/generate_plots.py \
+    --input-dir artifacts/proof/main10 \
+    --output-dir results/plots
 ```
 
 Policy:
 - Tune thresholds in `scripts/proof_regression_thresholds.json` only when benchmark noise or hardware/runtime variance is proven to cause false positives across repeated runs.
-- Refresh baseline files in `benchmarks/proof_baselines/main8_1/` when performance or quality changes are intentional and accepted after review.
+- Refresh baseline files in `benchmarks/proof_baselines/<profile>/` when performance or quality changes are intentional and accepted after review.
 - Do not update thresholds and baseline in the same change unless explicitly documenting why both are necessary.
 - KV latency thresholds are intentionally looser than quality thresholds because microbenchmark timing variance is higher than quality metric variance.
+- Custom kernel path is an alpha route with strict fallback to sequential reconstruction when unsupported.
+- Absolute quality minima should be treated as deployment warnings unless explicitly upgraded to hard-fail policy.
 
 ## Memory Profiling
 ```bash
@@ -170,6 +179,7 @@ python3 scripts/profile_memory.py
 ## Implementation Status
 ✅ Core modules compile and integrate in alpha scope
 ✅ Benchmarks scripts are present
+✅ Custom kernel alpha route and fallback policy are implemented
 ✅ Telemetry layer is implemented with batched writer support
 ⚠ MLX-dependent quality and performance validation is environment-dependent
 ⚠ Production hardening and end-to-end real-model validation remain in progress

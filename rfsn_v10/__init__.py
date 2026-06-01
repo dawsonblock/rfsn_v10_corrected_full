@@ -19,6 +19,8 @@ _LAZY_IMPORTS = {
     "MemoryGuard": ".memory_guard",
     "AsyncWriter": ".async_writer",
     "ClickHouseClient": ".clickhouse_client",
+    "KernelRouteError": ".kernels",
+    "custom_kernel_supported": ".kernels",
 }
 
 __all__ = [
@@ -35,6 +37,8 @@ __all__ = [
     "MemoryGuard",
     "AsyncWriter",
     "ClickHouseClient",
+    "KernelRouteError",
+    "custom_kernel_supported",
 ]
 
 
