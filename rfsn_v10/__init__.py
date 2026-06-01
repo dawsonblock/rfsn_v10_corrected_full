@@ -2,7 +2,7 @@
 
 from .bitpack import BitPackedQuantizer
 from .kv_manager import RFSNTurboQuantKVManager, TurboQuantKVCache
-from .attention import AdaptiveBlockSparseAttention
+from .attention import AdaptiveBlockSparseAttention, ExecutionMode
 from .runtime import RFSNRuntime, TelemetryEvent
 from .adaptive_sparsity import AdaptiveSparsityController, QualitySample
 from .memory_guard import MemoryGuard
@@ -14,6 +14,7 @@ __all__ = [
     "RFSNTurboQuantKVManager",
     "TurboQuantKVCache",
     "AdaptiveBlockSparseAttention",
+    "ExecutionMode",
     "RFSNRuntime",
     "TelemetryEvent",
     "AdaptiveSparsityController",

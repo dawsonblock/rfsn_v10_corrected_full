@@ -3,12 +3,14 @@
 RFSN v10 - TurboQuant KV Cache Manager.
 
 Grouped symmetric quantization with randomized-sign Hadamard preconditioning,
-fused packed-dequant-WHT kernel, pinned cache memory budget, and active cache
-LRU eviction.
+packed-dequant-WHT reconstruction path, pinned cache memory budget, and active
+cache LRU eviction.
 """
 from __future__ import annotations
 
+import hashlib
 import math
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional, Tuple
@@ -37,6 +39,7 @@ class TurboQuantKVCache:
     v_n_values: int = 0
     token_count: int = 0
     pinned: bool = False
+    last_used: float = 0.0
 
 
 class RFSNTurboQuantKVManager:
@@ -291,6 +294,26 @@ class RFSNTurboQuantKVManager:
             + cache.v_scales.size * 4  # float32
         )
 
+    def _enforce_memory_budget(self) -> None:
+        """Evict least-recently-used unpinned caches until budget is met."""
+        while self._total_estimated_bytes > self.max_memory_gb * (1024 ** 3):
+            # Find LRU unpinned cache
+            lru_key = min(
+                (
+                    k
+                    for k, v in self.active_caches.items()
+                    if not v.pinned
+                ),
+                key=lambda k: self.active_caches[k].last_used,
+                default=None,
+            )
+            if lru_key is None:
+                raise MemoryError(
+                    "All caches pinned, cannot evict to meet budget"
+                )
+            old_cache = self.active_caches.pop(lru_key)
+            self._total_estimated_bytes -= self._estimate_cache_bytes(old_cache)
+
     # ------------------------------------------------------------------
     # Store
     # ------------------------------------------------------------------
@@ -329,8 +352,13 @@ class RFSNTurboQuantKVManager:
         k_flat = keys.reshape(-1)
         v_flat = values.reshape(-1)
 
-        # Deterministic seed for sign preconditioning
-        seed = 42
+        # Deterministic seed derived from cache identity for sign preconditioning
+        seed = int(
+            hashlib.sha256(
+                f"{skill_pattern}|{keys.shape}|{self.k_bits}|{self.v_bits}".encode()
+            ).hexdigest()[:8],
+            16,
+        )
 
         # When use_incoherent, apply signs → WHT before quantization
         # so that retrieve's WHT → signs cancels them out (both self-inverse)
@@ -385,6 +413,9 @@ class RFSNTurboQuantKVManager:
         self.active_caches[skill_pattern] = cache
         self._total_estimated_bytes += cache_bytes
 
+        # Enforce memory budget with LRU eviction
+        self._enforce_memory_budget()
+
     # ------------------------------------------------------------------
     # Retrieve
     # ------------------------------------------------------------------
@@ -404,6 +435,9 @@ class RFSNTurboQuantKVManager:
             return None
 
         cache = self.active_caches[skill_pattern]
+
+        # Update last-used timestamp for LRU tracking
+        cache.last_used = time.monotonic()
 
         # Validate format version
         if cache.format_version != "rfsn_v10":
@@ -450,7 +484,7 @@ class RFSNTurboQuantKVManager:
     # ------------------------------------------------------------------
     # Pin cache (budget enforcement)
     # ------------------------------------------------------------------
-    def pincache(self, skill_pattern: str) -> bool:
+    def pin_cache(self, skill_pattern: str) -> bool:
         """Pin a cache entry so it cannot be evicted.
 
         Returns:
@@ -480,3 +514,6 @@ class RFSNTurboQuantKVManager:
         cache.pinned = True
         self._pinned_bytes += cache_bytes
         return True
+
+    # Backward compatibility alias
+    pincache = pin_cache

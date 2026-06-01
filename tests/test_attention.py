@@ -14,11 +14,12 @@ def test_sparse_attention_dense_fallback_prefill():
     k = mx.random.normal((1, 4, 128, 64))
     v = mx.random.normal((1, 4, 128, 64))
 
-    out, active = AdaptiveBlockSparseAttention.execute(q, k, v, top_k_ratio=0.25)
+    out, active, mode = AdaptiveBlockSparseAttention.execute(q, k, v, top_k_ratio=0.25)
     mx.eval(out)
 
     assert out.shape == q.shape
     assert active == 2  # ceil(128 / 64)
+    assert mode == "dense_prefill"
 
 
 def test_sparse_attention_decode_shape():
@@ -26,11 +27,12 @@ def test_sparse_attention_decode_shape():
     k = mx.random.normal((1, 4, 512, 64))
     v = mx.random.normal((1, 4, 512, 64))
 
-    out, active = AdaptiveBlockSparseAttention.execute(q, k, v, top_k_ratio=0.25)
+    out, active, mode = AdaptiveBlockSparseAttention.execute(q, k, v, top_k_ratio=0.25)
     mx.eval(out)
 
     assert out.shape == q.shape
     assert active >= 1
+    assert mode == "sparse_compacted"
 
 
 def test_sparse_attention_rejects_invalid_top_k():
@@ -59,7 +61,7 @@ def test_sparse_attention_padding_safe_decode():
     k = mx.random.normal((1, 4, 130, 64))
     v = mx.random.normal((1, 4, 130, 64))
 
-    out, active = AdaptiveBlockSparseAttention.execute(q, k, v, top_k_ratio=0.5)
+    out, active, mode = AdaptiveBlockSparseAttention.execute(q, k, v, top_k_ratio=0.5)
     mx.eval(out)
 
     assert out.shape == q.shape
@@ -71,7 +73,7 @@ def test_sparse_attention_dense_fallback_when_kv_not_strictly_past():
     k = mx.random.normal((1, 4, 512, 64))
     v = mx.random.normal((1, 4, 512, 64))
 
-    out, active = AdaptiveBlockSparseAttention.execute(
+    out, active, mode = AdaptiveBlockSparseAttention.execute(
         q,
         k,
         v,
@@ -82,6 +84,7 @@ def test_sparse_attention_dense_fallback_when_kv_not_strictly_past():
 
     assert out.shape == q.shape
     assert active == 8  # ceil(512 / 64)
+    assert mode == "dense_not_strictly_past"
 
 
 def test_sparse_attention_rejects_bad_rank():

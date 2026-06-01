@@ -9,14 +9,26 @@ Correct use case:
 - KV cache contains only past tokens
 - Positional information is already baked into keys, e.g. RoPE-applied keys
 - Prefill uses dense attention because physical compaction breaks causal alignment
+
+NOTE: The dense fallback path uses mx.fast.scaled_dot_product_attention without
+a causal mask. Callers handling autoregressive prefill must supply their own
+causal masking. This module is designed for decode, not prefill.
 """
 
 from __future__ import annotations
 
 import math
-from typing import Tuple
+from typing import Literal, Tuple
 
 import mlx.core as mx
+
+ExecutionMode = Literal[
+    "sparse_compacted",
+    "dense_requested",
+    "dense_short_context",
+    "dense_prefill",
+    "dense_not_strictly_past",
+]
 
 
 class AdaptiveBlockSparseAttention:
@@ -69,13 +81,14 @@ class AdaptiveBlockSparseAttention:
         return B, H, T_q, T_k, D
 
     @staticmethod
-    def _dense(
+    def _dense_unmasked(
         queries: mx.array,
         keys: mx.array,
         values: mx.array,
         scale: float,
         block_size: int,
-    ) -> Tuple[mx.array, int]:
+        mode: str,
+    ) -> Tuple[mx.array, int, str]:
         T_k = keys.shape[2]
         num_blocks = max(1, AdaptiveBlockSparseAttention._ceil_div(T_k, block_size))
         out = mx.fast.scaled_dot_product_attention(
@@ -84,7 +97,7 @@ class AdaptiveBlockSparseAttention:
             values,
             scale=scale,
         )
-        return out, num_blocks
+        return out, num_blocks, mode
 
     @staticmethod
     def execute(
@@ -95,7 +108,7 @@ class AdaptiveBlockSparseAttention:
         block_size: int = 64,
         kv_is_strictly_past: bool = True,
         consensus_mix: float = 0.7,
-    ) -> Tuple[mx.array, int]:
+    ) -> Tuple[mx.array, int, ExecutionMode]:
         """
         Execute hardware-aware block-sparse scaled dot-product attention.
 
@@ -111,7 +124,13 @@ class AdaptiveBlockSparseAttention:
                 1.0 = pure max across heads; 0.0 = pure mean across heads.
 
         Returns:
-            (attention_output, num_active_blocks)
+            (attention_output, num_active_blocks, execution_mode)
+            execution_mode is one of:
+              - "sparse_compacted": actual sparse block-selective attention ran
+              - "dense_requested": top_k_ratio >= 1.0
+              - "dense_short_context": T_k <= block_size
+              - "dense_prefill": T_q > 1 (causal mask not applied by this module)
+              - "dense_not_strictly_past": kv_is_strictly_past is False
         """
         B, H, T_q, T_k, D = AdaptiveBlockSparseAttention._validate_inputs(
             queries,
@@ -129,18 +148,21 @@ class AdaptiveBlockSparseAttention:
         # - Context too short to benefit
         # - Prefill path: physical compaction breaks causal mask alignment
         # - Caller cannot guarantee KV contains only past tokens
-        if (
-            top_k_ratio >= 1.0
-            or T_k <= block_size
-            or T_q > 1
-            or not kv_is_strictly_past
-        ):
-            return AdaptiveBlockSparseAttention._dense(
-                queries,
-                keys,
-                values,
-                scale,
-                block_size,
+        if top_k_ratio >= 1.0:
+            return AdaptiveBlockSparseAttention._dense_unmasked(
+                queries, keys, values, scale, block_size, "dense_requested",
+            )
+        if T_k <= block_size:
+            return AdaptiveBlockSparseAttention._dense_unmasked(
+                queries, keys, values, scale, block_size, "dense_short_context",
+            )
+        if T_q > 1:
+            return AdaptiveBlockSparseAttention._dense_unmasked(
+                queries, keys, values, scale, block_size, "dense_prefill",
+            )
+        if not kv_is_strictly_past:
+            return AdaptiveBlockSparseAttention._dense_unmasked(
+                queries, keys, values, scale, block_size, "dense_not_strictly_past",
             )
 
         pad_len = (block_size - (T_k % block_size)) % block_size
@@ -163,12 +185,8 @@ class AdaptiveBlockSparseAttention:
         k_active = max(1, int(math.ceil(num_blocks * float(top_k_ratio))))
 
         if k_active >= num_blocks:
-            return AdaptiveBlockSparseAttention._dense(
-                queries,
-                keys,
-                values,
-                scale,
-                block_size,
+            return AdaptiveBlockSparseAttention._dense_unmasked(
+                queries, keys, values, scale, block_size, "dense_short_context",
             )
 
         # Mean pooling is less sign-biased than max pooling because max pooling
@@ -197,12 +215,8 @@ class AdaptiveBlockSparseAttention:
         # - For B == 1, remove padded positions directly.
         # - For B > 1, padding would create ragged compact tensors, so fallback dense.
         if pad_len > 0 and B > 1:
-            return AdaptiveBlockSparseAttention._dense(
-                queries,
-                keys,
-                values,
-                scale,
-                block_size,
+            return AdaptiveBlockSparseAttention._dense_unmasked(
+                queries, keys, values, scale, block_size, "dense_requested",
             )
 
         if B == 1:
@@ -237,4 +251,4 @@ class AdaptiveBlockSparseAttention:
             scale=scale,
         )
 
-        return out, active_blocks
+        return out, active_blocks, "sparse_compacted"

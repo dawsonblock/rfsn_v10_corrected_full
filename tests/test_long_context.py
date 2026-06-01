@@ -73,7 +73,7 @@ def test_long_context_dense_baseline_comparison():
         mx.eval(dense_out)
 
         # Sparse with all blocks (should match dense)
-        sparse_out, n_active = AdaptiveBlockSparseAttention.execute(
+        sparse_out, n_active, mode = AdaptiveBlockSparseAttention.execute(
             q, k, v, top_k_ratio=1.0, block_size=64,
         )
         mx.eval(sparse_out)

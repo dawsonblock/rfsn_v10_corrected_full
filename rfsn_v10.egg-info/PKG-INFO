@@ -1,9 +1,0 @@
-Metadata-Version: 2.4
-Name: rfsn-v10
-Version: 0.1.0
-Summary: RFSN v10 - Quantized KV-cache + decode-time sparse-attention runtime for MLX/Apple Silicon
-Requires-Python: >=3.10
-Requires-Dist: mlx>=0.10.0
-Provides-Extra: dev
-Requires-Dist: pytest>=7.0; extra == "dev"
-Requires-Dist: pytest-asyncio; extra == "dev"

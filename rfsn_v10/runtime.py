@@ -54,6 +54,7 @@ class TelemetryEvent:
     audit_cosine: Optional[float]
     audit_rel_mae: Optional[float]
     audit_max_abs_error: Optional[float]
+    execution_mode: str
     termination_reason: str
 
 
@@ -181,16 +182,17 @@ class RFSNRuntime:
         termination_reason = "unknown"
 
         sparse_output = None
+        execution_mode = "unknown"
         try:
-            sparse_output, num_active_blocks = AdaptiveBlockSparseAttention.execute(
+            sparse_output, num_active_blocks, execution_mode = AdaptiveBlockSparseAttention.execute(
                 queries, keys, values,
                 top_k_ratio=effective_top_k,
                 block_size=self.block_size,
                 kv_is_strictly_past=True,
             )
             mx.eval(sparse_output)
-            sparse_success = True
-            termination_reason = "sparse_success"
+            sparse_success = (execution_mode == "sparse_compacted")
+            termination_reason = execution_mode
         except Exception as e:
             termination_reason = f"sparse_failed: {e}"
 
@@ -263,6 +265,7 @@ class RFSNRuntime:
             audit_cosine=audit_cosine,
             audit_rel_mae=audit_rel_mae,
             audit_max_abs_error=audit_max_abs_error,
+            execution_mode=execution_mode,
             termination_reason=termination_reason,
         )
         self._telemetry_log.append(event)
