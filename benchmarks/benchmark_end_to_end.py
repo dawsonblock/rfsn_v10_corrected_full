@@ -126,7 +126,7 @@ def main():
         ("cache_miss_full_precision_path", shape_q_decode, 8, 3, True, 0.50, False),
         ("cache_miss_use_compressed_on_miss_path", shape_q_decode, 8, 3, True, 0.50, True),
         ("cache_hit_compressed_path", shape_q_decode, 8, 3, True, 0.50, True),
-        ("sparse_decode_path", shape_q_decode, 8, 3, True, 0.75, True),
+        ("sparse_decode_path", shape_q_decode, 8, 3, True, 0.25, True),
         ("dense_decode_path", shape_q_dense, 8, 3, True, 0.25, True),
     ]
 
