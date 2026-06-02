@@ -1,6 +1,6 @@
 # main10 Proof Summary
 
-Generated: 2026-06-02T08:19:32.749966+00:00
+Generated: 2026-06-02T08:20:15.914318+00:00
 
 ## Files
 - kv_cache_runs.json
@@ -9,11 +9,11 @@ Generated: 2026-06-02T08:19:32.749966+00:00
 - real_model_validation.json (not generated)
 
 ## Highlights
-- Fastest KV retrieve: 0.95ms (shape=(1, 8, 1024, 64)|k=8|v=3|incoherent=False)
+- Fastest KV retrieve: 1.11ms (shape=(1, 8, 1024, 64)|k=8|v=3|incoherent=False)
 - KV value quality (same run): cos=0.9700, rel_mae=0.2671, max_abs=0.7896
-- Best sparse scenario: sparse_topk_075_sink1_recent2 miss=11.20ms, hit=6.30ms, sparse_cos=0.8836325407028198
+- Best sparse scenario: sparse_topk_075_sink1_recent2 miss=10.71ms, hit=6.76ms, sparse_cos=0.8836325407028198
 - Worst sparse scenario: sparse_disabled_by_default hit_mode=dense_requested sparse_cos=None sparse_rel_mae=None
-- Dense decode path: miss=9.13ms, hit=4.58ms, mode=dense_requested
+- Dense decode path: miss=9.09ms, hit=4.54ms, mode=dense_requested
 
 ## Absolute Quality
 - Sparse quality: warn (min=0.4996378421783447, threshold=0.900)
