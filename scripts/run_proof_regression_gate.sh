@@ -6,6 +6,10 @@ OUTPUT_DIR=${1:-artifacts/proof/$PROFILE}
 BASELINE_DIR=${2:-benchmarks/proof_baselines/$PROFILE}
 ITERATIONS=${3:-5}
 
+# Pre-push gate should validate plots without mutating tracked files.
+TMP_PLOT_DIR=$(mktemp -d)
+trap 'rm -rf "$TMP_PLOT_DIR"' EXIT
+
 python3 scripts/generate_proof_artifacts.py \
   --profile "$PROFILE" \
   --output-dir "$OUTPUT_DIR" \
@@ -13,7 +17,7 @@ python3 scripts/generate_proof_artifacts.py \
 
 python3 scripts/generate_plots.py \
   --input-dir "$OUTPUT_DIR" \
-  --output-dir results/plots
+  --output-dir "$TMP_PLOT_DIR"
 
 python3 scripts/check_proof_regression.py \
   --profile "$PROFILE" \
