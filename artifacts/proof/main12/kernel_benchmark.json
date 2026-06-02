@@ -10,9 +10,9 @@
       "bits": 8,
       "mode": "sequential_reference",
       "route": "sequential_reference",
-      "latency_ms_mean": 3.1384082045406103,
-      "latency_ms_p50": 1.3516659964807332,
-      "latency_ms_p95": 10.354833008022979,
+      "latency_ms_mean": 2.8177831962238997,
+      "latency_ms_p50": 2.736541995545849,
+      "latency_ms_p95": 4.33091598097235,
       "kv_reconstruction_kernel": "sequential_reference",
       "fallback_used": false,
       "key_cosine_vs_reference": 1.0,
@@ -35,9 +35,9 @@
       "bits": 8,
       "mode": "metal_dequant",
       "route": "metal_dequant",
-      "latency_ms_mean": 0.11782519286498427,
-      "latency_ms_p50": 0.04370798706077039,
-      "latency_ms_p95": 0.39708398981019855,
+      "latency_ms_mean": 0.3138169995509088,
+      "latency_ms_p50": 0.23929201415739954,
+      "latency_ms_p95": 0.726458994904533,
       "kv_reconstruction_kernel": "metal_dequant",
       "fallback_used": false,
       "key_cosine_vs_reference": 1.0,
@@ -48,7 +48,7 @@
       "value_valid": true,
       "route_class": "ablation",
       "status": "valid",
-      "speedup_vs_reference": 30.924919845917717
+      "speedup_vs_reference": 11.435993821949399
     },
     {
       "shape": [
@@ -60,9 +60,9 @@
       "bits": 8,
       "mode": "metal_dequant_wht",
       "route": "metal_dequant_wht",
-      "latency_ms_mean": 0.10725820320658386,
-      "latency_ms_p50": 0.11333302245475352,
-      "latency_ms_p95": 0.13466697419062257,
+      "latency_ms_mean": 0.3498168021906167,
+      "latency_ms_p50": 0.31266699079424143,
+      "latency_ms_p95": 0.8201250166166574,
       "kv_reconstruction_kernel": "metal_dequant_wht",
       "fallback_used": false,
       "key_cosine_vs_reference": 1.0,
@@ -73,7 +73,7 @@
       "value_valid": true,
       "route_class": "ablation",
       "status": "valid",
-      "speedup_vs_reference": 11.926497389764446
+      "speedup_vs_reference": 8.752257437200019
     },
     {
       "shape": [
@@ -85,9 +85,9 @@
       "bits": 8,
       "mode": "metal_dequant_sign",
       "route": "metal_dequant_sign",
-      "latency_ms_mean": 0.07944200187921524,
-      "latency_ms_p50": 0.0685419945511967,
-      "latency_ms_p95": 0.10941701475530863,
+      "latency_ms_mean": 0.3036668000277132,
+      "latency_ms_p50": 0.28570799622684717,
+      "latency_ms_p95": 0.42291698628105223,
       "kv_reconstruction_kernel": "metal_dequant_sign",
       "fallback_used": false,
       "key_cosine_vs_reference": 1.0,
@@ -98,7 +98,7 @@
       "value_valid": true,
       "route_class": "ablation",
       "status": "valid",
-      "speedup_vs_reference": 19.720260627535737
+      "speedup_vs_reference": 9.578107829271543
     },
     {
       "shape": [
@@ -110,9 +110,9 @@
       "bits": 8,
       "mode": "metal_dequant_wht_sign",
       "route": "metal_dequant_wht_sign",
-      "latency_ms_mean": 0.12232480803504586,
-      "latency_ms_p50": 0.11354099842719734,
-      "latency_ms_p95": 0.15725000412203372,
+      "latency_ms_mean": 0.311225198674947,
+      "latency_ms_p50": 0.27275001048110425,
+      "latency_ms_p95": 0.5107079923618585,
       "kv_reconstruction_kernel": "metal_dequant_wht_sign",
       "fallback_used": false,
       "key_cosine_vs_reference": 1.0,
@@ -123,7 +123,7 @@
       "value_valid": true,
       "route_class": "full_equivalent",
       "status": "valid",
-      "speedup_vs_reference": 11.904651317184104
+      "speedup_vs_reference": 10.03315083551732
     },
     {
       "shape": [
@@ -135,9 +135,9 @@
       "bits": 8,
       "mode": "sequential_reference",
       "route": "sequential_reference",
-      "latency_ms_mean": 1.586275000590831,
-      "latency_ms_p50": 1.4488750020973384,
-      "latency_ms_p95": 2.4720419896766543,
+      "latency_ms_mean": 2.3924418026581407,
+      "latency_ms_p50": 1.95387500571087,
+      "latency_ms_p95": 4.3956250010523945,
       "kv_reconstruction_kernel": "sequential_reference",
       "fallback_used": false,
       "key_cosine_vs_reference": 1.0,
@@ -160,9 +160,9 @@
       "bits": 8,
       "mode": "metal_dequant",
       "route": "metal_dequant",
-      "latency_ms_mean": 0.06547499797306955,
-      "latency_ms_p50": 0.06633400334976614,
-      "latency_ms_p95": 0.09304098784923553,
+      "latency_ms_mean": 0.16386660281568766,
+      "latency_ms_p50": 0.17245800700038671,
+      "latency_ms_p95": 0.20858299103565514,
       "kv_reconstruction_kernel": "metal_dequant",
       "fallback_used": false,
       "key_cosine_vs_reference": 0.9999999403953552,
@@ -173,7 +173,7 @@
       "value_valid": true,
       "route_class": "ablation",
       "status": "valid",
-      "speedup_vs_reference": 21.84211609327581
+      "speedup_vs_reference": 11.329569671453346
     },
     {
       "shape": [
@@ -185,9 +185,9 @@
       "bits": 8,
       "mode": "metal_dequant_wht",
       "route": "metal_dequant_wht",
-      "latency_ms_mean": 0.0861333915963769,
-      "latency_ms_p50": 0.08012499893084168,
-      "latency_ms_p95": 0.10762497549876571,
+      "latency_ms_mean": 0.3292499983217567,
+      "latency_ms_p50": 0.2591669908724725,
+      "latency_ms_p95": 0.6310410099104047,
       "kv_reconstruction_kernel": "metal_dequant_wht",
       "fallback_used": false,
       "key_cosine_vs_reference": 1.0000001192092896,
@@ -198,7 +198,7 @@
       "value_valid": true,
       "route_class": "ablation",
       "status": "valid",
-      "speedup_vs_reference": 18.082683574796754
+      "speedup_vs_reference": 7.539058115129743
     },
     {
       "shape": [
@@ -210,9 +210,9 @@
       "bits": 8,
       "mode": "metal_dequant_sign",
       "route": "metal_dequant_sign",
-      "latency_ms_mean": 0.1138832129072398,
-      "latency_ms_p50": 0.113290996523574,
-      "latency_ms_p95": 0.14475002535618842,
+      "latency_ms_mean": 0.4901834123302251,
+      "latency_ms_p50": 0.28445900534279644,
+      "latency_ms_p95": 1.2484160251915455,
       "kv_reconstruction_kernel": "metal_dequant_sign",
       "fallback_used": false,
       "key_cosine_vs_reference": 0.9999999403953552,
@@ -223,7 +223,7 @@
       "value_valid": true,
       "route_class": "ablation",
       "status": "valid",
-      "speedup_vs_reference": 12.788968643204152
+      "speedup_vs_reference": 6.86874020161988
     },
     {
       "shape": [
@@ -235,9 +235,9 @@
       "bits": 8,
       "mode": "metal_dequant_wht_sign",
       "route": "metal_dequant_wht_sign",
-      "latency_ms_mean": 0.14194159884937108,
-      "latency_ms_p50": 0.13712499639950693,
-      "latency_ms_p95": 0.18779200036078691,
+      "latency_ms_mean": 0.4555417981464416,
+      "latency_ms_p50": 0.39762500091455877,
+      "latency_ms_p95": 0.7004580111242831,
       "kv_reconstruction_kernel": "metal_dequant_wht_sign",
       "fallback_used": false,
       "key_cosine_vs_reference": 0.9999999403953552,
@@ -248,7 +248,7 @@
       "value_valid": true,
       "route_class": "full_equivalent",
       "status": "valid",
-      "speedup_vs_reference": 10.566089627277819
+      "speedup_vs_reference": 4.913863567976996
     },
     {
       "shape": [
@@ -260,9 +260,9 @@
       "bits": 8,
       "mode": "sequential_reference",
       "route": "sequential_reference",
-      "latency_ms_mean": 1.9057997968047857,
-      "latency_ms_p50": 1.5032079827506095,
-      "latency_ms_p95": 3.7231669994071126,
+      "latency_ms_mean": 3.6570836033206433,
+      "latency_ms_p50": 3.0426669982261956,
+      "latency_ms_p95": 6.284583010710776,
       "kv_reconstruction_kernel": "sequential_reference",
       "fallback_used": false,
       "key_cosine_vs_reference": 0.9999998807907104,
@@ -285,9 +285,9 @@
       "bits": 8,
       "mode": "metal_dequant",
       "route": "metal_dequant",
-      "latency_ms_mean": 0.06755000213161111,
-      "latency_ms_p50": 0.056958000641316175,
-      "latency_ms_p95": 0.10500001371838152,
+      "latency_ms_mean": 0.18996680155396461,
+      "latency_ms_p50": 0.1797500008251518,
+      "latency_ms_p95": 0.30174999847076833,
       "kv_reconstruction_kernel": "metal_dequant",
       "fallback_used": false,
       "key_cosine_vs_reference": 0.9999998807907104,
@@ -298,7 +298,7 @@
       "value_valid": true,
       "route_class": "ablation",
       "status": "valid",
-      "speedup_vs_reference": 26.391515956060665
+      "speedup_vs_reference": 16.927215489617097
     },
     {
       "shape": [
@@ -310,9 +310,9 @@
       "bits": 8,
       "mode": "metal_dequant_wht",
       "route": "metal_dequant_wht",
-      "latency_ms_mean": 0.12860000133514404,
-      "latency_ms_p50": 0.10645799920894206,
-      "latency_ms_p95": 0.24537500576116145,
+      "latency_ms_mean": 0.26022520032711327,
+      "latency_ms_p50": 0.268584000878036,
+      "latency_ms_p95": 0.43904100311920047,
       "kv_reconstruction_kernel": "metal_dequant_wht",
       "fallback_used": false,
       "key_cosine_vs_reference": 1.0,
@@ -323,7 +323,7 @@
       "value_valid": true,
       "route_class": "ablation",
       "status": "valid",
-      "speedup_vs_reference": 14.12019757951966
+      "speedup_vs_reference": 11.32854893917479
     },
     {
       "shape": [
@@ -335,9 +335,9 @@
       "bits": 8,
       "mode": "metal_dequant_sign",
       "route": "metal_dequant_sign",
-      "latency_ms_mean": 0.09044999605976045,
-      "latency_ms_p50": 0.08024999988265336,
-      "latency_ms_p95": 0.12304200208745897,
+      "latency_ms_mean": 0.390700192656368,
+      "latency_ms_p50": 0.2832080062944442,
+      "latency_ms_p95": 0.686999992467463,
       "kv_reconstruction_kernel": "metal_dequant_sign",
       "fallback_used": false,
       "key_cosine_vs_reference": 0.9999998807907104,
@@ -348,7 +348,7 @@
       "value_valid": true,
       "route_class": "ablation",
       "status": "valid",
-      "speedup_vs_reference": 18.731563675373156
+      "speedup_vs_reference": 10.743576913792513
     },
     {
       "shape": [
@@ -360,9 +360,9 @@
       "bits": 8,
       "mode": "metal_dequant_wht_sign",
       "route": "metal_dequant_wht_sign",
-      "latency_ms_mean": 0.12854160158894956,
-      "latency_ms_p50": 0.12933299876749516,
-      "latency_ms_p95": 0.1705830218270421,
+      "latency_ms_mean": 0.3708581964019686,
+      "latency_ms_p50": 0.276167003903538,
+      "latency_ms_p95": 0.7701249851379544,
       "kv_reconstruction_kernel": "metal_dequant_wht_sign",
       "fallback_used": false,
       "key_cosine_vs_reference": 0.9999998807907104,
@@ -373,7 +373,7 @@
       "value_valid": true,
       "route_class": "full_equivalent",
       "status": "valid",
-      "speedup_vs_reference": 11.622772201029377
+      "speedup_vs_reference": 11.017489255483124
     },
     {
       "shape": [
@@ -385,9 +385,9 @@
       "bits": 8,
       "mode": "sequential_reference",
       "route": "sequential_reference",
-      "latency_ms_mean": 16.492866590851918,
-      "latency_ms_p50": 7.465292001143098,
-      "latency_ms_p95": 54.1197499842383,
+      "latency_ms_mean": 13.221808389062062,
+      "latency_ms_p50": 8.258874993771315,
+      "latency_ms_p95": 37.41674998309463,
       "kv_reconstruction_kernel": "sequential_reference",
       "fallback_used": false,
       "key_cosine_vs_reference": 1.0,
@@ -410,9 +410,9 @@
       "bits": 8,
       "mode": "metal_dequant",
       "route": "metal_dequant",
-      "latency_ms_mean": 0.1249419990926981,
-      "latency_ms_p50": 0.11316698510199785,
-      "latency_ms_p95": 0.19979200442321599,
+      "latency_ms_mean": 0.11135839740745723,
+      "latency_ms_p50": 0.10566698620095849,
+      "latency_ms_p95": 0.13720901915803552,
       "kv_reconstruction_kernel": "metal_dequant",
       "fallback_used": false,
       "key_cosine_vs_reference": 1.0000001192092896,
@@ -423,7 +423,7 @@
       "value_valid": true,
       "route_class": "ablation",
       "status": "valid",
-      "speedup_vs_reference": 65.96704855585399
+      "speedup_vs_reference": 78.15946390355552
     },
     {
       "shape": [
@@ -435,9 +435,9 @@
       "bits": 8,
       "mode": "metal_dequant_wht",
       "route": "metal_dequant_wht",
-      "latency_ms_mean": 0.25449160020798445,
-      "latency_ms_p50": 0.1856669841799885,
-      "latency_ms_p95": 0.515749998157844,
+      "latency_ms_mean": 0.37307519232854247,
+      "latency_ms_p50": 0.4558340006042272,
+      "latency_ms_p95": 0.4901659849565476,
       "kv_reconstruction_kernel": "metal_dequant_wht",
       "fallback_used": false,
       "key_cosine_vs_reference": 1.0,
@@ -448,7 +448,7 @@
       "value_valid": true,
       "route_class": "ablation",
       "status": "valid",
-      "speedup_vs_reference": 40.20796715212504
+      "speedup_vs_reference": 18.118163592061645
     },
     {
       "shape": [
@@ -460,9 +460,9 @@
       "bits": 8,
       "mode": "metal_dequant_sign",
       "route": "metal_dequant_sign",
-      "latency_ms_mean": 0.2350583963561803,
-      "latency_ms_p50": 0.2529170014895499,
-      "latency_ms_p95": 0.311999989207834,
+      "latency_ms_mean": 0.17212480306625366,
+      "latency_ms_p50": 0.17995800590142608,
+      "latency_ms_p95": 0.20054102060385048,
       "kv_reconstruction_kernel": "metal_dequant_sign",
       "fallback_used": false,
       "key_cosine_vs_reference": 1.0000001192092896,
@@ -473,7 +473,7 @@
       "value_valid": true,
       "route_class": "ablation",
       "status": "valid",
-      "speedup_vs_reference": 29.51676620067612
+      "speedup_vs_reference": 45.89334579699223
     },
     {
       "shape": [
@@ -485,9 +485,9 @@
       "bits": 8,
       "mode": "metal_dequant_wht_sign",
       "route": "metal_dequant_wht_sign",
-      "latency_ms_mean": 0.48499180120415986,
-      "latency_ms_p50": 0.5076249944977462,
-      "latency_ms_p95": 0.8059579995460808,
+      "latency_ms_mean": 0.3480583953205496,
+      "latency_ms_p50": 0.363041996024549,
+      "latency_ms_p95": 0.4344589833635837,
       "kv_reconstruction_kernel": "metal_dequant_wht_sign",
       "fallback_used": false,
       "key_cosine_vs_reference": 1.0,
@@ -498,7 +498,7 @@
       "value_valid": true,
       "route_class": "full_equivalent",
       "status": "valid",
-      "speedup_vs_reference": 14.706312892511132
+      "speedup_vs_reference": 22.74908986896614
     }
   ],
   "summary": {
