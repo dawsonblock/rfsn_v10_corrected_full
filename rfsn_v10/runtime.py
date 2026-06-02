@@ -173,16 +173,29 @@ class RFSNRuntime:
         B, H, T_q, D = queries.shape
         T_k = keys.shape[2]  # keys is [B, H, T_k, D]
 
+        adaptive_decision = None
+        if self.adaptive_sparsity_controller is not None:
+            adaptive_decision = self.adaptive_sparsity_controller.get_decision(
+                model_id=self.model_id,
+                layer_id=layer_id,
+                skill_pattern=skill_pattern,
+                seq_len=int(T_k),
+            )
+
         # Per-call override has highest priority, then adaptive controller, then default.
         if top_k_ratio is not None:
             effective_top_k = top_k_ratio
-        elif self.adaptive_sparsity_controller is not None:
-            effective_top_k = self.adaptive_sparsity_controller.get_top_k_ratio()
+        elif adaptive_decision is not None:
+            effective_top_k = adaptive_decision.top_k_ratio
         else:
             effective_top_k = self.top_k_ratio
 
         quantized_enabled = True
         sparse_enabled = True
+        if adaptive_decision is not None:
+            quantized_enabled = not adaptive_decision.disable_quantized
+            sparse_enabled = not adaptive_decision.disable_sparse
+
         if self.memory_guard is not None:
             quantized_enabled = not self.memory_guard.should_disable_quantized()
             sparse_enabled = not self.memory_guard.should_disable_sparse()
@@ -205,10 +218,9 @@ class RFSNRuntime:
             format_version="rfsn_v10",
         )
 
-        # Store original keys/values for quantization error measurement in audit mode
-        if self.audit_mode:
-            self.original_keys = keys
-            self.original_values = values
+        # Keep audit tensors local to avoid cross-request mutation races.
+        original_keys = keys if self.audit_mode else None
+        original_values = values if self.audit_mode else None
 
         # 3-4. Try retrieve or store
         retrieve_latency_ms = 0.0
@@ -223,6 +235,8 @@ class RFSNRuntime:
             if not kv_cache_hit:
                 t_store_start = time.monotonic()
 
+                allow_store = True
+
                 if self.memory_guard is not None:
                     estimated_cache_bytes = self.kv_manager.estimate_compressed_bytes_for_shape(
                         shape=tuple(keys.shape),
@@ -231,11 +245,19 @@ class RFSNRuntime:
                         group_size=self.kv_manager.group_size,
                     )
                     self.memory_guard.enforce_safety(estimated_cache_bytes)
+                    if self.memory_guard.should_disable_quantized():
+                        allow_store = False
+                        quantized_enabled = False
+                        self.kv_manager.last_reconstruction_kernel = "quantized_disabled"
+                    if self.memory_guard.should_disable_sparse():
+                        sparse_enabled = False
+                        effective_attention_top_k = 1.0
 
-                self.kv_manager.store(cache_key, keys, values, T_k)
-                store_latency_ms = (time.monotonic() - t_store_start) * 1000.0
+                if allow_store:
+                    self.kv_manager.store(cache_key, keys, values, T_k)
+                    store_latency_ms = (time.monotonic() - t_store_start) * 1000.0
 
-                if self.use_compressed_on_miss:
+                if allow_store and self.use_compressed_on_miss:
                     t_retrieve_check_start = time.monotonic()
                     kv_result = self.kv_manager.retrieve(cache_key, out_dtype=keys.dtype)
                     retrieve_latency_ms += (time.monotonic() - t_retrieve_check_start) * 1000.0
@@ -319,7 +341,7 @@ class RFSNRuntime:
         if self.audit_mode:
             # Compute dense attention from original keys/values for quantization error
             original_dense_output = mx.fast.scaled_dot_product_attention(
-                queries, self.original_keys, self.original_values,
+                queries, original_keys, original_values,
                 scale=1.0 / math.sqrt(D),
             )
             mx.eval(original_dense_output)
@@ -360,13 +382,17 @@ class RFSNRuntime:
         
         # Update adaptive sparsity controller if available and in audit mode
         if self.adaptive_sparsity_controller is not None and self.audit_mode:
-            self.adaptive_sparsity_controller.update(
-                audit_cosine=audit_cosine,
-                rel_mae=audit_rel_mae,
-                latency_ms=attention_latency_ms,
-                fallback_occurred=fallback_used,
+            adaptive_decision = self.adaptive_sparsity_controller.update(
                 sparse_success=sparse_success,
-                pattern=skill_pattern,
+                fallback_used=fallback_used,
+                sparse_audit_cosine=sparse_audit_cosine,
+                sparse_audit_rel_mae=sparse_audit_rel_mae,
+                quant_audit_cosine=quant_audit_cosine,
+                quant_audit_rel_mae=quant_audit_rel_mae,
+                model_id=self.model_id,
+                layer_id=layer_id,
+                skill_pattern=skill_pattern,
+                seq_len=int(T_k),
             )
 
         total_latency_ms = (time.monotonic() - t_start) * 1000.0
@@ -416,6 +442,7 @@ class RFSNRuntime:
             "task_id": task_id,
             "kv_cache_hit": kv_cache_hit,
             "kv_reconstruction_kernel": self.kv_manager.last_reconstruction_kernel,
+            "adaptive_reason": adaptive_decision.reason if adaptive_decision is not None else None,
             "quantized_enabled": quantized_enabled,
             "sparse_enabled": sparse_enabled,
             "sparse_success": sparse_success,

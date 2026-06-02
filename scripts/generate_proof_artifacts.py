@@ -230,11 +230,12 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Generate proof artifacts")
     parser.add_argument(
         "--profile",
-        default="main10",
+        default="main11",
         help="Proof profile name for output labeling/default paths",
     )
     parser.add_argument(
         "--output-dir",
+        "--out",
         default="",
         help="Directory where JSON/Markdown artifacts are written",
     )

@@ -1,27 +1,27 @@
-# RFSN v10 - Main 10 Custom Kernel Alpha
+# RFSN v10 Main 11 - Custom Metal Kernel Alpha
 
-## Status: Main 10 Custom Kernel Alpha
+## Status: Main 11 Custom Metal Kernel Alpha
 
-Verified:
-- static compile
+Verified in this package:
+- static syntax
 - non-MLX tests
 - proof regression tooling
-- generated plots from baseline data
+- generated proof plots
 
 Requires Apple Silicon validation:
 - MLX bitpack tests
 - KV manager tests
-- kernel equivalence tests
+- custom Metal kernel equivalence tests
 - runtime audit tests
-- real model benchmark
+- real LLM logit/perplexity validation
 
 Claim boundary:
-- custom Metal kernel alpha path
-- reference equivalence tests
-- production validation pending
+- experimental custom Metal kernel path
+- reference-equivalence gated
+- runtime optimization alpha
 
 ## Overview
-RFSN v10 is an alpha quantized KV-cache + decode-time sparse-attention runtime for MLX/Apple Silicon. This build focuses on compile correctness and behavior stabilization of the core runtime path.
+RFSN v10 is an alpha quantized KV-cache + decode-time sparse-attention runtime for MLX/Apple Silicon. This build focuses on proving numerical equivalence and quality-safe sparse behavior before any production claim.
 
 ## Components
 
@@ -180,7 +180,7 @@ Policy:
 - Refresh baseline files in `benchmarks/proof_baselines/<profile>/` when performance or quality changes are intentional and accepted after review.
 - Do not update thresholds and baseline in the same change unless explicitly documenting why both are necessary.
 - KV latency thresholds are intentionally looser than quality thresholds because microbenchmark timing variance is higher than quality metric variance.
-- Custom kernel path is an alpha route with strict fallback to sequential reconstruction when unsupported.
+- Metal kernel path is an alpha route with strict fallback to sequential reconstruction when unsupported.
 - Absolute quality minima should be treated as deployment warnings unless explicitly upgraded to hard-fail policy.
 
 ## Memory Profiling
@@ -199,7 +199,7 @@ python3 scripts/profile_memory.py
 ## Implementation Status
 ✅ Core modules compile and integrate in alpha scope
 ✅ Benchmark scripts and proof plots are present
-✅ Custom kernel alpha route and fallback policy are implemented
+✅ Custom Metal kernel alpha route and fallback policy are implemented
 ✅ Telemetry layer is implemented with batched writer support
 ⚠ MLX-dependent quality and performance validation is environment-dependent
 ⚠ Sparse quality remains warning-scoped for deployment policy

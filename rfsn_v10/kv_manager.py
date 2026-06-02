@@ -19,7 +19,13 @@ from typing import Optional, Tuple
 from .compat import mx
 
 from .bitpack import BitPackedQuantizer
-from .kernels import KernelRouteError, custom_kernel_supported, reconstruct_packed_dequant_wht_custom
+from .kernels import (
+    KernelRouteError,
+    apply_hash_signs_metal,
+    maybe_supports_metal_kernels,
+    packed_dequant_metal,
+    reconstruct_packed_dequant_wht_sign_metal,
+)
 
 
 @dataclass
@@ -54,6 +60,15 @@ class TurboQuantKVCache:
         self.use_wht = enabled
         self.use_incoherent_signs = enabled
 
+    @property
+    def use_custom_kernel(self) -> bool:
+        """Backward compatibility alias for prefer_metal_kernels."""
+        return self.prefer_metal_kernels
+
+    @use_custom_kernel.setter
+    def use_custom_kernel(self, value: bool) -> None:
+        self.prefer_metal_kernels = bool(value)
+
 
 class RFSNTurboQuantKVManager:
     """TurboQuant KV cache manager with grouped symmetric quantization."""
@@ -65,7 +80,9 @@ class RFSNTurboQuantKVManager:
         use_wht: Optional[bool] = None,
         use_incoherent_signs: Optional[bool] = None,
         use_incoherent: Optional[bool] = None,
-        use_custom_kernel: bool = True,
+        use_custom_kernel: Optional[bool] = None,
+        prefer_metal_kernels: bool = False,
+        strict_metal: bool = False,
         max_memory_gb: float = 1.0,
         max_pinned_memory_gb: float = 0.5,
         cache_dir: str = ".rfsn_cache",
@@ -93,7 +110,10 @@ class RFSNTurboQuantKVManager:
         self.v_bits = v_bits
         self.use_wht = bool(use_wht)
         self.use_incoherent_signs = bool(use_incoherent_signs)
-        self.use_custom_kernel = bool(use_custom_kernel)
+        if use_custom_kernel is not None:
+            prefer_metal_kernels = bool(use_custom_kernel)
+        self.prefer_metal_kernels = bool(prefer_metal_kernels)
+        self.strict_metal = bool(strict_metal)
         self.max_memory_gb = max_memory_gb
         self.max_pinned_memory_gb = max_pinned_memory_gb
         self.cache_dir = Path(cache_dir)
@@ -104,7 +124,7 @@ class RFSNTurboQuantKVManager:
         self.active_caches: dict[str, TurboQuantKVCache] = {}
         self._total_estimated_bytes = 0
         self._pinned_bytes = 0
-        self.last_reconstruction_kernel = "sequential"
+        self.last_reconstruction_kernel = "sequential_reference"
         self.cache_dir.mkdir(parents=True, exist_ok=True)
 
     @property
@@ -148,7 +168,6 @@ class RFSNTurboQuantKVManager:
         seed_u32 = mx.array(seed & 0xFFFFFFFF, dtype=mx.uint32)
         idx = mx.arange(n, dtype=mx.uint32)
         z = idx ^ seed_u32
-        z = z + mx.array(0x9E3779B9, dtype=mx.uint32)
         z = (z ^ (z >> 16)) * mx.array(0x85EBCA6B, dtype=mx.uint32)
         z = (z ^ (z >> 13)) * mx.array(0xC2B2AE35, dtype=mx.uint32)
         z = z ^ (z >> 16)
@@ -418,17 +437,11 @@ class RFSNTurboQuantKVManager:
         use_incoherent_signs: bool,
         out_dtype: mx.Dtype,
     ) -> mx.array:
-        if self.use_custom_kernel:
-            supported, reason = custom_kernel_supported(
-                shape=shape,
-                out_dtype=out_dtype,
-                use_wht=use_wht,
-                use_incoherent_signs=use_incoherent_signs,
-            )
-            if supported:
-                try:
-                    self.last_reconstruction_kernel = "custom"
-                    return reconstruct_packed_dequant_wht_custom(
+        if self.prefer_metal_kernels and maybe_supports_metal_kernels():
+            try:
+                if use_wht and use_incoherent_signs:
+                    self.last_reconstruction_kernel = "metal_packed_dequant_wht_sign"
+                    return reconstruct_packed_dequant_wht_sign_metal(
                         packed=packed,
                         scales=scales,
                         n_values=n_values,
@@ -436,16 +449,33 @@ class RFSNTurboQuantKVManager:
                         bits=bits,
                         seed=seed,
                         out_dtype=out_dtype,
-                        dequantize_fn=self._dequantize_unsigned,
-                        wht_fn=self._apply_wht_pretransform,
-                        signs_fn=self._apply_signs_on_the_fly,
+                        group_size=self.group_size,
                     )
-                except KernelRouteError:
-                    self.last_reconstruction_kernel = "sequential_fallback"
-            else:
-                self.last_reconstruction_kernel = f"sequential_fallback:{reason}"
-        else:
-            self.last_reconstruction_kernel = "sequential"
+
+                deq = packed_dequant_metal(
+                    packed=packed,
+                    scales=scales,
+                    n_values=n_values,
+                    bits=bits,
+                    group_size=self.group_size,
+                    out_dtype=out_dtype,
+                ).reshape(shape)
+
+                if use_incoherent_signs:
+                    self.last_reconstruction_kernel = "metal_sign_only"
+                    return apply_hash_signs_metal(deq, seed=seed).astype(out_dtype)
+
+                self.last_reconstruction_kernel = "metal_packed_dequant"
+                return deq.astype(out_dtype)
+            except Exception as exc:
+                if self.strict_metal:
+                    raise KernelRouteError(f"strict metal reconstruction failed: {exc}") from exc
+                self.last_reconstruction_kernel = "metal_failed_fallback_reference"
+
+        if self.prefer_metal_kernels and self.strict_metal:
+            raise KernelRouteError("strict metal requested but metal kernels are unavailable")
+
+        self.last_reconstruction_kernel = "sequential_reference"
 
         return self._reconstruct_packed_dequant_wht(
             packed=packed,
@@ -458,6 +488,41 @@ class RFSNTurboQuantKVManager:
             use_incoherent_signs=use_incoherent_signs,
             out_dtype=out_dtype,
         )
+
+    def evict_lru(self, target_bytes: int | None = None) -> int:
+        """Evict least-recently-used unpinned caches.
+
+        Args:
+            target_bytes: Stop once at least this many bytes have been freed.
+
+        Returns:
+            Bytes freed.
+        """
+        to_free = 0 if target_bytes is None else max(0, int(target_bytes))
+        freed = 0
+
+        while self.active_caches and (freed < to_free or to_free == 0):
+            lru_key = min(
+                (
+                    k
+                    for k, v in self.active_caches.items()
+                    if not v.pinned
+                ),
+                key=lambda k: self.active_caches[k].last_used,
+                default=None,
+            )
+            if lru_key is None:
+                break
+
+            old_cache = self.active_caches.pop(lru_key)
+            old_bytes = self._estimate_cache_bytes(old_cache)
+            self._total_estimated_bytes -= old_bytes
+            freed += old_bytes
+
+            if to_free == 0:
+                break
+
+        return freed
 
     # ------------------------------------------------------------------
     # Memory estimation

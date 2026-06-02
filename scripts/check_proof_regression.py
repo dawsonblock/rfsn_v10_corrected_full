@@ -24,16 +24,19 @@ def main() -> None:
     )
     parser.add_argument(
         "--baseline-dir",
+        "--baseline",
         default="",
         help="Directory with baseline proof artifacts",
     )
     parser.add_argument(
         "--current-dir",
+        "--current",
         default="",
         help="Directory with current proof artifacts",
     )
     parser.add_argument(
         "--thresholds-file",
+        "--thresholds",
         default="scripts/proof_regression_thresholds.json",
         help="Thresholds config JSON file",
     )

@@ -15,12 +15,11 @@ _LAZY_IMPORTS = {
     "RFSNRuntime": ".runtime",
     "TelemetryEvent": ".runtime",
     "AdaptiveSparsityController": ".adaptive_sparsity",
-    "QualitySample": ".adaptive_sparsity",
+    "AdaptiveDecision": ".adaptive_sparsity",
     "MemoryGuard": ".memory_guard",
     "AsyncWriter": ".async_writer",
     "ClickHouseClient": ".clickhouse_client",
     "KernelRouteError": ".kernels",
-    "custom_kernel_supported": ".kernels",
 }
 
 __all__ = [
@@ -33,12 +32,11 @@ __all__ = [
     "RFSNRuntime",
     "TelemetryEvent",
     "AdaptiveSparsityController",
-    "QualitySample",
+    "AdaptiveDecision",
     "MemoryGuard",
     "AsyncWriter",
     "ClickHouseClient",
     "KernelRouteError",
-    "custom_kernel_supported",
 ]
 
 

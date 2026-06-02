@@ -80,6 +80,7 @@ def _plot_with_matplotlib(kv_runs: list[dict], e2e_runs: list[dict], output_dir:
     e2e_hit = [float(run.get("cache_hit_total_latency_ms", 0.0)) for run in e2e_runs]
     e2e_quant = [float(run.get("quant_audit_cosine") or 0.0) for run in e2e_runs]
     e2e_sparse = [float(run.get("sparse_audit_cosine") or 0.0) for run in e2e_runs]
+    e2e_topk = [float(run.get("top_k_ratio") or 0.0) for run in e2e_runs]
 
     fig = plt.figure(figsize=(10, 6))
     ax = fig.add_subplot(1, 1, 1)
@@ -119,6 +120,18 @@ def _plot_with_matplotlib(kv_runs: list[dict], e2e_runs: list[dict], output_dir:
     ax.set_title("E2E Sparse Quality Cosine")
     fig.tight_layout()
     fig.savefig(output_dir / "e2e_sparse_quality.png", dpi=150)
+    plt.close(fig)
+
+    fig = plt.figure(figsize=(10, 6))
+    ax = fig.add_subplot(1, 1, 1)
+    ax.scatter(e2e_topk, e2e_sparse, color="#264653")
+    ax.set_xlim(0.0, 1.0)
+    ax.set_ylim(0.0, 1.0)
+    ax.set_xlabel("Top-k ratio")
+    ax.set_ylabel("Sparse audit cosine")
+    ax.set_title("Sparse Quality vs Top-k")
+    fig.tight_layout()
+    fig.savefig(output_dir / "sparse_quality_vs_topk.png", dpi=150)
     plt.close(fig)
 
     return True
@@ -171,14 +184,22 @@ def main() -> None:
             output_dir / "e2e_sparse_quality.png",
             "matplotlib unavailable; placeholder only",
         )
+        _write_placeholder_png(
+            output_dir / "sparse_quality_vs_topk.png",
+            "matplotlib unavailable; placeholder only",
+        )
 
     _write_placeholder_png(
         output_dir / "custom_kernel_alpha_pending_benchmark.png",
         "Placeholder: custom kernel benchmark plot pending dedicated benchmark dataset.",
     )
     _write_placeholder_png(
+        output_dir / "kernel_reference_vs_metal.png",
+        "Placeholder: kernel reference vs metal comparison requires dedicated paired kernel benchmark dataset.",
+    )
+    _write_placeholder_png(
         output_dir / "kernel_reference_vs_custom.png",
-        "Placeholder: kernel reference vs custom comparison requires dedicated paired kernel benchmark dataset.",
+        "Alias placeholder for legacy naming; use kernel_reference_vs_metal.png for Main11.",
     )
 
     print(f"Wrote plot artifacts to {output_dir}")

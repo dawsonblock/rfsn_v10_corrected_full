@@ -294,3 +294,21 @@ def test_runtime_use_compressed_on_miss_assigns_retrieved_kv(kv_manager, monkeyp
     assert state["retrieve_calls"] == 2
     assert mx.allclose(state["keys_seen"], compressed_k).item()
     assert mx.allclose(state["values_seen"], compressed_v).item()
+
+
+def test_runtime_does_not_store_audit_tensors_on_self(runtime_with_audit):
+    q = mx.random.normal((1, 4, 1, 64))
+    k = mx.random.normal((1, 4, 128, 64))
+    v = mx.random.normal((1, 4, 128, 64))
+
+    runtime_with_audit.execute_decode_step(
+        skill_pattern="audit_tensor_scope",
+        layer_id="l0",
+        batch_id="b1",
+        queries=q,
+        keys=k,
+        values=v,
+    )
+
+    assert not hasattr(runtime_with_audit, "original_keys")
+    assert not hasattr(runtime_with_audit, "original_values")
