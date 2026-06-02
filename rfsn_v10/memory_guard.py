@@ -62,9 +62,9 @@ class MemoryGuard:
     def _check_mlx_memory_api() -> bool:
         """Check if MLX memory introspection APIs are available."""
         try:
-            if hasattr(mx, 'metal') and hasattr(mx.metal, 'get_active_memory'):
-                return True
             if hasattr(mx, 'get_active_memory'):
+                return True
+            if hasattr(mx, 'metal') and hasattr(mx.metal, 'get_active_memory'):
                 return True
             return False
         except Exception:
@@ -75,10 +75,10 @@ class MemoryGuard:
         if not self._has_mlx_memory_api:
             return 0
         try:
-            if hasattr(mx, 'metal') and hasattr(mx.metal, 'get_active_memory'):
-                return int(mx.metal.get_active_memory())
             if hasattr(mx, 'get_active_memory'):
                 return int(mx.get_active_memory())
+            if hasattr(mx, 'metal') and hasattr(mx.metal, 'get_active_memory'):
+                return int(mx.metal.get_active_memory())
         except Exception:
             pass
         return 0
@@ -88,10 +88,10 @@ class MemoryGuard:
         if not self._has_mlx_memory_api:
             return 0
         try:
-            if hasattr(mx, 'metal') and hasattr(mx.metal, 'get_peak_memory'):
-                return int(mx.metal.get_peak_memory())
             if hasattr(mx, 'get_peak_memory'):
                 return int(mx.get_peak_memory())
+            if hasattr(mx, 'metal') and hasattr(mx.metal, 'get_peak_memory'):
+                return int(mx.metal.get_peak_memory())
         except Exception:
             pass
         return 0
