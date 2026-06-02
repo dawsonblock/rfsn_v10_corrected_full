@@ -7,6 +7,15 @@ Verified:
 - optional MLX package structure
 - proof regression tooling
 - plot generation from included artifacts
+- package artifact inclusion (see below)
+
+Shipped proof artifacts (artifacts/proof/main12/):
+- ✅ kernel_benchmark.json — Metal path latency and equivalence rows
+- ✅ kv_cache_runs.json — KV quality and compression metrics
+- ✅ e2e_scenarios.json — end-to-end scenario evidence
+- ✅ regression_report.json + regression_report.md — baseline comparisons
+- ✅ real_model_validation.json — scaffold/record (environment-dependent)
+- ✅ summary.json + proof_summary.md — orbit summary
 
 Requires Apple Silicon:
 - MLX kernel equivalence tests
