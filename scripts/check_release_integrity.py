@@ -38,6 +38,12 @@ def check() -> list[str]:
     if ds_store:
         errors.append(f".DS_Store files found ({len(ds_store)} instances)")
 
+    # Check for nested archives
+    for pattern in ["*.zip", "*.tar", "*.tar.gz", "*.7z"]:
+        matches = list(root.rglob(pattern))
+        if matches:
+            errors.append(f"nested archive(s) found: {[str(m) for m in matches[:10]]}")
+
     # Verify required proof artifacts exist
     artifact_dir = root / "artifacts" / "proof" / "main12"
     if not artifact_dir.exists():

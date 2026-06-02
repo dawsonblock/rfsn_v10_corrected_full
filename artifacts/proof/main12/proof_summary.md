@@ -1,13 +1,16 @@
 # main12 Proof Summary
 
-Release: Main 17 — Clean Apple Silicon Proof Release
+Release: Main 18 — Fused-Kernel Coherence + Proof Repair
 Generated: 2026-06-02T07:26:04.849859+00:00
 
 ## KV Cache Status
 - Synthetic tensor proof: pass
 - Compression ratio: 0.265625 (best case)
 - Key quality: pass (cosine >= 0.999)
-- Value quality: pass (cosine >= 0.999)
+- Value quality:
+  - 8-bit V path: ~0.99998 cosine
+  - 3-bit V path: ~0.970 cosine
+  - release threshold: pass above 0.90
 
 ## Sparse Decode Status
 - Default: disabled

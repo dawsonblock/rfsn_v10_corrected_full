@@ -1,7 +1,7 @@
 {
   "profile": "main12",
-  "release": "main17",
-  "release_purpose": "Clean Apple Silicon Proof Release",
+  "release": "main18",
+  "release_purpose": "Fused-Kernel Coherence + Proof Repair",
   "generated_at": "2026-06-02T07:26:04.849886+00:00",
   "files": [
     "kv_cache_runs.json",

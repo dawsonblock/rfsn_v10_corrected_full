@@ -1,29 +1,27 @@
-# RFSN v10 Main 17 — Clean Apple Silicon Proof Release
+# RFSN v10 Main 18 — Fused-Kernel Coherence + Proof Repair
 
-## Status: RFSN v10 Main 17 — Clean Apple Silicon Proof Release
+## Status: RFSN v10 Main 18 — Fused-Kernel Coherence + Proof Repair
 
 Implemented:
 - low-bit KV cache compression
-- Metal packed-dequant kernel
-- Metal WHT64 kernel
-- Metal hash-sign kernel
+- sequential reference reconstruction route
 - multi-kernel Metal reconstruction route
+- fused packed-dequant-WHT-sign Metal kernel source path
 - sparse safety gate
-- proof artifact generation
-- kernel benchmark artifact packaging
+- kernel benchmark artifacts
+- synthetic proof artifacts
 
-Not implemented:
-- single fused packed-dequant-WHT-sign kernel
+Proof status:
+- multi-kernel route: benchmarked
+- fused route: must be proven by fused_kernel_benchmark.json
+- sparse decode: below threshold, disabled by default
+- real-model validation: tiny-random smoke test unless otherwise stated
+
+Not claimed:
 - production LLM deployment
-- sparse decode as default
-- guaranteed speedup on all workloads
-
-Current proof state:
-- synthetic KV compression proof: included
-- kernel benchmark JSON: included
-- sparse quality proof: included, below deployment threshold
-- real-model validation: smoke test only unless a real non-random model artifact is supplied
-- Apple Silicon validation: included only if mlx_test_summary.md contains real macOS/Apple Silicon hardware metadata
+- sparse-safe inference
+- real non-random LLM quality preservation
+- universal speedup
 
 ## Overview
 RFSN v10 is an alpha quantized KV-cache + decode-time sparse-attention runtime for MLX/Apple Silicon. This build focuses on proving numerical equivalence and quality-safe sparse behavior before any production claim.
@@ -71,8 +69,8 @@ RFSN v10 is an alpha quantized KV-cache + decode-time sparse-attention runtime f
 - **Benchmarks**: Performance measurements with hardware/software metadata
 
 Kernel status:
-- Implemented: Metal sign kernel, Metal packed-dequant kernel, Metal WHT64 kernel, multi-kernel Metal reconstruction route
-- Not implemented: single fused packed-dequant-WHT-sign Metal kernel
+- Implemented: Metal sign kernel, Metal packed-dequant kernel, Metal WHT64 kernel, multi-kernel Metal reconstruction route, fused packed-dequant-WHT-sign Metal kernel source path
+- Proof validation: fused route must be proven by fused_kernel_benchmark.json
 
 ## Requirements
 - Apple Silicon Mac (ARM64)
