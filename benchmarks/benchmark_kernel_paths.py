@@ -16,6 +16,9 @@ mx = pytest.importorskip("mlx.core")
 
 from rfsn_v10.kv_manager import RFSNTurboQuantKVManager
 
+COSINE_THRESHOLD = 0.999
+MAX_ABS_DIFF_THRESHOLD = 1e-3
+
 
 SHAPES = [
     (1, 4, 512, 64),
@@ -132,8 +135,8 @@ def _bench_mode(shape: tuple[int, int, int, int], mode: str, iterations: int, ba
         mx.eval(rec[0], rec[1])
         latencies.append(dt)
     latency_mean, latency_p50, latency_p95 = _latency_stats(latencies)
-    k_out, _ = manager.retrieve(key, out_dtype=mx.float32)
-    mx.eval(k_out)
+    k_out, v_out = manager.retrieve(key, out_dtype=mx.float32)
+    mx.eval(k_out, v_out)
 
     cache = manager.active_caches[key]
     ref_k = manager._reconstruct_packed_dequant_wht(
@@ -147,10 +150,23 @@ def _bench_mode(shape: tuple[int, int, int, int], mode: str, iterations: int, ba
         use_incoherent_signs=cache.use_incoherent_signs,
         out_dtype=mx.float32,
     )
-    mx.eval(ref_k)
+    ref_v = manager._reconstruct_packed_dequant_wht(
+        packed=cache.v_packed,
+        scales=cache.v_scales,
+        n_values=cache.v_n_values,
+        shape=cache.shape,
+        bits=cache.v_bits,
+        seed=cache.seed,
+        use_wht=cache.use_wht,
+        use_incoherent_signs=cache.use_incoherent_signs,
+        out_dtype=mx.float32,
+    )
+    mx.eval(ref_k, ref_v)
 
-    diff = mx.max(mx.abs(k_out - ref_k)).item()
-    cosine = cosine_similarity(k_out, ref_k)
+    k_diff = mx.max(mx.abs(k_out - ref_k)).item()
+    k_cosine = cosine_similarity(k_out, ref_k)
+    v_diff = mx.max(mx.abs(v_out - ref_v)).item()
+    v_cosine = cosine_similarity(v_out, ref_v)
 
     return {
         "shape": [int(v) for v in shape],
@@ -162,8 +178,10 @@ def _bench_mode(shape: tuple[int, int, int, int], mode: str, iterations: int, ba
         "latency_ms_p95": latency_p95,
         "kv_reconstruction_kernel": manager.last_reconstruction_kernel,
         "fallback_used": manager.last_reconstruction_kernel == "metal_failed_fallback_reference",
-        "max_abs_diff_vs_reference": float(diff),
-        "cosine_vs_reference": float(cosine),
+        "key_cosine_vs_reference": float(k_cosine),
+        "key_max_abs_diff_vs_reference": float(k_diff),
+        "value_cosine_vs_reference": float(v_cosine),
+        "value_max_abs_diff_vs_reference": float(v_diff),
     }
 
 
@@ -199,7 +217,7 @@ def main() -> None:
                 reference_latencies[str(tuple(shape))] = row["latency_ms_p50"]
 
     for row in runs:
-        shape_key = str(tuple(row["shape"])) if isinstance(row.get("shape"), list) else str(row.get("shape"))
+        shape_key = str(tuple(row["shape"]))
         ref_latency = reference_latencies.get(shape_key, row["latency_ms_p50"])
         computed_speedup = (
             float(ref_latency) / float(row["latency_ms_p50"])
@@ -207,12 +225,27 @@ def main() -> None:
             else 0.0
         )
 
+        # Validate K and V separately
+        key_valid = (
+            float(row["key_cosine_vs_reference"]) >= COSINE_THRESHOLD
+            and float(row["key_max_abs_diff_vs_reference"]) <= MAX_ABS_DIFF_THRESHOLD
+        )
+        value_valid = (
+            float(row["value_cosine_vs_reference"]) >= COSINE_THRESHOLD
+            and float(row["value_max_abs_diff_vs_reference"]) <= MAX_ABS_DIFF_THRESHOLD
+        )
+
+        row["key_valid"] = key_valid
+        row["value_valid"] = value_valid
+
+        # Add route classification
+        if row["mode"] in ["sequential_reference", "metal_dequant_wht_sign"]:
+            row["route_class"] = "full_equivalent"
+        else:
+            row["route_class"] = "ablation"
+
         if row["mode"].startswith("metal_"):
-            invalid = (
-                bool(row["fallback_used"])
-                or float(row["cosine_vs_reference"]) < 0.999
-                or float(row["max_abs_diff_vs_reference"]) > 1e-3
-            )
+            invalid = bool(row["fallback_used"]) or not key_valid or not value_valid
             row["status"] = "invalid" if invalid else "valid"
             row["speedup_vs_reference"] = None if invalid else float(computed_speedup)
         else:
@@ -225,7 +258,7 @@ def main() -> None:
             "equivalence_pass_modes": [
                 row["mode"]
                 for row in runs
-                if row["cosine_vs_reference"] > 0.999 and row.get("status") == "valid"
+                if row["key_valid"] and row["value_valid"]
             ],
             "speedup_modes": [
                 row["mode"]

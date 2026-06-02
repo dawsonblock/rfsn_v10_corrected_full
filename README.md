@@ -1,41 +1,29 @@
-# RFSN v10 Main 15 — Clean Proof Package + Release Integrity Repair
+# RFSN v10 Main 17 — Clean Apple Silicon Proof Release
 
-## Status: RFSN v10 Main 15 — Clean Proof Package + Release Integrity Repair
-
-Verified:
-- non-MLX tests
-- MLX kernel equivalence tests (kernel_equivalence_mlx.py, wht_metal_mlx.py, invalid_symmetric_codes_mlx.py)
-- MemoryGuard + sparse safety tests (memory_guard_runtime_mlx.py, sparse_safety_gate.py)
-- optional MLX package structure
-- proof regression tooling
-- plot generation from included artifacts
-- package artifact inclusion (see below)
-- release integrity verification
-
-Shipped proof artifacts (artifacts/proof/main12/):
-- ✅ kernel_benchmark.json — Metal path latency and equivalence rows
-- ✅ kv_cache_runs.json — KV quality and compression metrics
-- ✅ e2e_scenarios.json — end-to-end scenario evidence
-- ✅ regression_report.json + regression_report.md — baseline comparisons
-- ✅ real_model_validation.json — real-LLM KV roundtrip record
-- ✅ summary.json + proof_summary.md — orbit summary
-- ✅ mlx_test_summary.md — Apple Silicon test execution record
-
-Requires Apple Silicon:
-- Metal benchmark regeneration on target hardware
-- latency profiling on native Apple Silicon (non-MLX environment may not represent peak Metal throughput)
+## Status: RFSN v10 Main 17 — Clean Apple Silicon Proof Release
 
 Implemented:
+- low-bit KV cache compression
 - Metal packed-dequant kernel
 - Metal WHT64 kernel
 - Metal hash-sign kernel
 - multi-kernel Metal reconstruction route
 - sparse safety gate
+- proof artifact generation
+- kernel benchmark artifact packaging
 
 Not implemented:
 - single fused packed-dequant-WHT-sign kernel
 - production LLM deployment
-- guaranteed speedup
+- sparse decode as default
+- guaranteed speedup on all workloads
+
+Current proof state:
+- synthetic KV compression proof: included
+- kernel benchmark JSON: included
+- sparse quality proof: included, below deployment threshold
+- real-model validation: smoke test only unless a real non-random model artifact is supplied
+- Apple Silicon validation: included only if mlx_test_summary.md contains real macOS/Apple Silicon hardware metadata
 
 ## Overview
 RFSN v10 is an alpha quantized KV-cache + decode-time sparse-attention runtime for MLX/Apple Silicon. This build focuses on proving numerical equivalence and quality-safe sparse behavior before any production claim.
@@ -84,7 +72,7 @@ RFSN v10 is an alpha quantized KV-cache + decode-time sparse-attention runtime f
 
 Kernel status:
 - Implemented: Metal sign kernel, Metal packed-dequant kernel, Metal WHT64 kernel, multi-kernel Metal reconstruction route
-- Not yet implemented: single fused packed-dequant-WHT-sign Metal kernel
+- Not implemented: single fused packed-dequant-WHT-sign Metal kernel
 
 ## Requirements
 - Apple Silicon Mac (ARM64)

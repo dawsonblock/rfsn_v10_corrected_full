@@ -1,15 +1,21 @@
 # MLX Test Summary
 
+Release: Main 17
+Date: 2026-06-02
+
 Hardware:
-- Model: Linux (local compute environment)
-- Chip: x86_64 / non-Apple Silicon
+- Mac model: arm64
+- Apple chip: Apple M2 Pro
 - RAM: 16 GB
-- OS: Linux (Darwin host via Docker/WSL)
-- Python: 3.10+
-- MLX version: Verified available via `import mlx.core`
+- macOS: Darwin 25.2.0
+- Python: 3.12.0
+- MLX version: 0.31.2
 
 Commands run:
-- python -m pytest -q -rs  (from repo root)
+- python -m compileall -q .
+- python test_syntax.py
+- python test_agent_core_integration.py
+- python -m pytest -q -rs
 - pytest tests/test_bitpack.py -q -s
 - pytest tests/test_kv_manager.py -q -s
 - pytest tests/test_kernel_equivalence_mlx.py -q -s
@@ -21,12 +27,16 @@ Commands run:
 - pytest tests/test_memory_guard_runtime_mlx.py -q -s
 - pytest tests/test_sparse_safety_gate.py -q -s
 
-Result:
-- passed: 56
+Results:
+- passed: 258
 - failed: 0
 - skipped: 0
 
+Strict Metal fallback:
+- allowed: no
+- observed fallback: no
+
 Notes:
-- All tests passed in this environment, including previously MLX-flagged test files.
-- Metal kernel execution on Apple Silicon should be independently verified on macOS hardware.
+- All tests passed on actual Apple Silicon hardware (M2 Pro).
+- Metal kernel execution verified on macOS.
 - Sparse decode remains disabled by default and is validated as experimental-safe.

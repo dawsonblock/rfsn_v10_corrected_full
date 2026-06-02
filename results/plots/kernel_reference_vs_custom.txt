@@ -1,0 +1,1 @@
+Alias placeholder for legacy naming; use kernel_reference_vs_metal.png for Main11.

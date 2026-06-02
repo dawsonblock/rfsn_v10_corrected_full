@@ -1,19 +1,48 @@
 # main12 Proof Summary
 
+Release: Main 17 — Clean Apple Silicon Proof Release
 Generated: 2026-06-02T07:26:04.849859+00:00
+
+## KV Cache Status
+- Synthetic tensor proof: pass
+- Compression ratio: 0.265625 (best case)
+- Key quality: pass (cosine >= 0.999)
+- Value quality: pass (cosine >= 0.999)
 
 ## Sparse Decode Status
 - Default: disabled
 - Reason: shipped sparse audit quality has not cleared deployment threshold
 - Threshold: sparse_audit_cosine >= 0.90
 - Current minimum: 0.4996378421783447
+- Current maximum: 0.8836325407028198
 - Recommendation: dense default, sparse opt-in only
+
+## Kernel Benchmark Status
+- Full-route benchmark: included (sequential_reference vs metal_dequant_wht_sign)
+- Ablation benchmark: included (metal_dequant, metal_dequant_wht, metal_dequant_sign)
+- K validation: pass (cosine >= 0.999, max_abs_diff <= 1e-3)
+- V validation: pass (cosine >= 0.999, max_abs_diff <= 1e-3)
+- Fallback observed: no
+
+## MLX Test Status
+- Apple Silicon run: yes
+- Hardware: Apple M2 Pro, 16 GB RAM, macOS Darwin 25.2.0
+- MLX version: 0.31.2
+- Result: 258 tests passed, 0 failed, 0 skipped
+- Metal fallback: no
+
+## Real Model Validation
+- Class: tiny-random smoke test
+- Limitations: Uses hf-internal-testing-tiny-random-LlamaForCausalLM with random weights
+- Status: Verifies plumbing only, does not prove quality on a real LLM
+- For production-quality evidence: validation with a real non-random model is required
 
 ## Files
 - kv_cache_runs.json
 - e2e_scenarios.json
 - kernel_benchmark.json
 - real_model_validation.json
+- mlx_test_summary.md
 
 ## Highlights
 - Fastest KV retrieve: 0.61ms (shape=(1, 8, 1024, 64)|k=8|v=8|incoherent=False)
@@ -30,8 +59,6 @@ Generated: 2026-06-02T07:26:04.849859+00:00
 - WARNING_UNSAFE_FOR_LLM_DEPLOYMENT
 - Sparse deployment threshold met: no
 - Recommended default: dense (sparse decode remains experimental and should default to disabled)
-- Kernel benchmark: run
-- Real model validation: run
 
 ## Next Checks
 - Compare these artifacts against previous runs for trend regressions.
