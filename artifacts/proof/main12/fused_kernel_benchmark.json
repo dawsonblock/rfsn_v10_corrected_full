@@ -9,9 +9,9 @@
         64
       ],
       "bits": 8,
-      "latency_ms_mean": 0.13108367177968225,
-      "latency_ms_p50": 0.15216699102893472,
-      "latency_ms_p95": 0.19512500148266554,
+      "latency_ms_mean": 1.0889044031500816,
+      "latency_ms_p50": 0.6980840116739273,
+      "latency_ms_p95": 5.5690839944873005,
       "cosine_vs_reference": 0.9999998807907104,
       "max_abs_diff_vs_reference": 0.0,
       "rel_mae_vs_reference": 0.0,
@@ -27,9 +27,9 @@
         64
       ],
       "bits": 3,
-      "latency_ms_mean": 0.05588900724736353,
-      "latency_ms_p50": 0.04266700125299394,
-      "latency_ms_p95": 0.08583301678299904,
+      "latency_ms_mean": 0.5783333966974169,
+      "latency_ms_p50": 0.4584590205922723,
+      "latency_ms_p95": 1.4462499821092933,
       "cosine_vs_reference": 1.0,
       "max_abs_diff_vs_reference": 0.0,
       "rel_mae_vs_reference": 0.0,
@@ -45,9 +45,9 @@
         64
       ],
       "bits": 8,
-      "latency_ms_mean": 0.053805987893914185,
-      "latency_ms_p50": 0.03999998443759978,
-      "latency_ms_p95": 0.08733398863114417,
+      "latency_ms_mean": 0.4501708986936137,
+      "latency_ms_p50": 0.3676670021377504,
+      "latency_ms_p95": 0.9340419783256948,
       "cosine_vs_reference": 1.0,
       "max_abs_diff_vs_reference": 0.0,
       "rel_mae_vs_reference": 0.0,
@@ -63,9 +63,9 @@
         64
       ],
       "bits": 3,
-      "latency_ms_mean": 0.04812499779897431,
-      "latency_ms_p50": 0.03724999260157347,
-      "latency_ms_p95": 0.07079201168380678,
+      "latency_ms_mean": 0.43435420375317335,
+      "latency_ms_p50": 0.35270900116302073,
+      "latency_ms_p95": 1.0357499995734543,
       "cosine_vs_reference": 1.0,
       "max_abs_diff_vs_reference": 0.0,
       "rel_mae_vs_reference": 0.0,
@@ -81,9 +81,9 @@
         64
       ],
       "bits": 8,
-      "latency_ms_mean": 0.05837499823731681,
-      "latency_ms_p50": 0.06554200081154704,
-      "latency_ms_p95": 0.0718749943189323,
+      "latency_ms_mean": 0.23042920511215925,
+      "latency_ms_p50": 0.21487497724592686,
+      "latency_ms_p95": 0.34262501867488027,
       "cosine_vs_reference": 1.0,
       "max_abs_diff_vs_reference": 0.0,
       "rel_mae_vs_reference": 0.0,
@@ -99,9 +99,9 @@
         64
       ],
       "bits": 3,
-      "latency_ms_mean": 0.03718032773273686,
-      "latency_ms_p50": 0.03391699283383787,
-      "latency_ms_p95": 0.048165995394811034,
+      "latency_ms_mean": 0.2365791966440156,
+      "latency_ms_p50": 0.2176669950131327,
+      "latency_ms_p95": 0.409041007515043,
       "cosine_vs_reference": 0.9999998807907104,
       "max_abs_diff_vs_reference": 0.0,
       "rel_mae_vs_reference": 0.0,
@@ -114,5 +114,5 @@
     "avg_cosine_vs_reference": 0.9999999602635702,
     "avg_max_abs_diff_vs_reference": 0.0
   },
-  "generated_at": "2026-06-02T16:55:59.116001"
+  "generated_at": "2026-06-02T17:20:58.955076"
 }
