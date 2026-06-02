@@ -1,6 +1,6 @@
 {
   "metadata": {
-    "timestamp": "2026-06-02T08:33:41.317522+00:00",
+    "timestamp": "2026-06-02T08:34:47.874216+00:00",
     "platform": "macOS-26.2-arm64-arm-64bit",
     "machine": "arm64",
     "python_version": "3.12.0"
@@ -17,8 +17,8 @@
       "reserved_recent_blocks": 2,
       "use_compressed_on_miss": true,
       "sparse_allowed_by_gate": false,
-      "cache_miss_total_latency_ms": 10.089250004966743,
-      "cache_hit_total_latency_ms": 6.13954100117553,
+      "cache_miss_total_latency_ms": 10.633166995830834,
+      "cache_hit_total_latency_ms": 5.162000001291744,
       "cache_hit_execution_mode": "dense_requested",
       "active_blocks": 32,
       "kv_cache_hit": true,
@@ -28,7 +28,7 @@
       "sparse_audit_rel_mae": null,
       "effective_sparsity": 0.0,
       "execution_mode": "dense_requested",
-      "latency_ms": 6.13954100117553,
+      "latency_ms": 5.162000001291744,
       "scenario": "dense_baseline"
     },
     {
@@ -41,8 +41,8 @@
       "reserved_recent_blocks": 2,
       "use_compressed_on_miss": true,
       "sparse_allowed_by_gate": false,
-      "cache_miss_total_latency_ms": 12.533667002571747,
-      "cache_hit_total_latency_ms": 6.069709008443169,
+      "cache_miss_total_latency_ms": 9.206417002133094,
+      "cache_hit_total_latency_ms": 4.512291008722968,
       "cache_hit_execution_mode": "dense_requested",
       "active_blocks": 32,
       "kv_cache_hit": true,
@@ -52,7 +52,7 @@
       "sparse_audit_rel_mae": null,
       "effective_sparsity": 0.0,
       "execution_mode": "dense_requested",
-      "latency_ms": 6.069709008443169,
+      "latency_ms": 4.512291008722968,
       "scenario": "sparse_disabled_by_default"
     },
     {
@@ -65,8 +65,8 @@
       "reserved_recent_blocks": 2,
       "use_compressed_on_miss": true,
       "sparse_allowed_by_gate": true,
-      "cache_miss_total_latency_ms": 18.96054200187791,
-      "cache_hit_total_latency_ms": 10.131249990081415,
+      "cache_miss_total_latency_ms": 11.108958002296276,
+      "cache_hit_total_latency_ms": 7.003499995335005,
       "cache_hit_execution_mode": "sparse_compacted",
       "active_blocks": 24,
       "kv_cache_hit": true,
@@ -76,7 +76,7 @@
       "sparse_audit_rel_mae": 0.543573796749115,
       "effective_sparsity": 0.25,
       "execution_mode": "sparse_compacted",
-      "latency_ms": 10.131249990081415,
+      "latency_ms": 7.003499995335005,
       "scenario": "sparse_topk_075_sink1_recent2"
     },
     {
@@ -89,8 +89,8 @@
       "reserved_recent_blocks": 2,
       "use_compressed_on_miss": true,
       "sparse_allowed_by_gate": true,
-      "cache_miss_total_latency_ms": 15.223084003082477,
-      "cache_hit_total_latency_ms": 8.403416999499314,
+      "cache_miss_total_latency_ms": 10.450375004438683,
+      "cache_hit_total_latency_ms": 6.404207990271971,
       "cache_hit_execution_mode": "sparse_compacted",
       "active_blocks": 16,
       "kv_cache_hit": true,
@@ -100,7 +100,7 @@
       "sparse_audit_rel_mae": 0.955193281173706,
       "effective_sparsity": 0.5,
       "execution_mode": "sparse_compacted",
-      "latency_ms": 8.403416999499314,
+      "latency_ms": 6.404207990271971,
       "scenario": "sparse_topk_050_sink1_recent2"
     },
     {
@@ -113,8 +113,8 @@
       "reserved_recent_blocks": 4,
       "use_compressed_on_miss": true,
       "sparse_allowed_by_gate": true,
-      "cache_miss_total_latency_ms": 14.70987500215415,
-      "cache_hit_total_latency_ms": 8.566042000893503,
+      "cache_miss_total_latency_ms": 9.561458005919121,
+      "cache_hit_total_latency_ms": 6.500000003143214,
       "cache_hit_execution_mode": "sparse_compacted",
       "active_blocks": 16,
       "kv_cache_hit": true,
@@ -124,7 +124,7 @@
       "sparse_audit_rel_mae": 0.955193281173706,
       "effective_sparsity": 0.5,
       "execution_mode": "sparse_compacted",
-      "latency_ms": 8.566042000893503,
+      "latency_ms": 6.500000003143214,
       "scenario": "sparse_topk_050_sink1_recent4"
     },
     {
@@ -137,8 +137,8 @@
       "reserved_recent_blocks": 4,
       "use_compressed_on_miss": true,
       "sparse_allowed_by_gate": true,
-      "cache_miss_total_latency_ms": 15.433332999236882,
-      "cache_hit_total_latency_ms": 9.05100000090897,
+      "cache_miss_total_latency_ms": 9.396665991516784,
+      "cache_hit_total_latency_ms": 5.457334002130665,
       "cache_hit_execution_mode": "sparse_compacted",
       "active_blocks": 8,
       "kv_cache_hit": true,
@@ -148,7 +148,7 @@
       "sparse_audit_rel_mae": 1.5991672277450562,
       "effective_sparsity": 0.75,
       "execution_mode": "sparse_compacted",
-      "latency_ms": 9.05100000090897,
+      "latency_ms": 5.457334002130665,
       "scenario": "sparse_topk_025_sink1_recent4"
     },
     {
@@ -161,8 +161,8 @@
       "reserved_recent_blocks": 2,
       "use_compressed_on_miss": false,
       "sparse_allowed_by_gate": true,
-      "cache_miss_total_latency_ms": 10.897832995397039,
-      "cache_hit_total_latency_ms": 9.43350000306964,
+      "cache_miss_total_latency_ms": 7.183041001553647,
+      "cache_hit_total_latency_ms": 6.747208011802286,
       "cache_hit_execution_mode": "sparse_compacted",
       "active_blocks": 16,
       "kv_cache_hit": true,
@@ -172,7 +172,7 @@
       "sparse_audit_rel_mae": 0.955193281173706,
       "effective_sparsity": 0.5,
       "execution_mode": "sparse_compacted",
-      "latency_ms": 9.43350000306964,
+      "latency_ms": 6.747208011802286,
       "scenario": "cache_miss_full_precision_path"
     },
     {
@@ -185,8 +185,8 @@
       "reserved_recent_blocks": 2,
       "use_compressed_on_miss": true,
       "sparse_allowed_by_gate": true,
-      "cache_miss_total_latency_ms": 15.389416003017686,
-      "cache_hit_total_latency_ms": 8.440999998128973,
+      "cache_miss_total_latency_ms": 10.035875005996786,
+      "cache_hit_total_latency_ms": 6.9193329982226714,
       "cache_hit_execution_mode": "sparse_compacted",
       "active_blocks": 16,
       "kv_cache_hit": true,
@@ -196,7 +196,7 @@
       "sparse_audit_rel_mae": 0.955193281173706,
       "effective_sparsity": 0.5,
       "execution_mode": "sparse_compacted",
-      "latency_ms": 8.440999998128973,
+      "latency_ms": 6.9193329982226714,
       "scenario": "cache_miss_use_compressed_on_miss_path"
     },
     {
@@ -209,8 +209,8 @@
       "reserved_recent_blocks": 2,
       "use_compressed_on_miss": true,
       "sparse_allowed_by_gate": true,
-      "cache_miss_total_latency_ms": 14.957874998799525,
-      "cache_hit_total_latency_ms": 8.773041001404636,
+      "cache_miss_total_latency_ms": 10.092583004734479,
+      "cache_hit_total_latency_ms": 6.5938330080825835,
       "cache_hit_execution_mode": "sparse_compacted",
       "active_blocks": 16,
       "kv_cache_hit": true,
@@ -220,7 +220,7 @@
       "sparse_audit_rel_mae": 0.955193281173706,
       "effective_sparsity": 0.5,
       "execution_mode": "sparse_compacted",
-      "latency_ms": 8.773041001404636,
+      "latency_ms": 6.5938330080825835,
       "scenario": "cache_hit_compressed_path"
     },
     {
@@ -233,8 +233,8 @@
       "reserved_recent_blocks": 2,
       "use_compressed_on_miss": true,
       "sparse_allowed_by_gate": true,
-      "cache_miss_total_latency_ms": 15.76349999231752,
-      "cache_hit_total_latency_ms": 9.321625009761192,
+      "cache_miss_total_latency_ms": 12.320750000071712,
+      "cache_hit_total_latency_ms": 9.26166700082831,
       "cache_hit_execution_mode": "sparse_compacted",
       "active_blocks": 20,
       "kv_cache_hit": true,
@@ -244,7 +244,7 @@
       "sparse_audit_rel_mae": 0.7481040954589844,
       "effective_sparsity": 0.375,
       "execution_mode": "sparse_compacted",
-      "latency_ms": 9.321625009761192,
+      "latency_ms": 9.26166700082831,
       "scenario": "sparse_decode_path"
     },
     {
@@ -257,8 +257,8 @@
       "reserved_recent_blocks": 2,
       "use_compressed_on_miss": true,
       "sparse_allowed_by_gate": true,
-      "cache_miss_total_latency_ms": 14.09620899357833,
-      "cache_hit_total_latency_ms": 7.864208004320972,
+      "cache_miss_total_latency_ms": 13.766167001449503,
+      "cache_hit_total_latency_ms": 11.019000012311153,
       "cache_hit_execution_mode": "dense_prefill",
       "active_blocks": 32,
       "kv_cache_hit": true,
@@ -268,7 +268,7 @@
       "sparse_audit_rel_mae": null,
       "effective_sparsity": 0.0,
       "execution_mode": "dense_prefill",
-      "latency_ms": 7.864208004320972,
+      "latency_ms": 11.019000012311153,
       "scenario": "dense_decode_path"
     }
   ]
