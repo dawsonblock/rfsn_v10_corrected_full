@@ -1,1 +1,1 @@
-Placeholder: custom kernel benchmark plot pending dedicated benchmark dataset.
+Placeholder: metal kernel benchmark plot pending dedicated benchmark dataset.

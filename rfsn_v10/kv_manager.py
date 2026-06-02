@@ -60,16 +60,6 @@ class TurboQuantKVCache:
         self.use_wht = enabled
         self.use_incoherent_signs = enabled
 
-    @property
-    def use_custom_kernel(self) -> bool:
-        """Backward compatibility alias for prefer_metal_kernels."""
-        return self.prefer_metal_kernels
-
-    @use_custom_kernel.setter
-    def use_custom_kernel(self, value: bool) -> None:
-        self.prefer_metal_kernels = bool(value)
-
-
 class RFSNTurboQuantKVManager:
     """TurboQuant KV cache manager with grouped symmetric quantization."""
 
@@ -137,6 +127,15 @@ class RFSNTurboQuantKVManager:
         self.use_wht = enabled
         self.use_incoherent_signs = enabled
 
+    @property
+    def use_custom_kernel(self) -> bool:
+        """Backward compatibility alias for prefer_metal_kernels."""
+        return self.prefer_metal_kernels
+
+    @use_custom_kernel.setter
+    def use_custom_kernel(self, value: bool) -> None:
+        self.prefer_metal_kernels = bool(value)
+
     # ------------------------------------------------------------------
     # Randomized sign preconditioning (deterministic, self-inverse)
     # ------------------------------------------------------------------
@@ -153,7 +152,7 @@ class RFSNTurboQuantKVManager:
         Includes caching to avoid regenerating sign masks for identical
         shape/seed/dtype combinations.
         """
-        if maybe_supports_metal_kernels():
+        if self.prefer_metal_kernels and maybe_supports_metal_kernels():
             try:
                 return apply_hash_signs_metal(x, seed)
             except Exception:
@@ -175,6 +174,7 @@ class RFSNTurboQuantKVManager:
         seed_u32 = mx.array(seed & 0xFFFFFFFF, dtype=mx.uint32)
         idx = mx.arange(n, dtype=mx.uint32)
         z = idx ^ seed_u32
+        z = z + mx.array(0x9E3779B9, dtype=mx.uint32)
         z = (z ^ (z >> 16)) * mx.array(0x85EBCA6B, dtype=mx.uint32)
         z = (z ^ (z >> 13)) * mx.array(0xC2B2AE35, dtype=mx.uint32)
         z = z ^ (z >> 16)

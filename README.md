@@ -38,7 +38,7 @@ RFSN v10 is an alpha quantized KV-cache + decode-time sparse-attention runtime f
 ### Test Suite
 - `tests/test_bitpack.py` - 25 tests (roundtrip, stress, rejection cases)
 - `tests/test_kv_manager.py` - 25 tests (shapes, distributions, modes, corruption)
-- `tests/test_metal_kernel_math.py` - 133 tests (bitpack, quantization, WHT, fused kernel, KV store/retrieve)
+- `tests/test_metal_kernel_math.py` - 133 tests (bitpack, quantization, WHT, metal-path reconstruction, KV store/retrieve)
 - `tests/test_attention.py` - 9 tests (sparse attention correctness, fallback, validation)
 - `tests/test_runtime.py` - 12 tests (orchestrator, telemetry, cache behavior)
 - `tests/test_long_context.py` - 5 tests (long sequence smoke tests)

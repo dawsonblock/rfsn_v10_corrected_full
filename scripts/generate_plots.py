@@ -24,6 +24,12 @@ def _write_placeholder_png(path: Path, note: str) -> None:
     path.with_suffix(".txt").write_text(note + "\n", encoding="utf-8")
 
 
+def _load_optional(path: Path) -> dict | None:
+    if not path.exists():
+        return None
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
 def _plot_with_matplotlib(kv_runs: list[dict], e2e_runs: list[dict], output_dir: Path) -> bool:
     try:
         import matplotlib.pyplot as plt
@@ -137,6 +143,53 @@ def _plot_with_matplotlib(kv_runs: list[dict], e2e_runs: list[dict], output_dir:
     return True
 
 
+def _plot_kernel_reference_vs_metal(
+    *,
+    kernel_payload: dict | None,
+    output_dir: Path,
+) -> bool:
+    if kernel_payload is None:
+        return False
+
+    runs = list(kernel_payload.get("runs", []))
+    if not runs:
+        return False
+
+    try:
+        import matplotlib.pyplot as plt
+    except Exception:
+        return False
+
+    by_shape: dict[str, dict[str, float]] = {}
+    for row in runs:
+        shape = str(row.get("shape", ""))
+        mode = str(row.get("mode", ""))
+        latency = float(row.get("retrieve_latency_ms", 0.0))
+        by_shape.setdefault(shape, {})[mode] = latency
+
+    shapes = sorted(by_shape.keys())
+    ref = [by_shape[s].get("sequential_reference", 0.0) for s in shapes]
+    metal = [by_shape[s].get("metal_packed_dequant_wht_sign", 0.0) for s in shapes]
+
+    fig = plt.figure(figsize=(12, 6))
+    ax = fig.add_subplot(1, 1, 1)
+    x = list(range(len(shapes)))
+    ax.plot(x, ref, marker="o", label="sequential_reference")
+    ax.plot(x, metal, marker="o", label="metal_packed_dequant_wht_sign")
+    ax.set_xticks(x)
+    ax.set_xticklabels([s.replace("(", "").replace(")", "") for s in shapes], rotation=35, ha="right")
+    ax.set_ylabel("Retrieve latency (ms)")
+    ax.set_title("Kernel Reference vs Metal")
+    ax.legend()
+    fig.tight_layout()
+    fig.savefig(output_dir / "kernel_reference_vs_metal.png", dpi=150)
+    # Keep legacy alias name available.
+    fig.savefig(output_dir / "kernel_reference_vs_custom.png", dpi=150)
+    plt.close(fig)
+
+    return True
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Generate benchmark plot artifacts")
     parser.add_argument("--input-dir", default="artifacts/proof/main10")
@@ -149,6 +202,7 @@ def main() -> None:
 
     kv_runs = _load_runs(input_dir / "kv_cache_runs.json")
     e2e_runs = _load_runs(input_dir / "e2e_scenarios.json")
+    kernel_payload = _load_optional(input_dir / "kernel_benchmark.json")
 
     used_matplotlib = _plot_with_matplotlib(kv_runs, e2e_runs, output_dir)
     if not used_matplotlib:
@@ -191,16 +245,21 @@ def main() -> None:
 
     _write_placeholder_png(
         output_dir / "custom_kernel_alpha_pending_benchmark.png",
-        "Placeholder: custom kernel benchmark plot pending dedicated benchmark dataset.",
+        "Placeholder: metal kernel benchmark plot pending dedicated benchmark dataset.",
     )
-    _write_placeholder_png(
-        output_dir / "kernel_reference_vs_metal.png",
-        "Placeholder: kernel reference vs metal comparison requires dedicated paired kernel benchmark dataset.",
+    wrote_kernel_plot = _plot_kernel_reference_vs_metal(
+        kernel_payload=kernel_payload,
+        output_dir=output_dir,
     )
-    _write_placeholder_png(
-        output_dir / "kernel_reference_vs_custom.png",
-        "Alias placeholder for legacy naming; use kernel_reference_vs_metal.png for Main11.",
-    )
+    if not wrote_kernel_plot:
+        _write_placeholder_png(
+            output_dir / "kernel_reference_vs_metal.png",
+            "Placeholder: kernel reference vs metal comparison requires dedicated paired kernel benchmark dataset.",
+        )
+        _write_placeholder_png(
+            output_dir / "kernel_reference_vs_custom.png",
+            "Alias placeholder for legacy naming; use kernel_reference_vs_metal.png for Main11.",
+        )
 
     print(f"Wrote plot artifacts to {output_dir}")
 

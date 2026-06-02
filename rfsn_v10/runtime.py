@@ -264,6 +264,8 @@ class RFSNRuntime:
                     if kv_result is not None:
                         keys, values = kv_result
             else:
+                if kv_result is None:
+                    raise RuntimeError("KV cache reported hit but retrieve returned None")
                 keys, values = kv_result
         else:
             self.kv_manager.last_reconstruction_kernel = "quantized_disabled"
