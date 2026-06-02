@@ -153,6 +153,13 @@ class RFSNTurboQuantKVManager:
         Includes caching to avoid regenerating sign masks for identical
         shape/seed/dtype combinations.
         """
+        if maybe_supports_metal_kernels():
+            try:
+                return apply_hash_signs_metal(x, seed)
+            except Exception:
+                # Fall back to deterministic MLX math when metal invocation fails.
+                pass
+
         shape = x.shape
 
         # Check cache first
