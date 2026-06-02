@@ -30,6 +30,9 @@ def _not_run_payload(reason: str) -> dict[str, Any]:
     return {
         "status": "not_run",
         "reason": reason,
+        "model": None,
+        "tokens_tested": 0,
+        "modes": [],
         "mode_results": [],
     }
 
@@ -234,12 +237,20 @@ def main() -> None:
     if not model_path.exists():
         payload = _not_run_payload("model_path_missing")
         out_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+        out_path.with_name("real_model_validation_not_run.txt").write_text(
+            "Real model validation: not run (model_path_missing)\n",
+            encoding="utf-8",
+        )
         print(f"Real model validation not run: {payload['reason']}")
         return
 
     if not prompt_path.exists():
         payload = _not_run_payload("prompt_file_missing")
         out_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+        out_path.with_name("real_model_validation_not_run.txt").write_text(
+            "Real model validation: not run (prompt_file_missing)\n",
+            encoding="utf-8",
+        )
         print(f"Real model validation not run: {payload['reason']}")
         return
 
@@ -259,6 +270,10 @@ def main() -> None:
     if not prompt:
         payload = _not_run_payload("prompt_file_empty")
         out_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+        out_path.with_name("real_model_validation_not_run.txt").write_text(
+            "Real model validation: not run (prompt_file_empty)\n",
+            encoding="utf-8",
+        )
         print(f"Real model validation not run: {payload['reason']}")
         return
 
@@ -267,6 +282,10 @@ def main() -> None:
     if input_ids.shape[1] < 2:
         payload = _not_run_payload("prompt_too_short")
         out_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+        out_path.with_name("real_model_validation_not_run.txt").write_text(
+            "Real model validation: not run (prompt_too_short)\n",
+            encoding="utf-8",
+        )
         print(f"Real model validation not run: {payload['reason']}")
         return
 
@@ -329,6 +348,19 @@ def main() -> None:
 
     payload: dict[str, Any] = {
         "status": "run",
+        "model": model_path.as_posix(),
+        "tokens_tested": int(input_ids.shape[1]),
+        "modes": [
+            {
+                "mode": row["mode"],
+                "logit_cosine": row["logit_cosine"],
+                "logit_max_abs_diff": row["logit_max_abs_diff"],
+                "top1_token_match_rate": row["top1_token_match_rate"],
+                "top5_overlap": row["top5_overlap"],
+                "perplexity_delta": row["perplexity_delta"],
+            }
+            for row in results
+        ],
         "model_path": model_path.as_posix(),
         "device": str(device),
         "mode_results": results,

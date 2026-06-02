@@ -153,7 +153,7 @@ def _bench_mode(shape: tuple[int, int, int, int], mode: str, iterations: int, ba
     cosine = cosine_similarity(k_out, ref_k)
 
     return {
-        "shape": str(shape),
+        "shape": [int(v) for v in shape],
         "bits": 8,
         "mode": mode,
         "route": mode,
@@ -192,15 +192,15 @@ def main() -> None:
     reference_latencies: dict[str, float] = {}
 
     for shape in SHAPES:
-        shape_label = str(shape)
         for mode in modes:
             row = _bench_mode(shape, mode, args.iterations, out_path.parent / "kernel_bench_tmp")
             runs.append(row)
             if mode == "sequential_reference":
-                reference_latencies[shape_label] = row["latency_ms_p50"]
+                reference_latencies[str(tuple(shape))] = row["latency_ms_p50"]
 
     for row in runs:
-        ref_latency = reference_latencies.get(row["shape"], row["latency_ms_p50"])
+        shape_key = str(tuple(row["shape"])) if isinstance(row.get("shape"), list) else str(row.get("shape"))
+        ref_latency = reference_latencies.get(shape_key, row["latency_ms_p50"])
         computed_speedup = (
             float(ref_latency) / float(row["latency_ms_p50"])
             if float(row["latency_ms_p50"]) > 0

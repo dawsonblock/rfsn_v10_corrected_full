@@ -1,25 +1,29 @@
-# RFSN v10 Main 12 - Metal WHT + Kernel Benchmark Alpha
+# RFSN v10 Main 13 - Proof Artifact Release + Fused Kernel Preparation
 
-## Status: Main 12 Metal WHT + Kernel Benchmark Alpha
+## Status: RFSN v10 Main 13 - Proof Artifact Release + Fused Kernel Preparation
 
-Verified in this package:
-- static syntax
-- agent/tool tests
+Verified:
+- non-MLX tests
+- optional MLX package structure
 - proof regression tooling
-- generated proof plots
+- plot generation from included artifacts
 
-Requires Apple Silicon validation:
-- bitpack execution
-- KV manager execution
-- Metal kernel equivalence
-- kernel benchmark generation
+Requires Apple Silicon:
+- MLX kernel equivalence tests
+- Metal benchmark generation
 - real model validation
 
-Claim boundary:
-- experimental multi-kernel Metal reconstruction path
-- reference-equivalence gated
-- sparse decode disabled by default unless a profile passes safety gates
-- real model validation: not run
+Implemented:
+- Metal packed-dequant kernel
+- Metal WHT64 kernel
+- Metal hash-sign kernel
+- multi-kernel Metal reconstruction route
+- sparse safety gate
+
+Not implemented:
+- single fused packed-dequant-WHT-sign kernel
+- production LLM deployment
+- guaranteed speedup
 
 ## Overview
 RFSN v10 is an alpha quantized KV-cache + decode-time sparse-attention runtime for MLX/Apple Silicon. This build focuses on proving numerical equivalence and quality-safe sparse behavior before any production claim.
@@ -79,8 +83,9 @@ Kernel status:
 
 ## Installation
 ```bash
-pip install -e .
-pip install mlx pytest  # For testing
+pip install -e ".[dev]"
+pip install -e ".[dev,real_model]"  # Optional: real-model validation (torch + transformers)
+pip install mlx  # If not already installed
 ```
 
 ## Usage

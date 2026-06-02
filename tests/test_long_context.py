@@ -53,7 +53,9 @@ def test_long_context_runtime(seq_len: int):
         )
 
         assert output.shape == shape_q
-        assert info["sparse_success"] is True
+        assert info["sparse_enabled"] is False
+        assert info["sparse_gate_reason"] == "disabled_by_default"
+        assert info["sparse_success"] is False
         assert info["total_latency_ms"] > 0
 
 

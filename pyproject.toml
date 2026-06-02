@@ -22,6 +22,10 @@ dev = [
     "pytest-timeout>=2.2",
     "pytest-asyncio",
 ]
+real_model = [
+    "torch",
+    "transformers",
+]
 
 [tool.setuptools.packages.find]
 include = ["rfsn_v10", "agent_core", "tools"]

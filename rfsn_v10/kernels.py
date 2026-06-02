@@ -251,7 +251,7 @@ def packed_dequant_metal(
     )
 
 
-def reconstruct_packed_dequant_wht_sign_metal(
+def reconstruct_metal_dequant_then_wht_then_sign(
     *,
     packed: mx.array,
     scales: mx.array,
@@ -262,7 +262,7 @@ def reconstruct_packed_dequant_wht_sign_metal(
     out_dtype: mx.Dtype,
     group_size: int,
 ) -> mx.array:
-    """Metal path: packed dequant kernel -> WHT transform -> sign kernel."""
+    """Multi-kernel Metal route: packed dequant -> WHT64 -> hash sign."""
     if not MLX_AVAILABLE:
         raise KernelRouteError("mlx_not_available")
     if out_dtype not in (mx.float32, mx.float16):
@@ -284,6 +284,30 @@ def reconstruct_packed_dequant_wht_sign_metal(
     x = _wht_transform_mx(x, block=64)
     x = apply_hash_signs_metal(x, seed=seed)
     return x.astype(out_dtype)
+
+
+def reconstruct_packed_dequant_wht_sign_metal(
+    *,
+    packed: mx.array,
+    scales: mx.array,
+    n_values: int,
+    shape: tuple,
+    bits: int,
+    seed: int,
+    out_dtype: mx.Dtype,
+    group_size: int,
+) -> mx.array:
+    """Compatibility alias for `reconstruct_metal_dequant_then_wht_then_sign`."""
+    return reconstruct_metal_dequant_then_wht_then_sign(
+        packed=packed,
+        scales=scales,
+        n_values=n_values,
+        shape=shape,
+        bits=bits,
+        seed=seed,
+        out_dtype=out_dtype,
+        group_size=group_size,
+    )
 
 
 def maybe_supports_metal_kernels() -> bool:

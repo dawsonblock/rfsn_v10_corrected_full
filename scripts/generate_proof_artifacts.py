@@ -43,6 +43,7 @@ E2E_SCENARIOS = [
     # top_k_ratio, use_compressed_on_miss, enable_sparse_decode,
     # reserved_sink_blocks, reserved_recent_blocks
     ("dense_baseline", (1, 8, 1, 64), (1, 8, 2048, 64), 8, 3, True, 1.00, True, False, 1, 2),
+    ("sparse_disabled_by_default", (1, 8, 1, 64), (1, 8, 2048, 64), 8, 3, True, 0.50, True, False, 1, 2),
     ("sparse_topk_075_sink1_recent2", (1, 8, 1, 64), (1, 8, 2048, 64), 8, 3, True, 0.75, True, True, 1, 2),
     ("sparse_topk_050_sink1_recent2", (1, 8, 1, 64), (1, 8, 2048, 64), 8, 3, True, 0.50, True, True, 1, 2),
     ("sparse_topk_050_sink1_recent4", (1, 8, 1, 64), (1, 8, 2048, 64), 8, 3, True, 0.50, True, True, 1, 4),
@@ -103,6 +104,9 @@ def run_e2e_benchmarks(iterations: int) -> dict:
             use_compressed_on_miss=use_compressed_on_miss,
             iterations=iterations,
         )
+        # Keep canonical aliases expected by external proof parsers.
+        result["execution_mode"] = result.get("cache_hit_execution_mode")
+        result["latency_ms"] = result.get("cache_hit_total_latency_ms")
         result["scenario"] = scenario
         runs.append(result)
     return {"metadata": _metadata(), "iterations": iterations, "runs": runs}
@@ -165,6 +169,26 @@ def write_summary(output_dir: Path, kv_payload: dict, e2e_payload: dict, profile
     sparse_default_recommendation = (
         "sparse_allowed" if sparse_deployment_safe else "dense_default"
     )
+    sparse_default = "disabled"
+
+    kernel_benchmark_status = "not run"
+    kernel_benchmark_path = output_dir / "kernel_benchmark.json"
+    if kernel_benchmark_path.exists():
+        try:
+            kernel_payload = json.loads(kernel_benchmark_path.read_text(encoding="utf-8"))
+            if kernel_payload.get("runs"):
+                kernel_benchmark_status = "run"
+        except Exception:
+            kernel_benchmark_status = "not run"
+
+    real_model_status = "not run"
+    real_model_path = output_dir / "real_model_validation.json"
+    if real_model_path.exists():
+        try:
+            real_payload = json.loads(real_model_path.read_text(encoding="utf-8"))
+            real_model_status = "run" if real_payload.get("status") == "run" else "not run"
+        except Exception:
+            real_model_status = "not run"
 
     lines = [
         f"# {profile} Proof Summary",
@@ -174,6 +198,8 @@ def write_summary(output_dir: Path, kv_payload: dict, e2e_payload: dict, profile
         "## Files",
         "- kv_cache_runs.json",
         "- e2e_scenarios.json",
+        "- kernel_benchmark.json" if kernel_benchmark_status == "run" else "- kernel_benchmark.json (not generated)",
+        "- real_model_validation.json" if real_model_path.exists() else "- real_model_validation.json (not generated)",
         "",
         "## Highlights",
     ]
@@ -229,9 +255,10 @@ def write_summary(output_dir: Path, kv_payload: dict, e2e_payload: dict, profile
             f"(min={quant_min if quant_min is not None else 'n/a'}, threshold={quant_threshold:.3f})"
         ),
         (
-            f"- Value quality: {value_status} "
+            f"- KV cache quality: {value_status} "
             f"(min={value_min if value_min is not None else 'n/a'}, threshold={value_threshold:.3f})"
         ),
+        f"- Sparse default: {sparse_default}",
         "- WARNING_UNSAFE_FOR_LLM_DEPLOYMENT" if unsafe_for_llm else "- Deployment quality warning: none",
         (
             "- Sparse deployment threshold met: yes"
@@ -243,7 +270,8 @@ def write_summary(output_dir: Path, kv_payload: dict, e2e_payload: dict, profile
             if sparse_deployment_safe
             else "- Recommended default: dense (sparse decode remains experimental and should default to disabled)"
         ),
-        "- Real model validation: not run",
+        f"- Kernel benchmark: {kernel_benchmark_status}",
+        f"- Real model validation: {real_model_status}",
         "",
         "## Next Checks",
         "- Compare these artifacts against previous runs for trend regressions.",
@@ -278,10 +306,14 @@ def write_summary(output_dir: Path, kv_payload: dict, e2e_payload: dict, profile
             },
             "warning_unsafe_for_llm_deployment": unsafe_for_llm,
             "sparse_deployment_safe": sparse_deployment_safe,
+            "sparse_default": sparse_default,
             "sparse_default_recommendation": sparse_default_recommendation,
         },
+        "kernel_benchmark": {
+            "status": kernel_benchmark_status,
+        },
         "real_model_validation": {
-            "status": "not_run",
+            "status": "run" if real_model_status == "run" else "not_run",
         },
     }
 
