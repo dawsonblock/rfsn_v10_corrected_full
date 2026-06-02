@@ -152,16 +152,28 @@ class AdaptiveBlockSparseAttention:
 
         if allow_budget_overflow:
             budget = min(num_blocks, max(k_active, len(reserved)))
-            score_budget = budget
         else:
             budget = max(1, min(num_blocks, k_active))
-            score_budget = max(0, budget - len(reserved))
 
-        merged = reserved + score_selected[:score_budget]
-        selected = sorted(set(merged))
-        if len(selected) > budget:
-            selected = selected[:budget]
-        return selected
+        selected: list[int] = []
+        seen: set[int] = set()
+
+        for idx in reserved:
+            if idx not in seen:
+                seen.add(idx)
+                selected.append(idx)
+            if len(selected) >= budget:
+                break
+
+        for idx in score_selected:
+            if len(selected) >= budget:
+                break
+            if idx in seen:
+                continue
+            seen.add(idx)
+            selected.append(idx)
+
+        return sorted(selected)
 
     @staticmethod
     def execute(
@@ -299,11 +311,15 @@ class AdaptiveBlockSparseAttention:
 
         kth = num_blocks - effective_k_active
         unordered_topk_idx = mx.argpartition(global_block_scores, kth, axis=-1)[..., kth:]
-        topk_block_idx = mx.sort(unordered_topk_idx, axis=-1)  # chronological order
 
         selected_blocks_per_batch: list[list[int]] = []
         for b in range(B):
-            score_selected = [int(v.item()) for v in topk_block_idx[b, 0]]
+            score_candidates = [int(v.item()) for v in unordered_topk_idx[b, 0]]
+            score_selected = sorted(
+                score_candidates,
+                key=lambda idx: float(global_block_scores[b, 0, idx].item()),
+                reverse=True,
+            )
             selected = AdaptiveBlockSparseAttention._merge_reserved_and_scored_blocks(
                 num_blocks=num_blocks,
                 k_active=k_active,

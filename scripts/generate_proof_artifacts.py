@@ -42,7 +42,7 @@ E2E_SCENARIOS = [
     ("cache_miss_full_precision_path", (1, 8, 1, 64), (1, 8, 2048, 64), 8, 3, True, 0.50, False),
     ("cache_miss_use_compressed_on_miss_path", (1, 8, 1, 64), (1, 8, 2048, 64), 8, 3, True, 0.50, True),
     ("cache_hit_compressed_path", (1, 8, 1, 64), (1, 8, 2048, 64), 8, 3, True, 0.50, True),
-    ("sparse_decode_path", (1, 8, 1, 64), (1, 8, 2048, 64), 8, 3, True, 0.25, True),
+    ("sparse_decode_path", (1, 8, 1, 64), (1, 8, 2048, 64), 8, 3, True, 0.60, True),
     ("dense_decode_path", (1, 8, 8, 64), (1, 8, 2048, 64), 8, 3, True, 0.25, True),
 ]
 
