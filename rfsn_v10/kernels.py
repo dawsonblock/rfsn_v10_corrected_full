@@ -130,7 +130,8 @@ def apply_hash_signs_metal(x: mx.array, seed: int) -> mx.array:
         if (gid >= n) { return; }
 
         uint state = gid ^ seed_val;
-        state ^= state >> 15;
+        state += 0x9E3779B9u;
+        state ^= state >> 16;
         state *= 0x85ebca6bu;
         state ^= state >> 13;
         state *= 0xc2b2ae35u;
@@ -358,7 +359,8 @@ def packed_dequant_wht_sign_metal(
 
         // Step 3: Apply hash signs
         uint state = gid ^ seed_val;
-        state ^= state >> 15;
+        state += 0x9E3779B9u;
+        state ^= state >> 16;
         state *= 0x85ebca6bu;
         state ^= state >> 13;
         state *= 0xc2b2ae35u;

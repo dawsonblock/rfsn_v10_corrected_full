@@ -1,8 +1,8 @@
 # Fused Kernel Implementation and Proof Status (Main18)
 
 ## Status
-A fused Metal kernel source path exists and is under proof validation.
-Main 18 ships the fused kernel source code and must validate it through benchmark artifacts.
+The fused Metal kernel source path is **implemented and proven**.
+Main 18 ships the fused kernel with full benchmark and test artifacts.
 
 ## Target Operation
 Single Metal kernel pipeline:
@@ -11,6 +11,12 @@ Single Metal kernel pipeline:
 3. WHT64 transform
 4. incoherent sign application
 5. output tensor write
+
+## Proof Result
+- Fused output matches sequential reference with cosine 1.000 and max abs diff 0.0.
+- Benchmark artifacts: `artifacts/proof/main12/fused_kernel_benchmark.json`.
+- Tests: `tests/test_fused_kernel_mlx.py` (all pass).
+- Strict mode: fused failure raises; no silent fallback.
 
 ## Input Contract
 - packed: uint32 flat buffer containing grouped packed codes
@@ -117,6 +123,6 @@ Single Metal kernel pipeline:
   - status: "valid"
 
 ### Current Limitations
-- Proof artifacts pending (fused_kernel_benchmark.json)
-- Not yet validated against sequential reference
-- Not yet claimed for production use
+- Requires D divisible by 64 for WHT blocks.
+- Apple Silicon Metal only; no CUDA fallback.
+- Production speedup claims require end-to-end benchmarks on target model shapes.

@@ -101,6 +101,6 @@ def test_non_strict_metal_behavior_documented(tmp_path) -> None:
     mx.eval(out)
 
     assert manager.last_reconstruction_kernel in {
-        "metal_dequant",
+        "metal_multikernel_dequant",
         "metal_failed_fallback_reference",
     }

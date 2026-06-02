@@ -74,6 +74,7 @@ class RFSNTurboQuantKVManager:
         use_incoherent: Optional[bool] = None,
         use_custom_kernel: Optional[bool] = None,
         prefer_metal_kernels: bool = False,
+        prefer_fused_kernel: bool = True,
         strict_metal: bool = False,
         validate_metal_codes: bool = False,
         max_memory_gb: float = 1.0,
@@ -106,6 +107,7 @@ class RFSNTurboQuantKVManager:
         if use_custom_kernel is not None:
             prefer_metal_kernels = bool(use_custom_kernel)
         self.prefer_metal_kernels = bool(prefer_metal_kernels)
+        self.prefer_fused_kernel = bool(prefer_fused_kernel)
         self.strict_metal = bool(strict_metal)
         self.validate_metal_codes = bool(validate_metal_codes)
         self.max_memory_gb = max_memory_gb
@@ -486,26 +488,18 @@ class RFSNTurboQuantKVManager:
         if scales.size != n_groups:
             raise ValueError("Scale count mismatch")
 
-        try:
-            result = packed_dequant_wht_sign_metal(
-                packed=packed,
-                scales=scales,
-                n_values=n_values,
-                bits=bits,
-                group_size=self.group_size,
-                seed=seed,
-                out_dtype=mx.float32,
-            ).reshape(shape)
+        result = packed_dequant_wht_sign_metal(
+            packed=packed,
+            scales=scales,
+            n_values=n_values,
+            bits=bits,
+            group_size=self.group_size,
+            seed=seed,
+            out_dtype=mx.float32,
+        ).reshape(shape)
 
-            self.last_reconstruction_kernel = "metal_fused_dequant_wht_sign"
-            return result.astype(out_dtype)
-        except Exception as exc:
-            if self.strict_metal:
-                raise KernelRouteError(
-                    f"fused metal reconstruction failed: {exc}"
-                ) from exc
-            self.last_reconstruction_kernel = "metal_fused_failed_fallback"
-            raise
+        self.last_reconstruction_kernel = "metal_fused_dequant_wht_sign"
+        return result.astype(out_dtype)
 
     def _reconstruct_cached_tensor(
         self,
@@ -521,12 +515,12 @@ class RFSNTurboQuantKVManager:
     ) -> mx.array:
         def _metal_label() -> str:
             if use_wht and use_incoherent_signs:
-                return "metal_dequant_wht_sign"
+                return "metal_multikernel_dequant_wht_sign"
             if use_wht:
-                return "metal_dequant_wht"
+                return "metal_multikernel_dequant_wht"
             if use_incoherent_signs:
-                return "metal_dequant_sign"
-            return "metal_dequant"
+                return "metal_multikernel_dequant_sign"
+            return "metal_multikernel_dequant"
 
         if self.prefer_metal_kernels and maybe_supports_metal_kernels():
             if self.strict_metal or self.validate_metal_codes:
@@ -537,7 +531,7 @@ class RFSNTurboQuantKVManager:
                 )
 
             # Try fused kernel path when both WHT and signs are enabled
-            if use_wht and use_incoherent_signs:
+            if use_wht and use_incoherent_signs and self.prefer_fused_kernel:
                 try:
                     result = self._reconstruct_packed_dequant_wht_sign_fused(
                         packed=packed,
@@ -555,10 +549,10 @@ class RFSNTurboQuantKVManager:
                             f"fused metal reconstruction failed: {exc}"
                         ) from exc
                     self.last_reconstruction_kernel = (
-                        "metal_fused_failed_fallback_sequential"
+                        "metal_failed_fallback_reference"
                     )
 
-            # Fallback to sequential kernel path
+            # Fallback to sequential multi-kernel path
             try:
                 deq = packed_dequant_metal(
                     packed=packed,
@@ -585,7 +579,9 @@ class RFSNTurboQuantKVManager:
                 self.last_reconstruction_kernel = "metal_failed_fallback_reference"
 
         if self.prefer_metal_kernels and self.strict_metal:
-            raise KernelRouteError("strict metal requested but metal kernels are unavailable")
+            raise KernelRouteError(
+                "strict metal requested but metal kernels are unavailable"
+            )
 
         self.last_reconstruction_kernel = "sequential_reference"
 

@@ -13,7 +13,7 @@ Implemented:
 
 Proof status:
 - multi-kernel route: benchmarked
-- fused route: must be proven by fused_kernel_benchmark.json
+- fused route: proven by fused_kernel_benchmark.json (cosine 1.000, max_abs_diff 0.0)
 - sparse decode: below threshold, disabled by default
 - real-model validation: tiny-random smoke test unless otherwise stated
 
@@ -70,7 +70,7 @@ RFSN v10 is an alpha quantized KV-cache + decode-time sparse-attention runtime f
 
 Kernel status:
 - Implemented: Metal sign kernel, Metal packed-dequant kernel, Metal WHT64 kernel, multi-kernel Metal reconstruction route, fused packed-dequant-WHT-sign Metal kernel source path
-- Proof validation: fused route must be proven by fused_kernel_benchmark.json
+- Proof validation: fused route proven by fused_kernel_benchmark.json (cosine 1.000, max_abs_diff 0.0)
 
 ## Requirements
 - Apple Silicon Mac (ARM64)

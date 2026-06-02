@@ -40,10 +40,10 @@ def test_metal_hash_sign_is_self_inverse() -> None:
 @pytest.mark.parametrize(
     ("use_wht", "use_signs", "expected_label"),
     [
-        (False, False, "metal_dequant"),
-        (True, False, "metal_dequant_wht"),
-        (False, True, "metal_dequant_sign"),
-        (True, True, "metal_dequant_wht_sign"),
+        (False, False, "metal_multikernel_dequant"),
+        (True, False, "metal_multikernel_dequant_wht"),
+        (False, True, "metal_multikernel_dequant_sign"),
+        (True, True, "metal_multikernel_dequant_wht_sign"),
     ],
 )
 @pytest.mark.parametrize("shape", REQUIRED_SHAPES)
@@ -61,6 +61,7 @@ def test_metal_reconstruction_matches_reference(
         use_wht=use_wht,
         use_incoherent_signs=use_signs,
         prefer_metal_kernels=True,
+        prefer_fused_kernel=False,
         strict_metal=False,
     )
 
@@ -110,10 +111,10 @@ def test_metal_reconstruction_matches_reference(
 @pytest.mark.parametrize(
     ("use_wht", "use_signs", "expected_label"),
     [
-        (False, False, "metal_dequant"),
-        (True, False, "metal_dequant_wht"),
-        (False, True, "metal_dequant_sign"),
-        (True, True, "metal_dequant_wht_sign"),
+        (False, False, "metal_multikernel_dequant"),
+        (True, False, "metal_multikernel_dequant_wht"),
+        (False, True, "metal_multikernel_dequant_sign"),
+        (True, True, "metal_multikernel_dequant_wht_sign"),
     ],
 )
 @pytest.mark.parametrize("shape", REQUIRED_SHAPES)
@@ -135,6 +136,7 @@ def test_strict_metal_uses_metal_route(
         use_wht=use_wht,
         use_incoherent_signs=use_signs,
         prefer_metal_kernels=True,
+        prefer_fused_kernel=False,
         strict_metal=True,
     )
 
@@ -168,7 +170,9 @@ def test_strict_metal_uses_metal_route(
     mx.eval(k_rec, v_rec, ref_k, ref_v)
 
     assert manager.last_reconstruction_kernel == expected_label
-    assert manager.last_reconstruction_kernel != "metal_failed_fallback_reference"
+    assert (
+        manager.last_reconstruction_kernel != "metal_failed_fallback_reference"
+    )
     assert manager.last_reconstruction_kernel.startswith("metal_")
     assert cosine_similarity(k_rec, ref_k) > 0.999
     assert cosine_similarity(v_rec, ref_v) > 0.999

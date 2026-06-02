@@ -53,11 +53,13 @@ def check() -> list[str]:
             "kv_cache_runs.json",
             "e2e_scenarios.json",
             "kernel_benchmark.json",
+            "fused_kernel_benchmark.json",
             "proof_summary.md",
             "summary.json",
             "regression_report.json",
             "regression_report.md",
             "mlx_test_summary.md",
+            "mlx_pytest_raw.log",
         ]
         for artifact in required_artifacts:
             if not (artifact_dir / artifact).exists():
@@ -78,12 +80,31 @@ def check() -> list[str]:
         if kernel_plots and not kernel_json.exists():
             errors.append("kernel plots exist but kernel_benchmark.json missing")
 
+    # Reject placeholder plots
+    plot_dir = root / "results" / "plots"
+    if plot_dir.exists():
+        for pattern in ["*pending*", "*placeholder*"]:
+            bad = list(plot_dir.glob(pattern))
+            if bad:
+                errors.append(
+                    f"placeholder plot(s) found: {[str(p) for p in bad[:10]]}"
+                )
+
     # Verify README claims match reality
     try:
         readme = (root / "README.md").read_text(encoding="utf-8")
         if "Shipped proof artifacts" in readme and not artifact_dir.exists():
             errors.append(
                 "README claims shipped proof artifacts but artifact dir missing"
+            )
+        if (
+            "fused_kernel_benchmark.json" in readme
+            and artifact_dir.exists()
+            and not (artifact_dir / "fused_kernel_benchmark.json").exists()
+        ):
+            errors.append(
+                "README claims fused kernel proof but "
+                "fused_kernel_benchmark.json missing"
             )
     except (FileNotFoundError, IOError):
         errors.append("README.md missing or unreadable")

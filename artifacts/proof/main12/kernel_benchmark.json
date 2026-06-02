@@ -10,9 +10,9 @@
       "bits": 8,
       "mode": "sequential_reference",
       "route": "sequential_reference",
-      "latency_ms_mean": 2.8177831962238997,
-      "latency_ms_p50": 2.736541995545849,
-      "latency_ms_p95": 4.33091598097235,
+      "latency_ms_mean": 2.200444675205896,
+      "latency_ms_p50": 2.6387090038042516,
+      "latency_ms_p95": 2.7845840086229146,
       "kv_reconstruction_kernel": "sequential_reference",
       "fallback_used": false,
       "key_cosine_vs_reference": 1.0,
@@ -33,12 +33,12 @@
         64
       ],
       "bits": 8,
-      "mode": "metal_dequant",
-      "route": "metal_dequant",
-      "latency_ms_mean": 0.3138169995509088,
-      "latency_ms_p50": 0.23929201415739954,
-      "latency_ms_p95": 0.726458994904533,
-      "kv_reconstruction_kernel": "metal_dequant",
+      "mode": "metal_multikernel_dequant",
+      "route": "metal_multikernel_dequant",
+      "latency_ms_mean": 0.14334732744221887,
+      "latency_ms_p50": 0.08187498315237463,
+      "latency_ms_p95": 0.2708749962039292,
+      "kv_reconstruction_kernel": "metal_multikernel_dequant",
       "fallback_used": false,
       "key_cosine_vs_reference": 1.0,
       "key_max_abs_diff_vs_reference": 0.0,
@@ -48,7 +48,7 @@
       "value_valid": true,
       "route_class": "ablation",
       "status": "valid",
-      "speedup_vs_reference": 11.435993821949399
+      "speedup_vs_reference": 32.228513548435714
     },
     {
       "shape": [
@@ -58,12 +58,12 @@
         64
       ],
       "bits": 8,
-      "mode": "metal_dequant_wht",
-      "route": "metal_dequant_wht",
-      "latency_ms_mean": 0.3498168021906167,
-      "latency_ms_p50": 0.31266699079424143,
-      "latency_ms_p95": 0.8201250166166574,
-      "kv_reconstruction_kernel": "metal_dequant_wht",
+      "mode": "metal_multikernel_dequant_wht",
+      "route": "metal_multikernel_dequant_wht",
+      "latency_ms_mean": 0.2694443295088907,
+      "latency_ms_p50": 0.11087500024586916,
+      "latency_ms_p95": 0.6108749948907644,
+      "kv_reconstruction_kernel": "metal_multikernel_dequant_wht",
       "fallback_used": false,
       "key_cosine_vs_reference": 1.0,
       "key_max_abs_diff_vs_reference": 0.0,
@@ -73,7 +73,7 @@
       "value_valid": true,
       "route_class": "ablation",
       "status": "valid",
-      "speedup_vs_reference": 8.752257437200019
+      "speedup_vs_reference": 23.798953758311818
     },
     {
       "shape": [
@@ -83,12 +83,12 @@
         64
       ],
       "bits": 8,
-      "mode": "metal_dequant_sign",
-      "route": "metal_dequant_sign",
-      "latency_ms_mean": 0.3036668000277132,
-      "latency_ms_p50": 0.28570799622684717,
-      "latency_ms_p95": 0.42291698628105223,
-      "kv_reconstruction_kernel": "metal_dequant_sign",
+      "mode": "metal_multikernel_dequant_sign",
+      "route": "metal_multikernel_dequant_sign",
+      "latency_ms_mean": 0.15952799973698953,
+      "latency_ms_p50": 0.1240840065293014,
+      "latency_ms_p95": 0.2355000178795308,
+      "kv_reconstruction_kernel": "metal_multikernel_dequant_sign",
       "fallback_used": false,
       "key_cosine_vs_reference": 1.0,
       "key_max_abs_diff_vs_reference": 0.0,
@@ -98,7 +98,7 @@
       "value_valid": true,
       "route_class": "ablation",
       "status": "valid",
-      "speedup_vs_reference": 9.578107829271543
+      "speedup_vs_reference": 21.265504536889228
     },
     {
       "shape": [
@@ -108,12 +108,37 @@
         64
       ],
       "bits": 8,
-      "mode": "metal_dequant_wht_sign",
-      "route": "metal_dequant_wht_sign",
-      "latency_ms_mean": 0.311225198674947,
-      "latency_ms_p50": 0.27275001048110425,
-      "latency_ms_p95": 0.5107079923618585,
-      "kv_reconstruction_kernel": "metal_dequant_wht_sign",
+      "mode": "metal_multikernel_dequant_wht_sign",
+      "route": "metal_multikernel_dequant_wht_sign",
+      "latency_ms_mean": 0.14531932538375258,
+      "latency_ms_p50": 0.1376250002067536,
+      "latency_ms_p95": 0.1617909874767065,
+      "kv_reconstruction_kernel": "metal_multikernel_dequant_wht_sign",
+      "fallback_used": false,
+      "key_cosine_vs_reference": 1.0,
+      "key_max_abs_diff_vs_reference": 0.0,
+      "value_cosine_vs_reference": 1.0,
+      "value_max_abs_diff_vs_reference": 0.0,
+      "key_valid": true,
+      "value_valid": true,
+      "route_class": "full_equivalent",
+      "status": "valid",
+      "speedup_vs_reference": 19.17318074361582
+    },
+    {
+      "shape": [
+        1,
+        4,
+        512,
+        64
+      ],
+      "bits": 8,
+      "mode": "metal_fused_dequant_wht_sign",
+      "route": "metal_fused_dequant_wht_sign",
+      "latency_ms_mean": 0.30841666739434004,
+      "latency_ms_p50": 0.3290839958935976,
+      "latency_ms_p95": 0.33991600503213704,
+      "kv_reconstruction_kernel": "metal_fused_dequant_wht_sign",
       "fallback_used": false,
       "key_cosine_vs_reference": 1.0,
       "key_max_abs_diff_vs_reference": 0.0,
@@ -123,7 +148,7 @@
       "value_valid": true,
       "route_class": "full_equivalent",
       "status": "valid",
-      "speedup_vs_reference": 10.03315083551732
+      "speedup_vs_reference": 8.018344971894114
     },
     {
       "shape": [
@@ -135,9 +160,9 @@
       "bits": 8,
       "mode": "sequential_reference",
       "route": "sequential_reference",
-      "latency_ms_mean": 2.3924418026581407,
-      "latency_ms_p50": 1.95387500571087,
-      "latency_ms_p95": 4.3956250010523945,
+      "latency_ms_mean": 2.7627639938145876,
+      "latency_ms_p50": 2.5957920006476343,
+      "latency_ms_p95": 4.230374994222075,
       "kv_reconstruction_kernel": "sequential_reference",
       "fallback_used": false,
       "key_cosine_vs_reference": 1.0,
@@ -158,12 +183,12 @@
         64
       ],
       "bits": 8,
-      "mode": "metal_dequant",
-      "route": "metal_dequant",
-      "latency_ms_mean": 0.16386660281568766,
-      "latency_ms_p50": 0.17245800700038671,
-      "latency_ms_p95": 0.20858299103565514,
-      "kv_reconstruction_kernel": "metal_dequant",
+      "mode": "metal_multikernel_dequant",
+      "route": "metal_multikernel_dequant",
+      "latency_ms_mean": 0.19873599133764705,
+      "latency_ms_p50": 0.1743749890010804,
+      "latency_ms_p95": 0.33658300526440144,
+      "kv_reconstruction_kernel": "metal_multikernel_dequant",
       "fallback_used": false,
       "key_cosine_vs_reference": 0.9999999403953552,
       "key_max_abs_diff_vs_reference": 0.0,
@@ -173,7 +198,7 @@
       "value_valid": true,
       "route_class": "ablation",
       "status": "valid",
-      "speedup_vs_reference": 11.329569671453346
+      "speedup_vs_reference": 14.886263308274968
     },
     {
       "shape": [
@@ -183,12 +208,12 @@
         64
       ],
       "bits": 8,
-      "mode": "metal_dequant_wht",
-      "route": "metal_dequant_wht",
-      "latency_ms_mean": 0.3292499983217567,
-      "latency_ms_p50": 0.2591669908724725,
-      "latency_ms_p95": 0.6310410099104047,
-      "kv_reconstruction_kernel": "metal_dequant_wht",
+      "mode": "metal_multikernel_dequant_wht",
+      "route": "metal_multikernel_dequant_wht",
+      "latency_ms_mean": 0.16255566151812673,
+      "latency_ms_p50": 0.14316700980998576,
+      "latency_ms_p95": 0.2204999909736216,
+      "kv_reconstruction_kernel": "metal_multikernel_dequant_wht",
       "fallback_used": false,
       "key_cosine_vs_reference": 1.0000001192092896,
       "key_max_abs_diff_vs_reference": 0.0,
@@ -198,7 +223,7 @@
       "value_valid": true,
       "route_class": "ablation",
       "status": "valid",
-      "speedup_vs_reference": 7.539058115129743
+      "speedup_vs_reference": 18.131216151631744
     },
     {
       "shape": [
@@ -208,12 +233,12 @@
         64
       ],
       "bits": 8,
-      "mode": "metal_dequant_sign",
-      "route": "metal_dequant_sign",
-      "latency_ms_mean": 0.4901834123302251,
-      "latency_ms_p50": 0.28445900534279644,
-      "latency_ms_p95": 1.2484160251915455,
-      "kv_reconstruction_kernel": "metal_dequant_sign",
+      "mode": "metal_multikernel_dequant_sign",
+      "route": "metal_multikernel_dequant_sign",
+      "latency_ms_mean": 0.09022200053247313,
+      "latency_ms_p50": 0.09020802099257708,
+      "latency_ms_p95": 0.10437497985549271,
+      "kv_reconstruction_kernel": "metal_multikernel_dequant_sign",
       "fallback_used": false,
       "key_cosine_vs_reference": 0.9999999403953552,
       "key_max_abs_diff_vs_reference": 0.0,
@@ -223,7 +248,7 @@
       "value_valid": true,
       "route_class": "ablation",
       "status": "valid",
-      "speedup_vs_reference": 6.86874020161988
+      "speedup_vs_reference": 28.775622966623263
     },
     {
       "shape": [
@@ -233,14 +258,14 @@
         64
       ],
       "bits": 8,
-      "mode": "metal_dequant_wht_sign",
-      "route": "metal_dequant_wht_sign",
-      "latency_ms_mean": 0.4555417981464416,
-      "latency_ms_p50": 0.39762500091455877,
-      "latency_ms_p95": 0.7004580111242831,
-      "kv_reconstruction_kernel": "metal_dequant_wht_sign",
+      "mode": "metal_multikernel_dequant_wht_sign",
+      "route": "metal_multikernel_dequant_wht_sign",
+      "latency_ms_mean": 0.24288900506993136,
+      "latency_ms_p50": 0.18895900575444102,
+      "latency_ms_p95": 0.39045800804160535,
+      "kv_reconstruction_kernel": "metal_multikernel_dequant_wht_sign",
       "fallback_used": false,
-      "key_cosine_vs_reference": 0.9999999403953552,
+      "key_cosine_vs_reference": 1.0,
       "key_max_abs_diff_vs_reference": 0.0,
       "value_cosine_vs_reference": 1.0,
       "value_max_abs_diff_vs_reference": 0.0,
@@ -248,7 +273,32 @@
       "value_valid": true,
       "route_class": "full_equivalent",
       "status": "valid",
-      "speedup_vs_reference": 4.913863567976996
+      "speedup_vs_reference": 13.737328846982603
+    },
+    {
+      "shape": [
+        1,
+        8,
+        1024,
+        64
+      ],
+      "bits": 8,
+      "mode": "metal_fused_dequant_wht_sign",
+      "route": "metal_fused_dequant_wht_sign",
+      "latency_ms_mean": 0.134902666710938,
+      "latency_ms_p50": 0.1066249969881028,
+      "latency_ms_p95": 0.20045798737555742,
+      "kv_reconstruction_kernel": "metal_fused_dequant_wht_sign",
+      "fallback_used": false,
+      "key_cosine_vs_reference": 1.0,
+      "key_max_abs_diff_vs_reference": 0.0,
+      "value_cosine_vs_reference": 0.9999998807907104,
+      "value_max_abs_diff_vs_reference": 0.0,
+      "key_valid": true,
+      "value_valid": true,
+      "route_class": "full_equivalent",
+      "status": "valid",
+      "speedup_vs_reference": 24.345060482742827
     },
     {
       "shape": [
@@ -260,9 +310,9 @@
       "bits": 8,
       "mode": "sequential_reference",
       "route": "sequential_reference",
-      "latency_ms_mean": 3.6570836033206433,
-      "latency_ms_p50": 3.0426669982261956,
-      "latency_ms_p95": 6.284583010710776,
+      "latency_ms_mean": 2.900638666081553,
+      "latency_ms_p50": 2.018625003984198,
+      "latency_ms_p95": 5.07375001325272,
       "kv_reconstruction_kernel": "sequential_reference",
       "fallback_used": false,
       "key_cosine_vs_reference": 0.9999998807907104,
@@ -283,12 +333,12 @@
         64
       ],
       "bits": 8,
-      "mode": "metal_dequant",
-      "route": "metal_dequant",
-      "latency_ms_mean": 0.18996680155396461,
-      "latency_ms_p50": 0.1797500008251518,
-      "latency_ms_p95": 0.30174999847076833,
-      "kv_reconstruction_kernel": "metal_dequant",
+      "mode": "metal_multikernel_dequant",
+      "route": "metal_multikernel_dequant",
+      "latency_ms_mean": 0.07043033838272095,
+      "latency_ms_p50": 0.06854100502096117,
+      "latency_ms_p95": 0.09200000204145908,
+      "kv_reconstruction_kernel": "metal_multikernel_dequant",
       "fallback_used": false,
       "key_cosine_vs_reference": 0.9999998807907104,
       "key_max_abs_diff_vs_reference": 0.0,
@@ -298,7 +348,7 @@
       "value_valid": true,
       "route_class": "ablation",
       "status": "valid",
-      "speedup_vs_reference": 16.927215489617097
+      "speedup_vs_reference": 29.451348187364097
     },
     {
       "shape": [
@@ -308,12 +358,12 @@
         64
       ],
       "bits": 8,
-      "mode": "metal_dequant_wht",
-      "route": "metal_dequant_wht",
-      "latency_ms_mean": 0.26022520032711327,
-      "latency_ms_p50": 0.268584000878036,
-      "latency_ms_p95": 0.43904100311920047,
-      "kv_reconstruction_kernel": "metal_dequant_wht",
+      "mode": "metal_multikernel_dequant_wht",
+      "route": "metal_multikernel_dequant_wht",
+      "latency_ms_mean": 0.4904026670070986,
+      "latency_ms_p50": 0.1369579986203462,
+      "latency_ms_p95": 1.2237920018378645,
+      "kv_reconstruction_kernel": "metal_multikernel_dequant_wht",
       "fallback_used": false,
       "key_cosine_vs_reference": 1.0,
       "key_max_abs_diff_vs_reference": 0.0,
@@ -323,7 +373,7 @@
       "value_valid": true,
       "route_class": "ablation",
       "status": "valid",
-      "speedup_vs_reference": 11.32854893917479
+      "speedup_vs_reference": 14.739007756530661
     },
     {
       "shape": [
@@ -333,12 +383,12 @@
         64
       ],
       "bits": 8,
-      "mode": "metal_dequant_sign",
-      "route": "metal_dequant_sign",
-      "latency_ms_mean": 0.390700192656368,
-      "latency_ms_p50": 0.2832080062944442,
-      "latency_ms_p95": 0.686999992467463,
-      "kv_reconstruction_kernel": "metal_dequant_sign",
+      "mode": "metal_multikernel_dequant_sign",
+      "route": "metal_multikernel_dequant_sign",
+      "latency_ms_mean": 0.12247232371009886,
+      "latency_ms_p50": 0.11779199121519923,
+      "latency_ms_p95": 0.13924998347647488,
+      "kv_reconstruction_kernel": "metal_multikernel_dequant_sign",
       "fallback_used": false,
       "key_cosine_vs_reference": 0.9999998807907104,
       "key_max_abs_diff_vs_reference": 0.0,
@@ -348,7 +398,7 @@
       "value_valid": true,
       "route_class": "ablation",
       "status": "valid",
-      "speedup_vs_reference": 10.743576913792513
+      "speedup_vs_reference": 17.13720078215068
     },
     {
       "shape": [
@@ -358,22 +408,47 @@
         64
       ],
       "bits": 8,
-      "mode": "metal_dequant_wht_sign",
-      "route": "metal_dequant_wht_sign",
-      "latency_ms_mean": 0.3708581964019686,
-      "latency_ms_p50": 0.276167003903538,
-      "latency_ms_p95": 0.7701249851379544,
-      "kv_reconstruction_kernel": "metal_dequant_wht_sign",
+      "mode": "metal_multikernel_dequant_wht_sign",
+      "route": "metal_multikernel_dequant_wht_sign",
+      "latency_ms_mean": 0.21306933679928383,
+      "latency_ms_p50": 0.22950000129640102,
+      "latency_ms_p95": 0.26508301380090415,
+      "kv_reconstruction_kernel": "metal_multikernel_dequant_wht_sign",
       "fallback_used": false,
       "key_cosine_vs_reference": 0.9999998807907104,
       "key_max_abs_diff_vs_reference": 0.0,
-      "value_cosine_vs_reference": 1.0,
+      "value_cosine_vs_reference": 0.9999998807907104,
       "value_max_abs_diff_vs_reference": 0.0,
       "key_valid": true,
       "value_valid": true,
       "route_class": "full_equivalent",
       "status": "valid",
-      "speedup_vs_reference": 11.017489255483124
+      "speedup_vs_reference": 8.795751601661772
+    },
+    {
+      "shape": [
+        1,
+        8,
+        2048,
+        64
+      ],
+      "bits": 8,
+      "mode": "metal_fused_dequant_wht_sign",
+      "route": "metal_fused_dequant_wht_sign",
+      "latency_ms_mean": 0.09118068070771794,
+      "latency_ms_p50": 0.08750002598389983,
+      "latency_ms_p95": 0.11020901729352772,
+      "kv_reconstruction_kernel": "metal_fused_dequant_wht_sign",
+      "fallback_used": false,
+      "key_cosine_vs_reference": 1.0,
+      "key_max_abs_diff_vs_reference": 0.0,
+      "value_cosine_vs_reference": 0.9999998807907104,
+      "value_max_abs_diff_vs_reference": 0.0,
+      "key_valid": true,
+      "value_valid": true,
+      "route_class": "full_equivalent",
+      "status": "valid",
+      "speedup_vs_reference": 23.069993194694923
     },
     {
       "shape": [
@@ -385,9 +460,9 @@
       "bits": 8,
       "mode": "sequential_reference",
       "route": "sequential_reference",
-      "latency_ms_mean": 13.221808389062062,
-      "latency_ms_p50": 8.258874993771315,
-      "latency_ms_p95": 37.41674998309463,
+      "latency_ms_mean": 22.57195832983901,
+      "latency_ms_p50": 11.560165992705151,
+      "latency_ms_p95": 49.165875010658056,
       "kv_reconstruction_kernel": "sequential_reference",
       "fallback_used": false,
       "key_cosine_vs_reference": 1.0,
@@ -408,12 +483,12 @@
         128
       ],
       "bits": 8,
-      "mode": "metal_dequant",
-      "route": "metal_dequant",
-      "latency_ms_mean": 0.11135839740745723,
-      "latency_ms_p50": 0.10566698620095849,
-      "latency_ms_p95": 0.13720901915803552,
-      "kv_reconstruction_kernel": "metal_dequant",
+      "mode": "metal_multikernel_dequant",
+      "route": "metal_multikernel_dequant",
+      "latency_ms_mean": 0.13049999445987245,
+      "latency_ms_p50": 0.13366699567995965,
+      "latency_ms_p95": 0.16308299382217228,
+      "kv_reconstruction_kernel": "metal_multikernel_dequant",
       "fallback_used": false,
       "key_cosine_vs_reference": 1.0000001192092896,
       "key_max_abs_diff_vs_reference": 0.0,
@@ -423,7 +498,7 @@
       "value_valid": true,
       "route_class": "ablation",
       "status": "valid",
-      "speedup_vs_reference": 78.15946390355552
+      "speedup_vs_reference": 86.4848194866576
     },
     {
       "shape": [
@@ -433,12 +508,12 @@
         128
       ],
       "bits": 8,
-      "mode": "metal_dequant_wht",
-      "route": "metal_dequant_wht",
-      "latency_ms_mean": 0.37307519232854247,
-      "latency_ms_p50": 0.4558340006042272,
-      "latency_ms_p95": 0.4901659849565476,
-      "kv_reconstruction_kernel": "metal_dequant_wht",
+      "mode": "metal_multikernel_dequant_wht",
+      "route": "metal_multikernel_dequant_wht",
+      "latency_ms_mean": 0.1754166733007878,
+      "latency_ms_p50": 0.13787500211037695,
+      "latency_ms_p95": 0.2988330088555813,
+      "kv_reconstruction_kernel": "metal_multikernel_dequant_wht",
       "fallback_used": false,
       "key_cosine_vs_reference": 1.0,
       "key_max_abs_diff_vs_reference": 0.0,
@@ -448,7 +523,7 @@
       "value_valid": true,
       "route_class": "ablation",
       "status": "valid",
-      "speedup_vs_reference": 18.118163592061645
+      "speedup_vs_reference": 83.84526430288332
     },
     {
       "shape": [
@@ -458,12 +533,12 @@
         128
       ],
       "bits": 8,
-      "mode": "metal_dequant_sign",
-      "route": "metal_dequant_sign",
-      "latency_ms_mean": 0.17212480306625366,
-      "latency_ms_p50": 0.17995800590142608,
-      "latency_ms_p95": 0.20054102060385048,
-      "kv_reconstruction_kernel": "metal_dequant_sign",
+      "mode": "metal_multikernel_dequant_sign",
+      "route": "metal_multikernel_dequant_sign",
+      "latency_ms_mean": 0.16649999694588283,
+      "latency_ms_p50": 0.16762499581091106,
+      "latency_ms_p95": 0.17783298972062767,
+      "kv_reconstruction_kernel": "metal_multikernel_dequant_sign",
       "fallback_used": false,
       "key_cosine_vs_reference": 1.0000001192092896,
       "key_max_abs_diff_vs_reference": 0.0,
@@ -473,7 +548,7 @@
       "value_valid": true,
       "route_class": "ablation",
       "status": "valid",
-      "speedup_vs_reference": 45.89334579699223
+      "speedup_vs_reference": 68.96445209010216
     },
     {
       "shape": [
@@ -483,64 +558,97 @@
         128
       ],
       "bits": 8,
-      "mode": "metal_dequant_wht_sign",
-      "route": "metal_dequant_wht_sign",
-      "latency_ms_mean": 0.3480583953205496,
-      "latency_ms_p50": 0.363041996024549,
-      "latency_ms_p95": 0.4344589833635837,
-      "kv_reconstruction_kernel": "metal_dequant_wht_sign",
+      "mode": "metal_multikernel_dequant_wht_sign",
+      "route": "metal_multikernel_dequant_wht_sign",
+      "latency_ms_mean": 0.37406967021524906,
+      "latency_ms_p50": 0.41912501910701394,
+      "latency_ms_p95": 0.4819169989787042,
+      "kv_reconstruction_kernel": "metal_multikernel_dequant_wht_sign",
       "fallback_used": false,
       "key_cosine_vs_reference": 1.0,
       "key_max_abs_diff_vs_reference": 0.0,
-      "value_cosine_vs_reference": 1.0,
+      "value_cosine_vs_reference": 1.0000001192092896,
       "value_max_abs_diff_vs_reference": 0.0,
       "key_valid": true,
       "value_valid": true,
       "route_class": "full_equivalent",
       "status": "valid",
-      "speedup_vs_reference": 22.74908986896614
+      "speedup_vs_reference": 27.581665292459025
+    },
+    {
+      "shape": [
+        1,
+        32,
+        4096,
+        128
+      ],
+      "bits": 8,
+      "mode": "metal_fused_dequant_wht_sign",
+      "route": "metal_fused_dequant_wht_sign",
+      "latency_ms_mean": 0.9897080017253757,
+      "latency_ms_p50": 0.331916002323851,
+      "latency_ms_p95": 2.4272919981740415,
+      "kv_reconstruction_kernel": "metal_fused_dequant_wht_sign",
+      "fallback_used": false,
+      "key_cosine_vs_reference": 1.0,
+      "key_max_abs_diff_vs_reference": 0.0,
+      "value_cosine_vs_reference": 1.0000001192092896,
+      "value_max_abs_diff_vs_reference": 0.0,
+      "key_valid": true,
+      "value_valid": true,
+      "route_class": "full_equivalent",
+      "status": "valid",
+      "speedup_vs_reference": 34.82858889528887
     }
   ],
   "summary": {
     "equivalence_pass_modes": [
       "sequential_reference",
-      "metal_dequant",
-      "metal_dequant_wht",
-      "metal_dequant_sign",
-      "metal_dequant_wht_sign",
+      "metal_multikernel_dequant",
+      "metal_multikernel_dequant_wht",
+      "metal_multikernel_dequant_sign",
+      "metal_multikernel_dequant_wht_sign",
+      "metal_fused_dequant_wht_sign",
       "sequential_reference",
-      "metal_dequant",
-      "metal_dequant_wht",
-      "metal_dequant_sign",
-      "metal_dequant_wht_sign",
+      "metal_multikernel_dequant",
+      "metal_multikernel_dequant_wht",
+      "metal_multikernel_dequant_sign",
+      "metal_multikernel_dequant_wht_sign",
+      "metal_fused_dequant_wht_sign",
       "sequential_reference",
-      "metal_dequant",
-      "metal_dequant_wht",
-      "metal_dequant_sign",
-      "metal_dequant_wht_sign",
+      "metal_multikernel_dequant",
+      "metal_multikernel_dequant_wht",
+      "metal_multikernel_dequant_sign",
+      "metal_multikernel_dequant_wht_sign",
+      "metal_fused_dequant_wht_sign",
       "sequential_reference",
-      "metal_dequant",
-      "metal_dequant_wht",
-      "metal_dequant_sign",
-      "metal_dequant_wht_sign"
+      "metal_multikernel_dequant",
+      "metal_multikernel_dequant_wht",
+      "metal_multikernel_dequant_sign",
+      "metal_multikernel_dequant_wht_sign",
+      "metal_fused_dequant_wht_sign"
     ],
     "speedup_modes": [
-      "metal_dequant",
-      "metal_dequant_wht",
-      "metal_dequant_sign",
-      "metal_dequant_wht_sign",
-      "metal_dequant",
-      "metal_dequant_wht",
-      "metal_dequant_sign",
-      "metal_dequant_wht_sign",
-      "metal_dequant",
-      "metal_dequant_wht",
-      "metal_dequant_sign",
-      "metal_dequant_wht_sign",
-      "metal_dequant",
-      "metal_dequant_wht",
-      "metal_dequant_sign",
-      "metal_dequant_wht_sign"
+      "metal_multikernel_dequant",
+      "metal_multikernel_dequant_wht",
+      "metal_multikernel_dequant_sign",
+      "metal_multikernel_dequant_wht_sign",
+      "metal_fused_dequant_wht_sign",
+      "metal_multikernel_dequant",
+      "metal_multikernel_dequant_wht",
+      "metal_multikernel_dequant_sign",
+      "metal_multikernel_dequant_wht_sign",
+      "metal_fused_dequant_wht_sign",
+      "metal_multikernel_dequant",
+      "metal_multikernel_dequant_wht",
+      "metal_multikernel_dequant_sign",
+      "metal_multikernel_dequant_wht_sign",
+      "metal_fused_dequant_wht_sign",
+      "metal_multikernel_dequant",
+      "metal_multikernel_dequant_wht",
+      "metal_multikernel_dequant_sign",
+      "metal_multikernel_dequant_wht_sign",
+      "metal_fused_dequant_wht_sign"
     ]
   }
 }

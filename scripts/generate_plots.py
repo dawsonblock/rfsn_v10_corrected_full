@@ -172,34 +172,38 @@ def _plot_kernel_reference_vs_metal(
             row.get("latency_ms_p50", row.get("retrieve_latency_ms", 0.0))
         )
         by_shape.setdefault(shape, {})[mode] = latency
-        if mode == "metal_dequant_wht_sign":
+        if mode in ("metal_multikernel_dequant_wht_sign", "metal_fused_dequant_wht_sign"):
             speedup_by_shape[shape] = float(row.get("speedup_vs_reference", 0.0))
             error_by_shape[shape] = float(row.get("max_abs_diff_vs_reference", 0.0))
 
     shapes = sorted(by_shape.keys())
     ref = [by_shape[s].get("sequential_reference", 0.0) for s in shapes]
-    metal = [
-        by_shape[s].get(
-            "metal_dequant_wht_sign",
-            by_shape[s].get("metal_packed_dequant_wht_sign", 0.0),
-        )
+    metal_multi = [
+        by_shape[s].get("metal_multikernel_dequant_wht_sign", 0.0)
+        for s in shapes
+    ]
+    metal_fused = [
+        by_shape[s].get("metal_fused_dequant_wht_sign", 0.0)
         for s in shapes
     ]
 
     fig = plt.figure(figsize=(12, 6))
     ax = fig.add_subplot(1, 1, 1)
     x = list(range(len(shapes)))
-    ax.plot(x, ref, marker="o", label="sequential_reference")
-    ax.plot(x, metal, marker="o", label="metal_dequant_wht_sign")
+    ax.plot(x, ref, marker="o", label="sequential reference")
+    ax.plot(x, metal_multi, marker="o", label="multi-kernel Metal")
+    if any(metal_fused):
+        ax.plot(x, metal_fused, marker="o", label="fused Metal")
     ax.set_xticks(x)
-    ax.set_xticklabels([s.replace("(", "").replace(")", "") for s in shapes], rotation=35, ha="right")
+    ax.set_xticklabels(
+        [s.replace("(", "").replace(")", "") for s in shapes],
+        rotation=35, ha="right",
+    )
     ax.set_ylabel("Retrieve latency (ms)")
     ax.set_title("Kernel Reference vs Metal")
     ax.legend()
     fig.tight_layout()
     fig.savefig(output_dir / "kernel_reference_vs_metal.png", dpi=150)
-    # Keep legacy alias name available.
-    fig.savefig(output_dir / "kernel_reference_vs_custom.png", dpi=150)
     plt.close(fig)
 
     fig = plt.figure(figsize=(12, 6))
@@ -207,7 +211,10 @@ def _plot_kernel_reference_vs_metal(
     speedup = [speedup_by_shape.get(s, 0.0) for s in shapes]
     ax.bar(list(range(len(shapes))), speedup, color="#2a9d8f")
     ax.set_xticks(list(range(len(shapes))))
-    ax.set_xticklabels([s.replace("(", "").replace(")", "") for s in shapes], rotation=35, ha="right")
+    ax.set_xticklabels(
+        [s.replace("(", "").replace(")", "") for s in shapes],
+        rotation=35, ha="right",
+    )
     ax.set_ylabel("Speedup vs reference")
     ax.set_title("Kernel Speedup by Shape")
     fig.tight_layout()
@@ -219,7 +226,10 @@ def _plot_kernel_reference_vs_metal(
     err = [error_by_shape.get(s, 0.0) for s in shapes]
     ax.bar(list(range(len(shapes))), err, color="#e76f51")
     ax.set_xticks(list(range(len(shapes))))
-    ax.set_xticklabels([s.replace("(", "").replace(")", "") for s in shapes], rotation=35, ha="right")
+    ax.set_xticklabels(
+        [s.replace("(", "").replace(")", "") for s in shapes],
+        rotation=35, ha="right",
+    )
     ax.set_ylabel("Max abs diff vs reference")
     ax.set_title("Kernel Error vs Reference")
     fig.tight_layout()
@@ -231,7 +241,7 @@ def _plot_kernel_reference_vs_metal(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Generate benchmark plot artifacts")
-    parser.add_argument("--input-dir", default="artifacts/proof/main10")
+    parser.add_argument("--input-dir", default="artifacts/proof/main12")
     parser.add_argument("--output-dir", default="results/plots")
     args = parser.parse_args()
 
@@ -282,10 +292,12 @@ def main() -> None:
             "matplotlib unavailable; placeholder only",
         )
 
-    _write_placeholder_png(
-        output_dir / "custom_kernel_alpha_pending_benchmark.png",
-        "Placeholder: metal kernel benchmark plot pending dedicated benchmark dataset.",
-    )
+    # Remove obsolete placeholder files if they exist
+    (output_dir / "custom_kernel_alpha_pending_benchmark.png").unlink(missing_ok=True)
+    (output_dir / "custom_kernel_alpha_pending_benchmark.txt").unlink(missing_ok=True)
+    (output_dir / "kernel_reference_vs_custom.png").unlink(missing_ok=True)
+    (output_dir / "kernel_reference_vs_custom.txt").unlink(missing_ok=True)
+
     wrote_kernel_plot = _plot_kernel_reference_vs_metal(
         kernel_payload=kernel_payload,
         output_dir=output_dir,
@@ -294,10 +306,6 @@ def main() -> None:
         _write_placeholder_png(
             output_dir / "kernel_reference_vs_metal.png",
             "Placeholder: kernel reference vs metal comparison requires dedicated paired kernel benchmark dataset.",
-        )
-        _write_placeholder_png(
-            output_dir / "kernel_reference_vs_custom.png",
-            "Alias placeholder for legacy naming; use kernel_reference_vs_metal.png for Main11.",
         )
 
     print(f"Wrote plot artifacts to {output_dir}")

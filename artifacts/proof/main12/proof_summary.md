@@ -9,7 +9,7 @@ Generated: 2026-06-02T07:26:04.849859+00:00
 - Key quality: pass (cosine >= 0.999)
 - Value quality:
   - 8-bit V path: ~0.99998 cosine
-  - 3-bit V path: ~0.970 cosine
+  - 3-bit V path: ~0.970 cosine (not >= 0.999; threshold is 0.90)
   - release threshold: pass above 0.90
 
 ## Sparse Decode Status
@@ -21,8 +21,9 @@ Generated: 2026-06-02T07:26:04.849859+00:00
 - Recommendation: dense default, sparse opt-in only
 
 ## Kernel Benchmark Status
-- Full-route benchmark: included (sequential_reference vs metal_dequant_wht_sign)
-- Ablation benchmark: included (metal_dequant, metal_dequant_wht, metal_dequant_sign)
+- Full-route benchmark: included (sequential_reference vs metal_multikernel_dequant_wht_sign vs metal_fused_dequant_wht_sign)
+- Ablation benchmark: included (metal_multikernel_dequant, metal_multikernel_dequant_wht, metal_multikernel_dequant_sign)
+- Fused kernel: pass (cosine 1.000, max_abs_diff 0.0 vs sequential reference)
 - K validation: pass (cosine >= 0.999, max_abs_diff <= 1e-3)
 - V validation: pass (cosine >= 0.999, max_abs_diff <= 1e-3)
 - Fallback observed: no

@@ -1,0 +1,8 @@
+.................................................................................................................................................................................................................................................................................................
+=============================== warnings summary ===============================
+tests/test_memory_guard_runtime_mlx.py::test_runtime_hard_pressure_disables_sparse_path
+tests/test_memory_guard_runtime_mlx.py::test_runtime_hard_pressure_skips_compressed_store
+  /Users/dawsonblock/rfsn_v10_corrected_full/rfsn_v10/memory_guard.py:182: UserWarning: MemoryGuard: entered emergency mode — sparse and quantized modes disabled
+    warnings.warn("MemoryGuard: entered emergency mode — sparse and quantized modes disabled")
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html

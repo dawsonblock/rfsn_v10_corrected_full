@@ -46,7 +46,7 @@ def _make_manager(cache_dir: Path, mode: str) -> RFSNTurboQuantKVManager:
             use_incoherent_signs=True,
             prefer_metal_kernels=False,
         )
-    if mode == "metal_dequant_sign":
+    if mode == "metal_multikernel_dequant_sign":
         return RFSNTurboQuantKVManager(
             cache_dir=str(cache_dir),
             k_bits=8,
@@ -54,9 +54,10 @@ def _make_manager(cache_dir: Path, mode: str) -> RFSNTurboQuantKVManager:
             use_wht=False,
             use_incoherent_signs=True,
             prefer_metal_kernels=True,
+            prefer_fused_kernel=False,
             strict_metal=False,
         )
-    if mode == "metal_dequant":
+    if mode == "metal_multikernel_dequant":
         return RFSNTurboQuantKVManager(
             cache_dir=str(cache_dir),
             k_bits=8,
@@ -64,9 +65,10 @@ def _make_manager(cache_dir: Path, mode: str) -> RFSNTurboQuantKVManager:
             use_wht=False,
             use_incoherent_signs=False,
             prefer_metal_kernels=True,
+            prefer_fused_kernel=False,
             strict_metal=False,
         )
-    if mode == "metal_dequant_wht":
+    if mode == "metal_multikernel_dequant_wht":
         return RFSNTurboQuantKVManager(
             cache_dir=str(cache_dir),
             k_bits=8,
@@ -74,9 +76,10 @@ def _make_manager(cache_dir: Path, mode: str) -> RFSNTurboQuantKVManager:
             use_wht=True,
             use_incoherent_signs=False,
             prefer_metal_kernels=True,
+            prefer_fused_kernel=False,
             strict_metal=False,
         )
-    if mode == "metal_dequant_wht_sign":
+    if mode == "metal_multikernel_dequant_wht_sign":
         return RFSNTurboQuantKVManager(
             cache_dir=str(cache_dir),
             k_bits=8,
@@ -84,6 +87,18 @@ def _make_manager(cache_dir: Path, mode: str) -> RFSNTurboQuantKVManager:
             use_wht=True,
             use_incoherent_signs=True,
             prefer_metal_kernels=True,
+            prefer_fused_kernel=False,
+            strict_metal=False,
+        )
+    if mode == "metal_fused_dequant_wht_sign":
+        return RFSNTurboQuantKVManager(
+            cache_dir=str(cache_dir),
+            k_bits=8,
+            v_bits=3,
+            use_wht=True,
+            use_incoherent_signs=True,
+            prefer_metal_kernels=True,
+            prefer_fused_kernel=True,
             strict_metal=False,
         )
     raise ValueError(f"Unsupported mode: {mode}")
@@ -94,10 +109,10 @@ def _median_retrieve_latency_ms(manager: RFSNTurboQuantKVManager, key: str, iter
     for _ in range(iterations):
         t0 = time.perf_counter()
         rec = manager.retrieve(key, out_dtype=mx.float32)
-        dt = (time.perf_counter() - t0) * 1000.0
         if rec is None:
             raise RuntimeError("Expected cache hit during retrieval benchmark")
         mx.eval(rec[0], rec[1])
+        dt = (time.perf_counter() - t0) * 1000.0
         latencies.append(dt)
     return float(statistics.median(latencies))
 
@@ -129,10 +144,10 @@ def _bench_mode(shape: tuple[int, int, int, int], mode: str, iterations: int, ba
     for _ in range(iterations):
         t0 = time.perf_counter()
         rec = manager.retrieve(key, out_dtype=mx.float32)
-        dt = (time.perf_counter() - t0) * 1000.0
         if rec is None:
             raise RuntimeError("Expected cache hit during retrieval benchmark")
         mx.eval(rec[0], rec[1])
+        dt = (time.perf_counter() - t0) * 1000.0
         latencies.append(dt)
     latency_mean, latency_p50, latency_p95 = _latency_stats(latencies)
     k_out, v_out = manager.retrieve(key, out_dtype=mx.float32)
@@ -200,10 +215,11 @@ def main() -> None:
 
     modes = [
         "sequential_reference",
-        "metal_dequant",
-        "metal_dequant_wht",
-        "metal_dequant_sign",
-        "metal_dequant_wht_sign",
+        "metal_multikernel_dequant",
+        "metal_multikernel_dequant_wht",
+        "metal_multikernel_dequant_sign",
+        "metal_multikernel_dequant_wht_sign",
+        "metal_fused_dequant_wht_sign",
     ]
 
     runs: list[dict] = []
@@ -211,7 +227,10 @@ def main() -> None:
 
     for shape in SHAPES:
         for mode in modes:
-            row = _bench_mode(shape, mode, args.iterations, out_path.parent / "kernel_bench_tmp")
+            row = _bench_mode(
+                shape, mode, args.iterations,
+                out_path.parent / "kernel_bench_tmp",
+            )
             runs.append(row)
             if mode == "sequential_reference":
                 reference_latencies[str(tuple(shape))] = row["latency_ms_p50"]
@@ -228,18 +247,25 @@ def main() -> None:
         # Validate K and V separately
         key_valid = (
             float(row["key_cosine_vs_reference"]) >= COSINE_THRESHOLD
-            and float(row["key_max_abs_diff_vs_reference"]) <= MAX_ABS_DIFF_THRESHOLD
+            and float(row["key_max_abs_diff_vs_reference"])
+            <= MAX_ABS_DIFF_THRESHOLD
         )
         value_valid = (
             float(row["value_cosine_vs_reference"]) >= COSINE_THRESHOLD
-            and float(row["value_max_abs_diff_vs_reference"]) <= MAX_ABS_DIFF_THRESHOLD
+            and float(row["value_max_abs_diff_vs_reference"])
+            <= MAX_ABS_DIFF_THRESHOLD
         )
 
         row["key_valid"] = key_valid
         row["value_valid"] = value_valid
 
         # Add route classification
-        if row["mode"] in ["sequential_reference", "metal_dequant_wht_sign"]:
+        full_routes = {
+            "sequential_reference",
+            "metal_multikernel_dequant_wht_sign",
+            "metal_fused_dequant_wht_sign",
+        }
+        if row["mode"] in full_routes:
             row["route_class"] = "full_equivalent"
         else:
             row["route_class"] = "ablation"
