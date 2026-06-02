@@ -171,7 +171,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Benchmark kernel reconstruction paths")
     parser.add_argument(
         "--out",
-        default="artifacts/proof/main11/kernel_benchmark.json",
+        default="artifacts/proof/main12/kernel_benchmark.json",
         help="Output JSON path",
     )
     parser.add_argument("--iterations", type=int, default=5)
@@ -201,7 +201,7 @@ def main() -> None:
 
     for row in runs:
         ref_latency = reference_latencies.get(row["shape"], row["latency_ms_p50"])
-        row["speedup_vs_reference"] = (
+        computed_speedup = (
             float(ref_latency) / float(row["latency_ms_p50"])
             if float(row["latency_ms_p50"]) > 0
             else 0.0
@@ -214,8 +214,10 @@ def main() -> None:
                 or float(row["max_abs_diff_vs_reference"]) > 1e-3
             )
             row["status"] = "invalid" if invalid else "valid"
+            row["speedup_vs_reference"] = None if invalid else float(computed_speedup)
         else:
             row["status"] = "valid"
+            row["speedup_vs_reference"] = float(computed_speedup)
 
     payload = {
         "runs": runs,

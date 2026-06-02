@@ -53,3 +53,9 @@ def test_wht64_metal_rejects_invalid_last_dim() -> None:
     x = mx.random.normal((1, 1, 128, 80)).astype(mx.float32)
     with pytest.raises(ValueError, match="multiple of 64"):
         wht64_metal(x)
+
+
+def test_wht64_metal_rejects_empty_tensor() -> None:
+    x = mx.zeros((0,), dtype=mx.float32)
+    with pytest.raises(ValueError, match="empty"):
+        wht64_metal(x)
