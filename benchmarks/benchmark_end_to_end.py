@@ -33,6 +33,9 @@ def benchmark_e2e(
     v_bits,
     use_incoherent,
     top_k_ratio,
+    reserved_sink_blocks=1,
+    reserved_recent_blocks=2,
+    enable_sparse_decode=True,
     use_compressed_on_miss=False,
     iterations=5,
 ):
@@ -45,6 +48,9 @@ def benchmark_e2e(
         runtime = RFSNRuntime(
             kv_manager=mgr, model_id="bench_model", block_size=64,
             audit_mode=True, top_k_ratio=top_k_ratio,
+            enable_sparse_decode=enable_sparse_decode,
+            reserved_sink_blocks=reserved_sink_blocks,
+            reserved_recent_blocks=reserved_recent_blocks,
             use_compressed_on_miss=use_compressed_on_miss,
         )
 
@@ -65,6 +71,8 @@ def benchmark_e2e(
                 keys=k,
                 values=v,
                 top_k_ratio=top_k_ratio,
+                reserved_sink_blocks=reserved_sink_blocks,
+                reserved_recent_blocks=reserved_recent_blocks,
             )
             miss_timings.append(miss_info["total_latency_ms"])
 
@@ -80,12 +88,16 @@ def benchmark_e2e(
             keys=k,
             values=v,
             top_k_ratio=top_k_ratio,
+            reserved_sink_blocks=reserved_sink_blocks,
+            reserved_recent_blocks=reserved_recent_blocks,
         )
 
         for _ in range(iterations):
             _, info = runtime.execute_decode_step(
                 skill_pattern="bench", layer_id="l0", batch_id="b_hit",
                 queries=q, keys=k, values=v, top_k_ratio=top_k_ratio,
+                reserved_sink_blocks=reserved_sink_blocks,
+                reserved_recent_blocks=reserved_recent_blocks,
             )
             hit_timings.append(info["total_latency_ms"])
             hit_infos.append(info)
@@ -99,14 +111,19 @@ def benchmark_e2e(
             "k_bits": k_bits,
             "v_bits": v_bits,
             "top_k_ratio": top_k_ratio,
+            "reserved_sink_blocks": reserved_sink_blocks,
+            "reserved_recent_blocks": reserved_recent_blocks,
             "use_compressed_on_miss": use_compressed_on_miss,
+            "sparse_allowed_by_gate": bool(hit_infos[-1]["sparse_allowed_by_gate"]) if hit_infos else None,
             "cache_miss_total_latency_ms": float(median(miss_timings)),
             "cache_hit_total_latency_ms": float(median(hit_timings)),
             "cache_hit_execution_mode": hit_infos[-1]["execution_mode"] if hit_infos else None,
+            "active_blocks": hit_infos[-1]["num_active_blocks"] if hit_infos else None,
             "kv_cache_hit": latest.kv_cache_hit if latest else None,
             "audit_cosine": latest.audit_cosine if latest else None,
             "quant_audit_cosine": latest.quant_audit_cosine if latest else None,
             "sparse_audit_cosine": latest.sparse_audit_cosine if latest else None,
+            "sparse_audit_rel_mae": latest.sparse_audit_rel_mae if latest else None,
             "effective_sparsity": latest.effective_sparsity if latest else None,
         }
 

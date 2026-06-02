@@ -24,7 +24,7 @@ from .kernels import (
     apply_hash_signs_metal,
     maybe_supports_metal_kernels,
     packed_dequant_metal,
-    reconstruct_packed_dequant_wht_sign_metal,
+    wht64_metal,
 )
 
 
@@ -73,6 +73,7 @@ class RFSNTurboQuantKVManager:
         use_custom_kernel: Optional[bool] = None,
         prefer_metal_kernels: bool = False,
         strict_metal: bool = False,
+        validate_metal_codes: bool = False,
         max_memory_gb: float = 1.0,
         max_pinned_memory_gb: float = 0.5,
         cache_dir: str = ".rfsn_cache",
@@ -104,6 +105,7 @@ class RFSNTurboQuantKVManager:
             prefer_metal_kernels = bool(use_custom_kernel)
         self.prefer_metal_kernels = bool(prefer_metal_kernels)
         self.strict_metal = bool(strict_metal)
+        self.validate_metal_codes = bool(validate_metal_codes)
         self.max_memory_gb = max_memory_gb
         self.max_pinned_memory_gb = max_pinned_memory_gb
         self.cache_dir = Path(cache_dir)
@@ -361,6 +363,22 @@ class RFSNTurboQuantKVManager:
 
         return x.reshape(-1)[:original_size]
 
+    def validate_symmetric_packed_codes(
+        self,
+        packed: mx.array,
+        n_values: int,
+        bits: int,
+    ) -> None:
+        """Validate packed symmetric quant codes for invalid code points."""
+        codes = BitPackedQuantizer.unpack(packed, n_values, bits)
+        qmax = (1 << (bits - 1)) - 1
+        max_valid = 2 * qmax
+        if bool(mx.any(codes > max_valid).item()):
+            raise ValueError(
+                f"Invalid symmetric quant code for {bits}-bit quantization. "
+                f"Max valid code is {max_valid}."
+            )
+
     # ------------------------------------------------------------------
     # Packed-dequant-WHT reconstruction path
     # ------------------------------------------------------------------
@@ -444,35 +462,39 @@ class RFSNTurboQuantKVManager:
         use_incoherent_signs: bool,
         out_dtype: mx.Dtype,
     ) -> mx.array:
-        if self.prefer_metal_kernels and maybe_supports_metal_kernels():
-            try:
-                if use_wht and use_incoherent_signs:
-                    self.last_reconstruction_kernel = "metal_packed_dequant_wht_sign"
-                    return reconstruct_packed_dequant_wht_sign_metal(
-                        packed=packed,
-                        scales=scales,
-                        n_values=n_values,
-                        shape=shape,
-                        bits=bits,
-                        seed=seed,
-                        out_dtype=out_dtype,
-                        group_size=self.group_size,
-                    )
+        def _metal_label() -> str:
+            if use_wht and use_incoherent_signs:
+                return "metal_dequant_wht_sign"
+            if use_wht:
+                return "metal_dequant_wht"
+            if use_incoherent_signs:
+                return "metal_dequant_sign"
+            return "metal_dequant"
 
+        if self.prefer_metal_kernels and maybe_supports_metal_kernels():
+            if self.strict_metal or self.validate_metal_codes:
+                self.validate_symmetric_packed_codes(
+                    packed=packed,
+                    n_values=n_values,
+                    bits=bits,
+                )
+            try:
                 deq = packed_dequant_metal(
                     packed=packed,
                     scales=scales,
                     n_values=n_values,
                     bits=bits,
                     group_size=self.group_size,
-                    out_dtype=out_dtype,
+                    out_dtype=mx.float32,
                 ).reshape(shape)
 
-                if use_incoherent_signs:
-                    self.last_reconstruction_kernel = "metal_sign_only"
-                    return apply_hash_signs_metal(deq, seed=seed).astype(out_dtype)
+                if use_wht:
+                    deq = wht64_metal(deq)
 
-                self.last_reconstruction_kernel = "metal_packed_dequant"
+                if use_incoherent_signs:
+                    deq = apply_hash_signs_metal(deq, seed=seed)
+
+                self.last_reconstruction_kernel = _metal_label()
                 return deq.astype(out_dtype)
             except Exception as exc:
                 if self.strict_metal:

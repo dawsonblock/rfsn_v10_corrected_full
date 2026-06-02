@@ -35,6 +35,7 @@ def runtime(tmp_path, kv_manager):
         block_size=64,
         audit_mode=False,
         top_k_ratio=1.0,
+        enable_sparse_decode=True,
     )
 
 
@@ -46,6 +47,7 @@ def runtime_with_audit(tmp_path, kv_manager):
         block_size=64,
         audit_mode=True,
         top_k_ratio=0.5,
+        enable_sparse_decode=True,
     )
 
 
@@ -244,6 +246,7 @@ def test_runtime_use_compressed_on_miss_assigns_retrieved_kv(kv_manager, monkeyp
         block_size=64,
         audit_mode=False,
         top_k_ratio=0.5,
+        enable_sparse_decode=True,
         use_compressed_on_miss=True,
     )
 
@@ -271,6 +274,8 @@ def test_runtime_use_compressed_on_miss_assigns_retrieved_kv(kv_manager, monkeyp
         top_k_ratio,
         block_size,
         kv_is_strictly_past,
+        reserved_sink_blocks=1,
+        reserved_recent_blocks=2,
         memory_guard=None,
     ):
         state["keys_seen"] = keys

@@ -23,6 +23,14 @@ class ClickHouseClient:
     - Automatic table creation (if enabled)
     - Basic error handling and retries
     """
+
+    ALLOWED_TABLES = {
+        "rfsn_attention_events",
+        "rfsn_kv_cache_events",
+        "rfsn_audit_events",
+        "rfsn_failures",
+        "rfsn_sparsity_profiles",
+    }
     
     def __init__(
         self,
@@ -212,6 +220,11 @@ class ClickHouseClient:
         Args:
             events: List of telemetry event dictionaries.
         """
+        self.write_attention_events(events)
+
+    def _write_events(self, table: str, events: List[Dict[str, Any]]) -> None:
+        if table not in self.ALLOWED_TABLES:
+            raise ValueError(f"Table is not allowed for writes: {table}")
         if not events:
             return
 
@@ -219,8 +232,23 @@ class ClickHouseClient:
             json.dumps(event, default=str, separators=(",", ":"))
             for event in events
         )
-        query = "INSERT INTO rfsn_attention_events FORMAT JSONEachRow\n" + payload
+        query = f"INSERT INTO {table} FORMAT JSONEachRow\n" + payload
         self._execute_query(query)
+
+    def write_attention_events(self, events: List[Dict[str, Any]]) -> None:
+        self._write_events("rfsn_attention_events", events)
+
+    def write_kv_cache_events(self, events: List[Dict[str, Any]]) -> None:
+        self._write_events("rfsn_kv_cache_events", events)
+
+    def write_audit_events(self, events: List[Dict[str, Any]]) -> None:
+        self._write_events("rfsn_audit_events", events)
+
+    def write_failure_events(self, events: List[Dict[str, Any]]) -> None:
+        self._write_events("rfsn_failures", events)
+
+    def write_sparsity_profile_events(self, events: List[Dict[str, Any]]) -> None:
+        self._write_events("rfsn_sparsity_profiles", events)
     
     def close(self) -> None:
         """Close the client and cleanup resources."""

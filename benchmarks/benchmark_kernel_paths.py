@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""Benchmark sequential vs metal reconstruction paths for Main11."""
+"""Benchmark sequential vs metal reconstruction paths for Main12."""
 
 from __future__ import annotations
 
 import argparse
 import json
+import math
 import statistics
 import time
 from pathlib import Path
@@ -42,7 +43,7 @@ def _make_manager(cache_dir: Path, mode: str) -> RFSNTurboQuantKVManager:
             use_incoherent_signs=True,
             prefer_metal_kernels=False,
         )
-    if mode == "metal_sign_only":
+    if mode == "metal_dequant_sign":
         return RFSNTurboQuantKVManager(
             cache_dir=str(cache_dir),
             k_bits=8,
@@ -52,7 +53,7 @@ def _make_manager(cache_dir: Path, mode: str) -> RFSNTurboQuantKVManager:
             prefer_metal_kernels=True,
             strict_metal=False,
         )
-    if mode == "metal_packed_dequant":
+    if mode == "metal_dequant":
         return RFSNTurboQuantKVManager(
             cache_dir=str(cache_dir),
             k_bits=8,
@@ -62,7 +63,17 @@ def _make_manager(cache_dir: Path, mode: str) -> RFSNTurboQuantKVManager:
             prefer_metal_kernels=True,
             strict_metal=False,
         )
-    if mode == "metal_packed_dequant_wht_sign":
+    if mode == "metal_dequant_wht":
+        return RFSNTurboQuantKVManager(
+            cache_dir=str(cache_dir),
+            k_bits=8,
+            v_bits=3,
+            use_wht=True,
+            use_incoherent_signs=False,
+            prefer_metal_kernels=True,
+            strict_metal=False,
+        )
+    if mode == "metal_dequant_wht_sign":
         return RFSNTurboQuantKVManager(
             cache_dir=str(cache_dir),
             k_bits=8,
@@ -88,6 +99,17 @@ def _median_retrieve_latency_ms(manager: RFSNTurboQuantKVManager, key: str, iter
     return float(statistics.median(latencies))
 
 
+def _latency_stats(latencies: list[float]) -> tuple[float, float, float]:
+    if not latencies:
+        return 0.0, 0.0, 0.0
+    ordered = sorted(latencies)
+    mean = float(statistics.fmean(ordered))
+    p50 = float(statistics.median(ordered))
+    p95_index = max(0, min(len(ordered) - 1, math.ceil(0.95 * len(ordered)) - 1))
+    p95 = float(ordered[p95_index])
+    return mean, p50, p95
+
+
 def _bench_mode(shape: tuple[int, int, int, int], mode: str, iterations: int, base_dir: Path) -> dict:
     mx.random.seed(42)
     keys = mx.random.normal(shape)
@@ -100,7 +122,16 @@ def _bench_mode(shape: tuple[int, int, int, int], mode: str, iterations: int, ba
     manager = _make_manager(mode_dir, mode)
     manager.store(key, keys, values, token_count=shape[2])
 
-    latency_ms = _median_retrieve_latency_ms(manager, key, iterations=iterations)
+    latencies = []
+    for _ in range(iterations):
+        t0 = time.perf_counter()
+        rec = manager.retrieve(key, out_dtype=mx.float32)
+        dt = (time.perf_counter() - t0) * 1000.0
+        if rec is None:
+            raise RuntimeError("Expected cache hit during retrieval benchmark")
+        mx.eval(rec[0], rec[1])
+        latencies.append(dt)
+    latency_mean, latency_p50, latency_p95 = _latency_stats(latencies)
     k_out, _ = manager.retrieve(key, out_dtype=mx.float32)
     mx.eval(k_out)
 
@@ -123,9 +154,14 @@ def _bench_mode(shape: tuple[int, int, int, int], mode: str, iterations: int, ba
 
     return {
         "shape": str(shape),
+        "bits": 8,
         "mode": mode,
-        "retrieve_latency_ms": latency_ms,
+        "route": mode,
+        "latency_ms_mean": latency_mean,
+        "latency_ms_p50": latency_p50,
+        "latency_ms_p95": latency_p95,
         "kv_reconstruction_kernel": manager.last_reconstruction_kernel,
+        "fallback_used": manager.last_reconstruction_kernel == "metal_failed_fallback_reference",
         "max_abs_diff_vs_reference": float(diff),
         "cosine_vs_reference": float(cosine),
     }
@@ -146,9 +182,10 @@ def main() -> None:
 
     modes = [
         "sequential_reference",
-        "metal_sign_only",
-        "metal_packed_dequant",
-        "metal_packed_dequant_wht_sign",
+        "metal_dequant",
+        "metal_dequant_wht",
+        "metal_dequant_sign",
+        "metal_dequant_wht_sign",
     ]
 
     runs: list[dict] = []
@@ -160,15 +197,25 @@ def main() -> None:
             row = _bench_mode(shape, mode, args.iterations, out_path.parent / "kernel_bench_tmp")
             runs.append(row)
             if mode == "sequential_reference":
-                reference_latencies[shape_label] = row["retrieve_latency_ms"]
+                reference_latencies[shape_label] = row["latency_ms_p50"]
 
     for row in runs:
-        ref_latency = reference_latencies.get(row["shape"], row["retrieve_latency_ms"])
+        ref_latency = reference_latencies.get(row["shape"], row["latency_ms_p50"])
         row["speedup_vs_reference"] = (
-            float(ref_latency) / float(row["retrieve_latency_ms"])
-            if float(row["retrieve_latency_ms"]) > 0
+            float(ref_latency) / float(row["latency_ms_p50"])
+            if float(row["latency_ms_p50"]) > 0
             else 0.0
         )
+
+        if row["mode"].startswith("metal_"):
+            invalid = (
+                bool(row["fallback_used"])
+                or float(row["cosine_vs_reference"]) < 0.999
+                or float(row["max_abs_diff_vs_reference"]) > 1e-3
+            )
+            row["status"] = "invalid" if invalid else "valid"
+        else:
+            row["status"] = "valid"
 
     payload = {
         "runs": runs,
@@ -176,12 +223,16 @@ def main() -> None:
             "equivalence_pass_modes": [
                 row["mode"]
                 for row in runs
-                if row["cosine_vs_reference"] > 0.999
+                if row["cosine_vs_reference"] > 0.999 and row.get("status") == "valid"
             ],
             "speedup_modes": [
                 row["mode"]
                 for row in runs
-                if row["mode"].startswith("metal_") and row["speedup_vs_reference"] > 1.0
+                if (
+                    row["mode"].startswith("metal_")
+                    and row["status"] == "valid"
+                    and row["speedup_vs_reference"] > 1.0
+                )
             ],
         },
     }

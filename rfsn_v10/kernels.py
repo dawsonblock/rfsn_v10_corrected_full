@@ -79,6 +79,71 @@ def _wht_transform_mx(x: mx.array, block: int = 64) -> mx.array:
     return y.reshape(shape)
 
 
+def wht64_metal(
+    x: mx.array,
+    out_dtype: mx.Dtype = mx.float32,
+) -> mx.array:
+    """Apply normalized WHT over contiguous 64-value blocks with Metal."""
+    ensure_mlx_available()
+    if not hasattr(mx.fast, "metal_kernel"):
+        raise KernelRouteError("metal_kernel_api_unavailable")
+    if x.size == 0:
+        raise ValueError("Cannot WHT-transform empty tensor.")
+    if x.shape[-1] % 64 != 0:
+        raise ValueError("Last dimension must be a multiple of 64.")
+
+    source = """
+        uint tgid = threadgroup_position_in_grid.x;
+        uint lid = thread_position_in_threadgroup.x;
+        uint gid = tgid * 64u + lid;
+        uint n = n_buf[0];
+
+        threadgroup float smem[64];
+        float val = 0.0f;
+        if (gid < n) {
+            val = float(x[gid]);
+        }
+
+        smem[lid] = val;
+        threadgroup_barrier(mem_flags::mem_threadgroup);
+
+        for (uint step = 1u; step < 64u; step *= 2u) {
+            uint partner = lid ^ step;
+            float a = smem[lid];
+            float b = smem[partner];
+            threadgroup_barrier(mem_flags::mem_threadgroup);
+            smem[lid] = ((lid & step) == 0u) ? (a + b) : (b - a);
+            threadgroup_barrier(mem_flags::mem_threadgroup);
+        }
+
+        if (gid < n) {
+            out[gid] = T(smem[lid] / 8.0f);
+        }
+    """
+
+    kernel = mx.fast.metal_kernel(
+        name="rfsn_wht64",
+        input_names=["x", "n_buf"],
+        output_names=["out"],
+        source=source,
+    )
+
+    shape = x.shape
+    flat = mx.array(x.reshape(-1))
+    n = int(flat.size)
+    n_buf = mx.array([n], dtype=mx.uint32)
+    outputs = kernel(
+        inputs=[flat, n_buf],
+        template=[("T", out_dtype)],
+        grid=(n, 1, 1),
+        threadgroup=(64, 1, 1),
+        output_shapes=[(n,)],
+        output_dtypes=[out_dtype],
+    )
+
+    return outputs[0].reshape(shape)
+
+
 def apply_hash_signs_metal(x: mx.array, seed: int) -> mx.array:
     """Apply deterministic +/-1 signs with an MLX metal kernel."""
     ensure_mlx_available()

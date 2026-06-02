@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Main11 metal kernel equivalence tests."""
+"""Main12 metal reconstruction route equivalence tests."""
 
 from __future__ import annotations
 
@@ -31,20 +31,22 @@ def test_metal_hash_sign_is_self_inverse() -> None:
 
 
 @pytest.mark.parametrize(
-    "shape",
+    ("use_wht", "use_signs", "expected_label"),
     [
-        (1, 4, 128, 64),
-        (1, 8, 512, 64),
-        (1, 8, 1024, 128),
+        (False, False, "metal_dequant"),
+        (True, False, "metal_dequant_wht"),
+        (False, True, "metal_dequant_sign"),
+        (True, True, "metal_dequant_wht_sign"),
     ],
 )
-def test_metal_reconstruction_matches_reference(shape, tmp_path):
+def test_metal_reconstruction_matches_reference(use_wht, use_signs, expected_label, tmp_path):
+    shape = (1, 8, 512, 64)
     manager = RFSNTurboQuantKVManager(
         cache_dir=str(tmp_path),
         k_bits=8,
         v_bits=3,
-        use_wht=True,
-        use_incoherent_signs=True,
+        use_wht=use_wht,
+        use_incoherent_signs=use_signs,
         prefer_metal_kernels=True,
         strict_metal=False,
     )
@@ -55,10 +57,7 @@ def test_metal_reconstruction_matches_reference(shape, tmp_path):
     manager.store("kernel_eq", keys, values, token_count=shape[2])
 
     metal_k, metal_v = manager.retrieve("kernel_eq", out_dtype=mx.float32)
-    assert manager.last_reconstruction_kernel in {
-        "metal_packed_dequant_wht_sign",
-        "metal_failed_fallback_reference",
-    }
+    assert manager.last_reconstruction_kernel == expected_label
 
     cache = manager.active_caches["kernel_eq"]
     ref_k = manager._reconstruct_packed_dequant_wht(
@@ -90,26 +89,33 @@ def test_metal_reconstruction_matches_reference(shape, tmp_path):
 
 
 def test_strict_metal_uses_metal_route(tmp_path):
-    manager = RFSNTurboQuantKVManager(
-        cache_dir=str(tmp_path),
-        k_bits=8,
-        v_bits=3,
-        use_wht=True,
-        use_incoherent_signs=False,
-        prefer_metal_kernels=True,
-        strict_metal=True,
-    )
+    cases = [
+        (False, False, "metal_dequant"),
+        (True, False, "metal_dequant_wht"),
+        (False, True, "metal_dequant_sign"),
+        (True, True, "metal_dequant_wht_sign"),
+    ]
 
     mx.random.seed(1)
     shape = (1, 4, 128, 64)
     keys = mx.random.normal(shape)
     values = mx.random.normal(shape)
-    manager.store("strict_metal", keys, values, token_count=shape[2])
 
-    k_rec, v_rec = manager.retrieve("strict_metal", out_dtype=mx.float32)
-    mx.eval(k_rec, v_rec)
-    assert manager.last_reconstruction_kernel in {
-        "metal_sign_only",
-        "metal_packed_dequant",
-        "metal_packed_dequant_wht_sign",
-    }
+    for idx, (use_wht, use_signs, expected_label) in enumerate(cases):
+        manager = RFSNTurboQuantKVManager(
+            cache_dir=str(tmp_path / f"strict_{idx}"),
+            k_bits=8,
+            v_bits=3,
+            use_wht=use_wht,
+            use_incoherent_signs=use_signs,
+            prefer_metal_kernels=True,
+            strict_metal=True,
+        )
+
+        key = f"strict_metal_{idx}"
+        manager.store(key, keys, values, token_count=shape[2])
+        k_rec, v_rec = manager.retrieve(key, out_dtype=mx.float32)
+        mx.eval(k_rec, v_rec)
+
+        assert manager.last_reconstruction_kernel == expected_label
+        assert manager.last_reconstruction_kernel != "metal_failed_fallback_reference"

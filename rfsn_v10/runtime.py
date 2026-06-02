@@ -75,6 +75,9 @@ class RFSNRuntime:
         block_size: int = 64,
         audit_mode: bool = False,
         top_k_ratio: float = 1.0,
+        enable_sparse_decode: bool = False,
+        reserved_sink_blocks: int = 1,
+        reserved_recent_blocks: int = 2,
         use_compressed_on_miss: bool = False,
         use_custom_kernel: Optional[bool] = None,
         adaptive_sparsity_controller: Optional[AdaptiveSparsityController] = None,
@@ -85,6 +88,9 @@ class RFSNRuntime:
         self.block_size = block_size
         self.audit_mode = audit_mode
         self.top_k_ratio = top_k_ratio
+        self.enable_sparse_decode = bool(enable_sparse_decode)
+        self.reserved_sink_blocks = int(reserved_sink_blocks)
+        self.reserved_recent_blocks = int(reserved_recent_blocks)
         self.use_compressed_on_miss = use_compressed_on_miss
         if use_custom_kernel is not None:
             self.kv_manager.use_custom_kernel = bool(use_custom_kernel)
@@ -154,6 +160,8 @@ class RFSNRuntime:
         keys: mx.array,
         values: mx.array,
         top_k_ratio: Optional[float] = None,
+        reserved_sink_blocks: Optional[int] = None,
+        reserved_recent_blocks: Optional[int] = None,
     ) -> tuple[mx.array, dict]:
         task_id = str(uuid.uuid4())
         t_start = time.monotonic()
@@ -172,6 +180,8 @@ class RFSNRuntime:
 
         B, H, T_q, D = queries.shape
         T_k = keys.shape[2]  # keys is [B, H, T_k, D]
+        sink_blocks = self.reserved_sink_blocks if reserved_sink_blocks is None else int(reserved_sink_blocks)
+        recent_blocks = self.reserved_recent_blocks if reserved_recent_blocks is None else int(reserved_recent_blocks)
 
         adaptive_decision = None
         if self.adaptive_sparsity_controller is not None:
@@ -192,13 +202,23 @@ class RFSNRuntime:
 
         quantized_enabled = True
         sparse_enabled = True
+        sparse_gate_reason = None
+        if not self.enable_sparse_decode:
+            sparse_enabled = False
+            sparse_gate_reason = "disabled_by_default"
+
         if adaptive_decision is not None:
             quantized_enabled = not adaptive_decision.disable_quantized
-            sparse_enabled = not adaptive_decision.disable_sparse
+            if self.enable_sparse_decode:
+                sparse_enabled = not adaptive_decision.disable_sparse
+                if adaptive_decision.disable_sparse:
+                    sparse_gate_reason = "adaptive_controller_disabled"
 
         if self.memory_guard is not None:
             quantized_enabled = not self.memory_guard.should_disable_quantized()
-            sparse_enabled = not self.memory_guard.should_disable_sparse()
+            if self.memory_guard.should_disable_sparse():
+                sparse_enabled = False
+                sparse_gate_reason = "memory_guard_disabled"
 
         effective_attention_top_k = effective_top_k if sparse_enabled else 1.0
 
@@ -287,6 +307,8 @@ class RFSNRuntime:
                 top_k_ratio=effective_attention_top_k,
                 block_size=self.block_size,
                 kv_is_strictly_past=True,
+                reserved_sink_blocks=sink_blocks,
+                reserved_recent_blocks=recent_blocks,
                 memory_guard=self.memory_guard,
             )
             mx.eval(sparse_output)
@@ -447,9 +469,13 @@ class RFSNRuntime:
             "adaptive_reason": adaptive_decision.reason if adaptive_decision is not None else None,
             "quantized_enabled": quantized_enabled,
             "sparse_enabled": sparse_enabled,
+            "sparse_allowed_by_gate": sparse_enabled,
+            "sparse_gate_reason": sparse_gate_reason,
             "sparse_success": sparse_success,
             "dense_success": dense_success,
             "fallback_used": fallback_used,
+            "reserved_sink_blocks": sink_blocks,
+            "reserved_recent_blocks": recent_blocks,
             "num_active_blocks": int(num_active_blocks),
             "effective_sparsity": effective_sparsity,
             "total_latency_ms": total_latency_ms,

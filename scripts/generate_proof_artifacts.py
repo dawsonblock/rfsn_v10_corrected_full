@@ -39,11 +39,20 @@ KV_CONFIGS = [
 ]
 
 E2E_SCENARIOS = [
-    ("cache_miss_full_precision_path", (1, 8, 1, 64), (1, 8, 2048, 64), 8, 3, True, 0.50, False),
-    ("cache_miss_use_compressed_on_miss_path", (1, 8, 1, 64), (1, 8, 2048, 64), 8, 3, True, 0.50, True),
-    ("cache_hit_compressed_path", (1, 8, 1, 64), (1, 8, 2048, 64), 8, 3, True, 0.50, True),
-    ("sparse_decode_path", (1, 8, 1, 64), (1, 8, 2048, 64), 8, 3, True, 0.60, True),
-    ("dense_decode_path", (1, 8, 8, 64), (1, 8, 2048, 64), 8, 3, True, 0.25, True),
+    # scenario, shape_q, shape_kv, k_bits, v_bits, use_incoherent,
+    # top_k_ratio, use_compressed_on_miss, enable_sparse_decode,
+    # reserved_sink_blocks, reserved_recent_blocks
+    ("dense_baseline", (1, 8, 1, 64), (1, 8, 2048, 64), 8, 3, True, 1.00, True, False, 1, 2),
+    ("sparse_topk_075_sink1_recent2", (1, 8, 1, 64), (1, 8, 2048, 64), 8, 3, True, 0.75, True, True, 1, 2),
+    ("sparse_topk_050_sink1_recent2", (1, 8, 1, 64), (1, 8, 2048, 64), 8, 3, True, 0.50, True, True, 1, 2),
+    ("sparse_topk_050_sink1_recent4", (1, 8, 1, 64), (1, 8, 2048, 64), 8, 3, True, 0.50, True, True, 1, 4),
+    ("sparse_topk_025_sink1_recent4", (1, 8, 1, 64), (1, 8, 2048, 64), 8, 3, True, 0.25, True, True, 1, 4),
+    # Legacy scenarios retained for baseline comparability in strict regression checks.
+    ("cache_miss_full_precision_path", (1, 8, 1, 64), (1, 8, 2048, 64), 8, 3, True, 0.50, False, True, 1, 2),
+    ("cache_miss_use_compressed_on_miss_path", (1, 8, 1, 64), (1, 8, 2048, 64), 8, 3, True, 0.50, True, True, 1, 2),
+    ("cache_hit_compressed_path", (1, 8, 1, 64), (1, 8, 2048, 64), 8, 3, True, 0.50, True, True, 1, 2),
+    ("sparse_decode_path", (1, 8, 1, 64), (1, 8, 2048, 64), 8, 3, True, 0.60, True, True, 1, 2),
+    ("dense_decode_path", (1, 8, 8, 64), (1, 8, 2048, 64), 8, 3, True, 0.25, True, True, 1, 2),
 ]
 
 
@@ -68,7 +77,19 @@ def run_kv_benchmarks(iterations: int) -> dict:
 
 def run_e2e_benchmarks(iterations: int) -> dict:
     runs = []
-    for scenario, shape_q, shape_kv, k_bits, v_bits, use_incoherent, top_k_ratio, use_compressed_on_miss in E2E_SCENARIOS:
+    for (
+        scenario,
+        shape_q,
+        shape_kv,
+        k_bits,
+        v_bits,
+        use_incoherent,
+        top_k_ratio,
+        use_compressed_on_miss,
+        enable_sparse_decode,
+        reserved_sink_blocks,
+        reserved_recent_blocks,
+    ) in E2E_SCENARIOS:
         result = benchmark_e2e(
             shape_q,
             shape_kv,
@@ -76,6 +97,9 @@ def run_e2e_benchmarks(iterations: int) -> dict:
             v_bits,
             use_incoherent,
             top_k_ratio,
+            reserved_sink_blocks=reserved_sink_blocks,
+            reserved_recent_blocks=reserved_recent_blocks,
+            enable_sparse_decode=enable_sparse_decode,
             use_compressed_on_miss=use_compressed_on_miss,
             iterations=iterations,
         )
@@ -89,8 +113,18 @@ def write_summary(output_dir: Path, kv_payload: dict, e2e_payload: dict, profile
     e2e_runs = e2e_payload["runs"]
 
     best_kv = min(kv_runs, key=lambda r: r["retrieve_latency_ms"]) if kv_runs else None
-    best_sparse = next((r for r in e2e_runs if r["scenario"] == "sparse_decode_path"), None)
-    best_dense = next((r for r in e2e_runs if r["scenario"] == "dense_decode_path"), None)
+    sparse_runs = [r for r in e2e_runs if str(r.get("scenario", "")).startswith("sparse_")]
+    best_sparse = max(
+        sparse_runs,
+        key=lambda r: float(r.get("sparse_audit_cosine") or 0.0),
+        default=None,
+    )
+    worst_sparse = min(
+        sparse_runs,
+        key=lambda r: float(r.get("sparse_audit_cosine") or 0.0),
+        default=None,
+    )
+    best_dense = next((r for r in e2e_runs if r["scenario"] == "dense_baseline"), None)
 
     thresholds = load_thresholds_file(REPO_ROOT / "scripts/proof_regression_thresholds.json")
     absolute_cfg = thresholds.get("absolute_quality_min", {})
@@ -127,6 +161,10 @@ def write_summary(output_dir: Path, kv_payload: dict, e2e_payload: dict, profile
     value_status = _status(value_min, value_threshold)
 
     unsafe_for_llm = any(status in {"warn", "fail"} for status in (sparse_status, quant_status, value_status))
+    sparse_deployment_safe = bool(sparse_min is not None and sparse_min >= sparse_threshold)
+    sparse_default_recommendation = (
+        "sparse_allowed" if sparse_deployment_safe else "dense_default"
+    )
 
     lines = [
         f"# {profile} Proof Summary",
@@ -155,10 +193,20 @@ def write_summary(output_dir: Path, kv_payload: dict, e2e_payload: dict, profile
 
     if best_sparse is not None:
         lines.append(
-            "- Sparse decode path: "
+            "- Best sparse scenario: "
+            f"{best_sparse['scenario']} "
             f"miss={best_sparse['cache_miss_total_latency_ms']:.2f}ms, "
             f"hit={best_sparse['cache_hit_total_latency_ms']:.2f}ms, "
-            f"quant_cos={best_sparse.get('quant_audit_cosine')}"
+            f"sparse_cos={best_sparse.get('sparse_audit_cosine')}"
+        )
+
+    if worst_sparse is not None:
+        lines.append(
+            "- Worst sparse scenario: "
+            f"{worst_sparse['scenario']} "
+            f"hit_mode={worst_sparse.get('cache_hit_execution_mode')} "
+            f"sparse_cos={worst_sparse.get('sparse_audit_cosine')} "
+            f"sparse_rel_mae={worst_sparse.get('sparse_audit_rel_mae')}"
         )
 
     if best_dense is not None:
@@ -185,6 +233,17 @@ def write_summary(output_dir: Path, kv_payload: dict, e2e_payload: dict, profile
             f"(min={value_min if value_min is not None else 'n/a'}, threshold={value_threshold:.3f})"
         ),
         "- WARNING_UNSAFE_FOR_LLM_DEPLOYMENT" if unsafe_for_llm else "- Deployment quality warning: none",
+        (
+            "- Sparse deployment threshold met: yes"
+            if sparse_deployment_safe
+            else "- Sparse deployment threshold met: no"
+        ),
+        (
+            "- Recommended default: sparse decode may be enabled for validated profiles"
+            if sparse_deployment_safe
+            else "- Recommended default: dense (sparse decode remains experimental and should default to disabled)"
+        ),
+        "- Real model validation: not run",
         "",
         "## Next Checks",
         "- Compare these artifacts against previous runs for trend regressions.",
@@ -198,6 +257,7 @@ def write_summary(output_dir: Path, kv_payload: dict, e2e_payload: dict, profile
         "highlights": {
             "best_kv": best_kv,
             "best_sparse": best_sparse,
+            "worst_sparse": worst_sparse,
             "best_dense": best_dense,
         },
         "absolute_quality": {
@@ -217,6 +277,11 @@ def write_summary(output_dir: Path, kv_payload: dict, e2e_payload: dict, profile
                 "threshold": value_threshold,
             },
             "warning_unsafe_for_llm_deployment": unsafe_for_llm,
+            "sparse_deployment_safe": sparse_deployment_safe,
+            "sparse_default_recommendation": sparse_default_recommendation,
+        },
+        "real_model_validation": {
+            "status": "not_run",
         },
     }
 
@@ -230,7 +295,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Generate proof artifacts")
     parser.add_argument(
         "--profile",
-        default="main11",
+        default="main12",
         help="Proof profile name for output labeling/default paths",
     )
     parser.add_argument(

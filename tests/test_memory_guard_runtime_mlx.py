@@ -35,6 +35,7 @@ def test_runtime_hard_pressure_disables_sparse_path(tmp_path) -> None:
         model_id="m",
         block_size=64,
         top_k_ratio=0.5,
+        enable_sparse_decode=True,
         memory_guard=guard,
     )
 
@@ -62,6 +63,7 @@ def test_runtime_hard_pressure_skips_compressed_store(tmp_path) -> None:
         model_id="m",
         block_size=64,
         top_k_ratio=0.5,
+        enable_sparse_decode=True,
         memory_guard=guard,
     )
 

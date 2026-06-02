@@ -1,24 +1,25 @@
-# RFSN v10 Main 11 - Custom Metal Kernel Alpha
+# RFSN v10 Main 12 - Metal WHT + Kernel Benchmark Alpha
 
-## Status: Main 11 Custom Metal Kernel Alpha
+## Status: Main 12 Metal WHT + Kernel Benchmark Alpha
 
 Verified in this package:
 - static syntax
-- non-MLX tests
+- agent/tool tests
 - proof regression tooling
 - generated proof plots
 
 Requires Apple Silicon validation:
-- MLX bitpack tests
-- KV manager tests
-- custom Metal kernel equivalence tests
-- runtime audit tests
-- real LLM logit/perplexity validation
+- bitpack execution
+- KV manager execution
+- Metal kernel equivalence
+- kernel benchmark generation
+- real model validation
 
 Claim boundary:
-- experimental custom Metal kernel path
+- experimental multi-kernel Metal reconstruction path
 - reference-equivalence gated
-- runtime optimization alpha
+- sparse decode disabled by default unless a profile passes safety gates
+- real model validation: not run
 
 ## Overview
 RFSN v10 is an alpha quantized KV-cache + decode-time sparse-attention runtime for MLX/Apple Silicon. This build focuses on proving numerical equivalence and quality-safe sparse behavior before any production claim.
@@ -64,6 +65,10 @@ RFSN v10 is an alpha quantized KV-cache + decode-time sparse-attention runtime f
 - **Telemetry**: Async writer with batching, retries, and ClickHouse backend
 - **Testing**: Deterministic unit coverage across core components
 - **Benchmarks**: Performance measurements with hardware/software metadata
+
+Kernel status:
+- Implemented: Metal sign kernel, Metal packed-dequant kernel, Metal WHT64 kernel, multi-kernel Metal reconstruction route
+- Not yet implemented: single fused packed-dequant-WHT-sign Metal kernel
 
 ## Requirements
 - Apple Silicon Mac (ARM64)
@@ -151,27 +156,37 @@ python3 benchmarks/benchmark_end_to_end.py
 # Generate proof artifacts (JSON + summary report)
 ./scripts/run_proof_artifacts.sh
 # Optional custom output dir, iterations, and profile
-./scripts/run_proof_artifacts.sh artifacts/proof/main11 3 main11
+./scripts/run_proof_artifacts.sh artifacts/proof/main12 3 main12
 
 # Compare current proof run vs tracked baseline
 python3 scripts/compare_proof_runs.py \
-    --profile main11 \
+    --profile main12 \
     --baseline-dir benchmarks/proof_baselines/main10 \
-    --current-dir artifacts/proof/main11 \
-    --output-json artifacts/proof/main11/trend_report.json \
-    --output-md artifacts/proof/main11/trend_report.md
+    --current-dir artifacts/proof/main12 \
+    --output-json artifacts/proof/main12/trend_report.json \
+    --output-md artifacts/proof/main12/trend_report.md
 
 # Enforce regression gate (non-zero exit on threshold breach)
 python3 scripts/check_proof_regression.py \
     --baseline benchmarks/proof_baselines/main10 \
-    --current artifacts/proof/main11 \
-    --output-json artifacts/proof/main11/regression_report.json \
-    --output-md artifacts/proof/main11/regression_report.md
+    --current artifacts/proof/main12 \
+    --output-json artifacts/proof/main12/regression_report.json \
+    --output-md artifacts/proof/main12/regression_report.md
+
+# Generate kernel benchmark evidence
+python3 benchmarks/benchmark_kernel_paths.py \
+    --out artifacts/proof/main12/kernel_benchmark.json
 
 # Generate plot artifacts from proof JSON
 python3 scripts/generate_plots.py \
-    --input-dir artifacts/proof/main11 \
+    --input-dir artifacts/proof/main12 \
     --output-dir results/plots
+
+# Optional real-model validation scaffold
+python3 benchmarks/validate_real_model_kv.py \
+    --model-path /path/to/mlx/model \
+    --prompt-file prompts/long_context.txt \
+    --out artifacts/proof/main12/real_model_validation.json
 ```
 
 Policy:
@@ -181,7 +196,8 @@ Policy:
 - KV latency thresholds are intentionally looser than quality thresholds because microbenchmark timing variance is higher than quality metric variance.
 - Metal kernel path is an alpha route with strict fallback to sequential reconstruction when unsupported.
 - Absolute quality minima should be treated as deployment warnings unless explicitly upgraded to hard-fail policy.
-- Current Main11 proof output includes `WARNING_UNSAFE_FOR_LLM_DEPLOYMENT` when sparse absolute quality is below target.
+- Current Main12 proof output includes `WARNING_UNSAFE_FOR_LLM_DEPLOYMENT` when sparse absolute quality is below target.
+- Sparse decode is experimental and disabled by default unless a profile passes safety gates.
 
 ## Memory Profiling
 ```bash
@@ -199,10 +215,10 @@ python3 scripts/profile_memory.py
 ## Implementation Status
 ✅ Core modules compile and integrate in alpha scope
 ✅ Benchmark scripts and proof plots are present
-✅ Custom Metal kernel alpha route and fallback policy are implemented
+✅ Metal packed-dequant, Metal WHT64, and Metal sign kernels are implemented
 ✅ Telemetry layer is implemented with batched writer support
 ⚠ MLX-dependent quality and performance validation is environment-dependent
-⚠ Sparse quality remains warning-scoped for deployment policy
+⚠ Sparse quality remains warning-scoped; sparse decode defaults to disabled
 ⚠ Production hardening and end-to-end real-model validation remain in progress
 ❌ Disk persistence (planned for future)
 ❌ Partial dequantization (optional optimization)

@@ -15,6 +15,8 @@ TINY_PNG = base64.b64decode(
 
 
 def _load_runs(path: Path) -> list[dict]:
+    if not path.exists():
+        return []
     payload = json.loads(path.read_text(encoding="utf-8"))
     return list(payload.get("runs", []))
 
@@ -161,21 +163,34 @@ def _plot_kernel_reference_vs_metal(
         return False
 
     by_shape: dict[str, dict[str, float]] = {}
+    speedup_by_shape: dict[str, float] = {}
+    error_by_shape: dict[str, float] = {}
     for row in runs:
         shape = str(row.get("shape", ""))
         mode = str(row.get("mode", ""))
-        latency = float(row.get("retrieve_latency_ms", 0.0))
+        latency = float(
+            row.get("latency_ms_p50", row.get("retrieve_latency_ms", 0.0))
+        )
         by_shape.setdefault(shape, {})[mode] = latency
+        if mode == "metal_dequant_wht_sign":
+            speedup_by_shape[shape] = float(row.get("speedup_vs_reference", 0.0))
+            error_by_shape[shape] = float(row.get("max_abs_diff_vs_reference", 0.0))
 
     shapes = sorted(by_shape.keys())
     ref = [by_shape[s].get("sequential_reference", 0.0) for s in shapes]
-    metal = [by_shape[s].get("metal_packed_dequant_wht_sign", 0.0) for s in shapes]
+    metal = [
+        by_shape[s].get(
+            "metal_dequant_wht_sign",
+            by_shape[s].get("metal_packed_dequant_wht_sign", 0.0),
+        )
+        for s in shapes
+    ]
 
     fig = plt.figure(figsize=(12, 6))
     ax = fig.add_subplot(1, 1, 1)
     x = list(range(len(shapes)))
     ax.plot(x, ref, marker="o", label="sequential_reference")
-    ax.plot(x, metal, marker="o", label="metal_packed_dequant_wht_sign")
+    ax.plot(x, metal, marker="o", label="metal_dequant_wht_sign")
     ax.set_xticks(x)
     ax.set_xticklabels([s.replace("(", "").replace(")", "") for s in shapes], rotation=35, ha="right")
     ax.set_ylabel("Retrieve latency (ms)")
@@ -185,6 +200,30 @@ def _plot_kernel_reference_vs_metal(
     fig.savefig(output_dir / "kernel_reference_vs_metal.png", dpi=150)
     # Keep legacy alias name available.
     fig.savefig(output_dir / "kernel_reference_vs_custom.png", dpi=150)
+    plt.close(fig)
+
+    fig = plt.figure(figsize=(12, 6))
+    ax = fig.add_subplot(1, 1, 1)
+    speedup = [speedup_by_shape.get(s, 0.0) for s in shapes]
+    ax.bar(list(range(len(shapes))), speedup, color="#2a9d8f")
+    ax.set_xticks(list(range(len(shapes))))
+    ax.set_xticklabels([s.replace("(", "").replace(")", "") for s in shapes], rotation=35, ha="right")
+    ax.set_ylabel("Speedup vs reference")
+    ax.set_title("Kernel Speedup by Shape")
+    fig.tight_layout()
+    fig.savefig(output_dir / "kernel_speedup_by_shape.png", dpi=150)
+    plt.close(fig)
+
+    fig = plt.figure(figsize=(12, 6))
+    ax = fig.add_subplot(1, 1, 1)
+    err = [error_by_shape.get(s, 0.0) for s in shapes]
+    ax.bar(list(range(len(shapes))), err, color="#e76f51")
+    ax.set_xticks(list(range(len(shapes))))
+    ax.set_xticklabels([s.replace("(", "").replace(")", "") for s in shapes], rotation=35, ha="right")
+    ax.set_ylabel("Max abs diff vs reference")
+    ax.set_title("Kernel Error vs Reference")
+    fig.tight_layout()
+    fig.savefig(output_dir / "kernel_error_vs_reference.png", dpi=150)
     plt.close(fig)
 
     return True
