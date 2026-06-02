@@ -14,7 +14,7 @@ import pytest
 
 mx = pytest.importorskip("mlx.core")
 
-from rfsn_v10.kv_manager import RFSNTurboQuantKVManager
+from rfsn_v10.kv_manager import RFSNTurboQuantKVManager  # noqa: E402
 
 COSINE_THRESHOLD = 0.999
 MAX_ABS_DIFF_THRESHOLD = 1e-3
