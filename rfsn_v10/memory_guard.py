@@ -150,6 +150,9 @@ class MemoryGuard:
 
         self._pressure_active = True
         target_free_bytes = max(0, projected_active - soft_limit_bytes)
+        # Under pressure, request eviction for at least the estimated cache footprint
+        # to avoid under-evicting from byte-rounding at tiny configured limits.
+        target_free_bytes = max(target_free_bytes, int(estimated_cache_bytes))
         bytes_freed = 0
         if self.eviction_callback is not None:
             try:
