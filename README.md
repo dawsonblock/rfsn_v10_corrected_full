@@ -36,12 +36,12 @@ RFSN v10 is an alpha quantized KV-cache + decode-time sparse-attention runtime f
 - `clickhouse_client.py` - HTTP-based ClickHouse client for telemetry ingestion
 
 ### Test Suite
-- `tests/test_bitpack.py` - 25 tests (roundtrip, stress, rejection cases)
-- `tests/test_kv_manager.py` - 25 tests (shapes, distributions, modes, corruption)
-- `tests/test_metal_kernel_math.py` - 133 tests (bitpack, quantization, WHT, metal-path reconstruction, KV store/retrieve)
-- `tests/test_attention.py` - 9 tests (sparse attention correctness, fallback, validation)
-- `tests/test_runtime.py` - 12 tests (orchestrator, telemetry, cache behavior)
-- `tests/test_long_context.py` - 5 tests (long sequence smoke tests)
+- `tests/test_bitpack.py` - bitpack roundtrip, stress, and rejection coverage
+- `tests/test_kv_manager.py` - KV compression/reconstruction and cache behavior coverage
+- `tests/test_metal_kernel_math.py` - bitpack, quantization, WHT, and metal-path reconstruction coverage
+- `tests/test_attention.py` - sparse attention correctness, fallback, and validation coverage
+- `tests/test_runtime.py` - runtime orchestration, telemetry, and audit coverage
+- `tests/test_long_context.py` - long sequence smoke coverage
 
 ### Benchmarks
 - `benchmarks/benchmark_bitpack.py` - Pack/unpack throughput and compression ratio
@@ -151,27 +151,26 @@ python3 benchmarks/benchmark_end_to_end.py
 # Generate proof artifacts (JSON + summary report)
 ./scripts/run_proof_artifacts.sh
 # Optional custom output dir, iterations, and profile
-./scripts/run_proof_artifacts.sh artifacts/proof/main10 3 main10
+./scripts/run_proof_artifacts.sh artifacts/proof/main11 3 main11
 
 # Compare current proof run vs tracked baseline
 python3 scripts/compare_proof_runs.py \
-    --profile main10 \
+    --profile main11 \
     --baseline-dir benchmarks/proof_baselines/main10 \
-    --current-dir artifacts/proof/main10 \
-    --output-json artifacts/proof/main10/trend_report.json \
-    --output-md artifacts/proof/main10/trend_report.md
+    --current-dir artifacts/proof/main11 \
+    --output-json artifacts/proof/main11/trend_report.json \
+    --output-md artifacts/proof/main11/trend_report.md
 
 # Enforce regression gate (non-zero exit on threshold breach)
 python3 scripts/check_proof_regression.py \
-    --profile main10 \
-    --baseline-dir benchmarks/proof_baselines/main10 \
-    --current-dir artifacts/proof/main10 \
-    --output-json artifacts/proof/main10/regression_report.json \
-    --output-md artifacts/proof/main10/regression_report.md
+    --baseline benchmarks/proof_baselines/main10 \
+    --current artifacts/proof/main11 \
+    --output-json artifacts/proof/main11/regression_report.json \
+    --output-md artifacts/proof/main11/regression_report.md
 
 # Generate plot artifacts from proof JSON
 python3 scripts/generate_plots.py \
-    --input-dir artifacts/proof/main10 \
+    --input-dir artifacts/proof/main11 \
     --output-dir results/plots
 ```
 
@@ -182,6 +181,7 @@ Policy:
 - KV latency thresholds are intentionally looser than quality thresholds because microbenchmark timing variance is higher than quality metric variance.
 - Metal kernel path is an alpha route with strict fallback to sequential reconstruction when unsupported.
 - Absolute quality minima should be treated as deployment warnings unless explicitly upgraded to hard-fail policy.
+- Current Main11 proof output includes `WARNING_UNSAFE_FOR_LLM_DEPLOYMENT` when sparse absolute quality is below target.
 
 ## Memory Profiling
 ```bash
