@@ -1,0 +1,27 @@
+version: '3.8'
+
+services:
+  rfsn:
+    build: .
+    container_name: rfsn-v10
+    volumes:
+      - ./artifacts:/app/artifacts
+      - ./results:/app/results
+      - rfsn_cache:/app/.cache
+    environment:
+      - RFSN_LOG_LEVEL=INFO
+      - RFSN_CACHE_DIR=/app/.cache
+      - RFSN_METRICS_ENABLED=true
+    ports:
+      - "8080:8080"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "from rfsn_v10.health import get_health_checker; checker = get_health_checker(); report = checker.get_health_report(); exit(0 if report['overall_status'] == 'healthy' else 1)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+volumes:
+  rfsn_cache:
+    driver: local

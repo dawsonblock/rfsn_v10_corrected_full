@@ -85,6 +85,7 @@ Kernel status:
 ```bash
 pip install -e ".[dev]"
 pip install -e ".[dev,real_model]"  # Optional: real-model validation (torch + transformers)
+pip install -e ".[production]"  # Optional: production validation (huggingface_hub)
 pip install mlx  # If not already installed
 ```
 
@@ -192,6 +193,19 @@ python3 benchmarks/validate_real_model_kv.py \
     --model-path /path/to/mlx/model \
     --prompt-file prompts/long_context.txt \
     --out artifacts/proof/main12/real_model_validation.json
+
+# Production-grade model validation
+# Download a model first:
+python tools/model_download.py mistral-7b --output-dir models
+# Then run comprehensive validation:
+python benchmarks/validate_production_model.py \
+    --model-path models/mistral-7b \
+    --prompt-suite prompts/validation_suite.json \
+    --out artifacts/proof/main12/production_validation.json
+# Check against baseline:
+python scripts/check_production_regression.py \
+    --results artifacts/proof/main12/production_validation.json \
+    --baseline benchmarks/production_baseline.json
 ```
 
 Policy:

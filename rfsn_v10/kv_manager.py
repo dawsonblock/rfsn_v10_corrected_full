@@ -11,10 +11,10 @@ from __future__ import annotations
 import hashlib
 import math
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from threading import RLock, get_ident
-from typing import Optional, Tuple
+from typing import Optional
 
 from .compat import mx
 
@@ -24,6 +24,7 @@ from .kernels import (
     apply_hash_signs_metal,
     maybe_supports_metal_kernels,
     packed_dequant_metal,
+    packed_dequant_wht_sign_metal,
     wht64_metal,
 )
 
@@ -60,6 +61,7 @@ class TurboQuantKVCache:
         self.use_wht = enabled
         self.use_incoherent_signs = enabled
 
+
 class RFSNTurboQuantKVManager:
     """TurboQuant KV cache manager with grouped symmetric quantization."""
 
@@ -86,7 +88,7 @@ class RFSNTurboQuantKVManager:
             raise ValueError(f"v_bits must be between 2 and 8, got {v_bits}")
         if group_size <= 0:
             raise ValueError(f"group_size must be positive, got {group_size}")
-            
+
         if use_wht is None and use_incoherent_signs is None:
             legacy = True if use_incoherent is None else bool(use_incoherent)
             use_wht = legacy
@@ -146,11 +148,11 @@ class RFSNTurboQuantKVManager:
 
         Uses hash-based deterministic signs instead of global RNG to avoid
         contaminating global random state.
-        
+
         Generates a deterministic mask of +1/-1 based on hash(index, seed),
         and multiplies element-wise. Calling twice with the same seed
         restores the original tensor.
-        
+
         Includes caching to avoid regenerating sign masks for identical
         shape/seed/dtype combinations.
         """
@@ -186,14 +188,14 @@ class RFSNTurboQuantKVManager:
             mx.array(1.0, dtype=x.dtype),
             mx.array(-1.0, dtype=x.dtype),
         ).reshape(shape)
-        
+
         # Cache the result (bounded) with lock to avoid concurrent mutation races.
         with self._sign_cache_lock:
             if cache_key not in self._sign_cache and len(self._sign_cache) < 128:
                 self._sign_cache[cache_key] = signs
             else:
                 signs = self._sign_cache.get(cache_key, signs)
-        
+
         return x * signs
 
     def estimate_compressed_bytes_for_shape(
@@ -450,6 +452,61 @@ class RFSNTurboQuantKVManager:
 
         return x.astype(out_dtype)
 
+    def _reconstruct_packed_dequant_wht_sign_fused(
+        self,
+        packed: mx.array,
+        scales: mx.array,
+        n_values: int,
+        shape: tuple,
+        bits: int,
+        seed: int,
+        out_dtype: mx.Dtype,
+    ) -> mx.array:
+        """Fused packed-dequant-WHT-sign reconstruction using single Metal kernel.
+
+        This is the optimized path that combines dequantization, WHT transform,
+        and sign application into a single kernel launch for better performance.
+        """
+
+        # Validate shape product
+        shape_product = math.prod(shape)
+        if shape_product != n_values:
+            raise ValueError(
+                f"Shape product {shape_product} does not match n_values {n_values}"
+            )
+
+        # Validate packed size
+        codes_per_word = 32 // bits
+        required_words = (n_values + codes_per_word - 1) // codes_per_word
+        if packed.size < required_words:
+            raise ValueError("Packed buffer too small")
+
+        # Validate scale count
+        n_groups = (n_values + self.group_size - 1) // self.group_size
+        if scales.size != n_groups:
+            raise ValueError("Scale count mismatch")
+
+        try:
+            result = packed_dequant_wht_sign_metal(
+                packed=packed,
+                scales=scales,
+                n_values=n_values,
+                bits=bits,
+                group_size=self.group_size,
+                seed=seed,
+                out_dtype=mx.float32,
+            ).reshape(shape)
+
+            self.last_reconstruction_kernel = "metal_fused_dequant_wht_sign"
+            return result.astype(out_dtype)
+        except Exception as exc:
+            if self.strict_metal:
+                raise KernelRouteError(
+                    f"fused metal reconstruction failed: {exc}"
+                ) from exc
+            self.last_reconstruction_kernel = "metal_fused_failed_fallback"
+            raise
+
     def _reconstruct_cached_tensor(
         self,
         packed: mx.array,
@@ -478,6 +535,30 @@ class RFSNTurboQuantKVManager:
                     n_values=n_values,
                     bits=bits,
                 )
+
+            # Try fused kernel path when both WHT and signs are enabled
+            if use_wht and use_incoherent_signs:
+                try:
+                    result = self._reconstruct_packed_dequant_wht_sign_fused(
+                        packed=packed,
+                        scales=scales,
+                        n_values=n_values,
+                        shape=shape,
+                        bits=bits,
+                        seed=seed,
+                        out_dtype=out_dtype,
+                    )
+                    return result
+                except Exception as exc:
+                    if self.strict_metal:
+                        raise KernelRouteError(
+                            f"fused metal reconstruction failed: {exc}"
+                        ) from exc
+                    self.last_reconstruction_kernel = (
+                        "metal_fused_failed_fallback_sequential"
+                    )
+
+            # Fallback to sequential kernel path
             try:
                 deq = packed_dequant_metal(
                     packed=packed,
@@ -498,7 +579,9 @@ class RFSNTurboQuantKVManager:
                 return deq.astype(out_dtype)
             except Exception as exc:
                 if self.strict_metal:
-                    raise KernelRouteError(f"strict metal reconstruction failed: {exc}") from exc
+                    raise KernelRouteError(
+                        f"strict metal reconstruction failed: {exc}"
+                    ) from exc
                 self.last_reconstruction_kernel = "metal_failed_fallback_reference"
 
         if self.prefer_metal_kernels and self.strict_metal:
@@ -730,7 +813,7 @@ class RFSNTurboQuantKVManager:
                 f"v_bits={cache.v_bits}, current k_bits={self.k_bits} "
                 f"v_bits={self.v_bits}"
             )
-        
+
         # Validate group_size metadata
         if cache.group_size != self.group_size:
             raise ValueError(

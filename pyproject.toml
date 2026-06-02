@@ -1,16 +1,43 @@
 [build-system]
-requires = ["setuptools>=68.0", "wheel"]
+requires = ["setuptools>=68.0", "wheel", "setuptools_scm>=8.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "rfsn-v10"
-version = "0.1.0"
+dynamic = ["version"]
 description = "RFSN v10 - Quantized KV-cache + decode-time sparse-attention runtime for MLX/Apple Silicon"
+readme = "README.md"
 requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [
+    {name = "RFSN Contributors"},
+]
+keywords = [
+    "quantization",
+    "kv-cache",
+    "sparse-attention",
+    "mlx",
+    "apple-silicon",
+    "llm",
+    "inference",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
 dependencies = [
     "numpy>=1.24",
     "matplotlib>=3.7",
     "requests>=2.31",
+    "pydantic>=2.0",
+    "pyyaml>=6.0",
 ]
 
 [project.optional-dependencies]
@@ -21,11 +48,27 @@ dev = [
     "pytest>=8.0",
     "pytest-timeout>=2.2",
     "pytest-asyncio",
+    "black>=23.0",
+    "ruff>=0.1.0",
+    "mypy>=1.5",
 ]
 real_model = [
     "torch",
     "transformers",
 ]
+production = [
+    "huggingface_hub>=0.20",
+    "psutil>=5.9",
+]
+all = [
+    "rfsn-v10[mlx,dev,real_model,production]",
+]
+
+[project.urls]
+Homepage = "https://github.com/yourusername/rfsn_v10"
+Documentation = "https://github.com/yourusername/rfsn_v10#readme"
+Repository = "https://github.com/yourusername/rfsn_v10"
+Issues = "https://github.com/yourusername/rfsn_v10/issues"
 
 [tool.setuptools.packages.find]
 include = ["rfsn_v10", "agent_core", "tools"]
@@ -33,6 +76,26 @@ include = ["rfsn_v10", "agent_core", "tools"]
 [tool.setuptools.exclude-package-data]
 "*" = ["*.pyc", "__pycache__/*"]
 
+[tool.setuptools_scm]
+write_to = "rfsn_v10/_version.py"
+
 [tool.pytest.ini_options]
 addopts = "-q"
 testpaths = ["tests"]
+timeout = 300
+
+[tool.black]
+line-length = 100
+target-version = ["py310", "py311", "py312"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+select = ["E", "F", "I", "N", "W", "UP"]
+ignore = ["E501"]
+
+[tool.mypy]
+python_version = "3.10"
+warn_return_any = true
+warn_unused_configs = true
+ignore_missing_imports = true
