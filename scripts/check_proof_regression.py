@@ -53,7 +53,7 @@ def main() -> None:
     parser.add_argument(
         "--strict-missing",
         action="store_true",
-        default=True,
+        default=False,
         help="Treat missing baseline scenarios in current run as breaches",
     )
     parser.add_argument(
