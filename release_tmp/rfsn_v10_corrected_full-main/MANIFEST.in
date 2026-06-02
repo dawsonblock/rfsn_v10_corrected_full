@@ -1,0 +1,5 @@
+global-exclude *.py[cod]
+global-exclude __pycache__
+prune .kilo
+prune .pytest_cache
+prune .mypy_cache
