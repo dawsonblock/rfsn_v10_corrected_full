@@ -1,8 +1,9 @@
-# Fused Kernel Plan (Main14+)
+# Fused Kernel Plan (Main16+)
 
 ## Status
-This document is preparation-only for a future single-kernel implementation.
-Main13 ships a multi-kernel Metal route and does not claim fused-kernel completion.
+(Main15) roadmap.
+Document is preparation-only for a future single-kernel implementation.
+Main15 ships a multi-kernel Metal route and does not claim fused-kernel completion.
 
 ## Target Operation
 Single Metal kernel pipeline:

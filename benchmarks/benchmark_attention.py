@@ -11,7 +11,13 @@ import platform
 import time
 from datetime import datetime, timezone
 
-import mlx.core as mx
+try:
+    import mlx.core as mx
+except Exception as exc:  # pragma: no cover
+    raise SystemExit(
+        "MLX is required for attention benchmarks. "
+        "Run this on Apple Silicon with: pip install mlx"
+    ) from exc
 
 from rfsn_v10.attention import AdaptiveBlockSparseAttention
 

@@ -51,34 +51,6 @@ def _run_metal_kernel(
     return outputs[0]
 
 
-def _wht_transform_mx(x: mx.array, block: int = 64) -> mx.array:
-    if block != 64:
-        raise KernelRouteError(f"wht block must be 64, got {block}")
-    if x.shape[-1] % block != 0:
-        raise KernelRouteError(
-            f"wht requires head dim multiple of {block}, got {x.shape[-1]}"
-        )
-
-    def _wht_block_recursive(y: mx.array) -> mx.array:
-        n = y.shape[-1]
-        if n == 1:
-            return y
-
-        half = n // 2
-        y0 = y[..., :half]
-        y1 = y[..., half:]
-
-        a = _wht_block_recursive(y0)
-        b = _wht_block_recursive(y1)
-        return mx.concatenate([a + b, a - b], axis=-1)
-
-    shape = x.shape
-    y = x.reshape(-1, block)
-    y = _wht_block_recursive(y)
-    y = y / math.sqrt(block)
-    return y.reshape(shape)
-
-
 def wht64_metal(
     x: mx.array,
     out_dtype: mx.Dtype = mx.float32,
@@ -264,41 +236,6 @@ def packed_dequant_metal(
         output_dtype=out_dtype,
         n_threads=int(n_values),
     )
-
-
-def reconstruct_metal_dequant_then_wht_then_sign(
-    *,
-    packed: mx.array,
-    scales: mx.array,
-    n_values: int,
-    shape: tuple,
-    bits: int,
-    seed: int,
-    out_dtype: mx.Dtype,
-    group_size: int,
-) -> mx.array:
-    """Multi-kernel Metal route: packed dequant -> WHT64 -> hash sign."""
-    if not MLX_AVAILABLE:
-        raise KernelRouteError("mlx_not_available")
-    if out_dtype not in (mx.float32, mx.float16):
-        raise KernelRouteError(f"out dtype unsupported: {out_dtype}")
-    if math.prod(shape) != n_values:
-        raise KernelRouteError(
-            f"shape product {math.prod(shape)} does not match n_values {n_values}"
-        )
-
-    deq = packed_dequant_metal(
-        packed=packed,
-        scales=scales,
-        n_values=n_values,
-        bits=bits,
-        group_size=group_size,
-        out_dtype=out_dtype,
-    )
-    x = deq.reshape(shape)
-    x = _wht_transform_mx(x, block=64)
-    x = apply_hash_signs_metal(x, seed=seed)
-    return x.astype(out_dtype)
 
 
 def maybe_supports_metal_kernels() -> bool:

@@ -1,26 +1,29 @@
-# RFSN v10 Main 13 - Proof Artifact Release + Fused Kernel Preparation
+# RFSN v10 Main 15 — Clean Proof Package + Release Integrity Repair
 
-## Status: RFSN v10 Main 13 - Proof Artifact Release + Fused Kernel Preparation
+## Status: RFSN v10 Main 15 — Clean Proof Package + Release Integrity Repair
 
 Verified:
 - non-MLX tests
+- MLX kernel equivalence tests (kernel_equivalence_mlx.py, wht_metal_mlx.py, invalid_symmetric_codes_mlx.py)
+- MemoryGuard + sparse safety tests (memory_guard_runtime_mlx.py, sparse_safety_gate.py)
 - optional MLX package structure
 - proof regression tooling
 - plot generation from included artifacts
 - package artifact inclusion (see below)
+- release integrity verification
 
 Shipped proof artifacts (artifacts/proof/main12/):
 - ✅ kernel_benchmark.json — Metal path latency and equivalence rows
 - ✅ kv_cache_runs.json — KV quality and compression metrics
 - ✅ e2e_scenarios.json — end-to-end scenario evidence
 - ✅ regression_report.json + regression_report.md — baseline comparisons
-- ✅ real_model_validation.json — scaffold/record (environment-dependent)
+- ✅ real_model_validation.json — real-LLM KV roundtrip record
 - ✅ summary.json + proof_summary.md — orbit summary
+- ✅ mlx_test_summary.md — Apple Silicon test execution record
 
 Requires Apple Silicon:
-- MLX kernel equivalence tests
-- Metal benchmark generation
-- real model validation
+- Metal benchmark regeneration on target hardware
+- latency profiling on native Apple Silicon (non-MLX environment may not represent peak Metal throughput)
 
 Implemented:
 - Metal packed-dequant kernel
@@ -210,7 +213,7 @@ Policy:
 - KV latency thresholds are intentionally looser than quality thresholds because microbenchmark timing variance is higher than quality metric variance.
 - Metal kernel path is an alpha route with strict fallback to sequential reconstruction when unsupported.
 - Absolute quality minima should be treated as deployment warnings unless explicitly upgraded to hard-fail policy.
-- Current Main12 proof output includes `WARNING_UNSAFE_FOR_LLM_DEPLOYMENT` when sparse absolute quality is below target.
+- Current proof output includes `WARNING_UNSAFE_FOR_LLM_DEPLOYMENT` when sparse absolute quality is below target.
 - Sparse decode is experimental and disabled by default unless a profile passes safety gates.
 
 ## Memory Profiling
