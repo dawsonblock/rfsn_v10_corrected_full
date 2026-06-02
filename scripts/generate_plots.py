@@ -34,6 +34,7 @@ def _plot_with_matplotlib(kv_runs: list[dict], e2e_runs: list[dict], output_dir:
     kv_store = [float(run.get("store_latency_ms", 0.0)) for run in kv_runs]
     kv_retrieve = [float(run.get("retrieve_latency_ms", 0.0)) for run in kv_runs]
     kv_value_cos = [float(run.get("value_cosine_sim", 0.0)) for run in kv_runs]
+    kv_compression_ratio = [float(run.get("compression_ratio", 0.0)) for run in kv_runs]
 
     fig = plt.figure(figsize=(12, 6))
     ax = fig.add_subplot(1, 1, 1)
@@ -47,6 +48,7 @@ def _plot_with_matplotlib(kv_runs: list[dict], e2e_runs: list[dict], output_dir:
     ax.legend()
     fig.tight_layout()
     fig.savefig(output_dir / "kv_latency.png", dpi=150)
+    fig.savefig(output_dir / "kv_cache_latency.png", dpi=150)
     plt.close(fig)
 
     fig = plt.figure(figsize=(12, 6))
@@ -59,6 +61,18 @@ def _plot_with_matplotlib(kv_runs: list[dict], e2e_runs: list[dict], output_dir:
     ax.set_title("KV Value Cosine Similarity")
     fig.tight_layout()
     fig.savefig(output_dir / "kv_quality_cosine.png", dpi=150)
+    fig.savefig(output_dir / "kv_reconstruction_quality.png", dpi=150)
+    plt.close(fig)
+
+    fig = plt.figure(figsize=(12, 6))
+    ax = fig.add_subplot(1, 1, 1)
+    ax.plot(x, kv_compression_ratio, marker="o", color="#6a4c93")
+    ax.set_xticks(x)
+    ax.set_xticklabels([s.replace("shape=", "")[:28] for s in kv_scenarios], rotation=45, ha="right")
+    ax.set_ylabel("Packed / Original")
+    ax.set_title("KV Compression Ratio")
+    fig.tight_layout()
+    fig.savefig(output_dir / "compression_ratio.png", dpi=150)
     plt.close(fig)
 
     e2e_scenarios = [run.get("scenario", "") for run in e2e_runs]
@@ -95,6 +109,18 @@ def _plot_with_matplotlib(kv_runs: list[dict], e2e_runs: list[dict], output_dir:
     fig.savefig(output_dir / "e2e_quality_cosine.png", dpi=150)
     plt.close(fig)
 
+    fig = plt.figure(figsize=(10, 6))
+    ax = fig.add_subplot(1, 1, 1)
+    ax.plot(x2, e2e_sparse, marker="o", color="#1d3557")
+    ax.set_xticks(x2)
+    ax.set_xticklabels(e2e_scenarios, rotation=35, ha="right")
+    ax.set_ylim(0.0, 1.0)
+    ax.set_ylabel("Cosine")
+    ax.set_title("E2E Sparse Quality Cosine")
+    fig.tight_layout()
+    fig.savefig(output_dir / "e2e_sparse_quality.png", dpi=150)
+    plt.close(fig)
+
     return True
 
 
@@ -118,7 +144,19 @@ def main() -> None:
             "matplotlib unavailable; placeholder only",
         )
         _write_placeholder_png(
+            output_dir / "kv_cache_latency.png",
+            "matplotlib unavailable; placeholder only",
+        )
+        _write_placeholder_png(
             output_dir / "kv_quality_cosine.png",
+            "matplotlib unavailable; placeholder only",
+        )
+        _write_placeholder_png(
+            output_dir / "kv_reconstruction_quality.png",
+            "matplotlib unavailable; placeholder only",
+        )
+        _write_placeholder_png(
+            output_dir / "compression_ratio.png",
             "matplotlib unavailable; placeholder only",
         )
         _write_placeholder_png(
@@ -129,10 +167,18 @@ def main() -> None:
             output_dir / "e2e_quality_cosine.png",
             "matplotlib unavailable; placeholder only",
         )
+        _write_placeholder_png(
+            output_dir / "e2e_sparse_quality.png",
+            "matplotlib unavailable; placeholder only",
+        )
 
     _write_placeholder_png(
         output_dir / "custom_kernel_alpha_pending_benchmark.png",
         "Placeholder: custom kernel benchmark plot pending dedicated benchmark dataset.",
+    )
+    _write_placeholder_png(
+        output_dir / "kernel_reference_vs_custom.png",
+        "Placeholder: kernel reference vs custom comparison requires dedicated paired kernel benchmark dataset.",
     )
 
     print(f"Wrote plot artifacts to {output_dir}")

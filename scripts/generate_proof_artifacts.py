@@ -191,7 +191,39 @@ def write_summary(output_dir: Path, kv_payload: dict, e2e_payload: dict, profile
         "- Keep sparse vs dense and quant vs sparse audit metrics split in analysis.",
     ])
 
+    summary_payload = {
+        "profile": profile,
+        "generated_at": _metadata()["timestamp"],
+        "files": ["kv_cache_runs.json", "e2e_scenarios.json"],
+        "highlights": {
+            "best_kv": best_kv,
+            "best_sparse": best_sparse,
+            "best_dense": best_dense,
+        },
+        "absolute_quality": {
+            "sparse": {
+                "status": sparse_status,
+                "min": sparse_min,
+                "threshold": sparse_threshold,
+            },
+            "quant": {
+                "status": quant_status,
+                "min": quant_min,
+                "threshold": quant_threshold,
+            },
+            "value": {
+                "status": value_status,
+                "min": value_min,
+                "threshold": value_threshold,
+            },
+            "warning_unsafe_for_llm_deployment": unsafe_for_llm,
+        },
+    }
+
     (output_dir / "proof_summary.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    (output_dir / "summary.json").write_text(
+        json.dumps(summary_payload, indent=2) + "\n", encoding="utf-8"
+    )
 
 
 def main() -> None:
