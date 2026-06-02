@@ -7,4 +7,4 @@ build/
 .mypy_cache/
 .rfsn_cache/
 .kilo/
-artifacts/
+.tmp/

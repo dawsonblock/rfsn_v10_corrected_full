@@ -1,0 +1,38 @@
+# main12 Proof Summary
+
+Generated: 2026-06-02T07:26:04.849859+00:00
+
+## Sparse Decode Status
+- Default: disabled
+- Reason: shipped sparse audit quality has not cleared deployment threshold
+- Threshold: sparse_audit_cosine >= 0.90
+- Current minimum: 0.4996378421783447
+- Recommendation: dense default, sparse opt-in only
+
+## Files
+- kv_cache_runs.json
+- e2e_scenarios.json
+- kernel_benchmark.json
+- real_model_validation.json
+
+## Highlights
+- Fastest KV retrieve: 0.61ms (shape=(1, 8, 1024, 64)|k=8|v=8|incoherent=False)
+- KV value quality (same run): cos=1.0000, rel_mae=0.0063, max_abs=0.0199
+- Best sparse scenario: sparse_topk_075_sink1_recent2 miss=11.06ms, hit=7.37ms, sparse_cos=0.8836325407028198
+- Worst sparse scenario: sparse_disabled_by_default hit_mode=dense_requested sparse_cos=None sparse_rel_mae=None
+- Dense decode path: miss=9.68ms, hit=5.33ms, mode=dense_requested
+
+## Absolute Quality
+- Sparse quality: warn (min=0.4996378421783447, threshold=0.900)
+- Quant quality: pass (min=0.9703969359397888, threshold=0.950)
+- KV cache quality: pass (min=0.9699910283088684, threshold=0.900)
+- Sparse default: disabled
+- WARNING_UNSAFE_FOR_LLM_DEPLOYMENT
+- Sparse deployment threshold met: no
+- Recommended default: dense (sparse decode remains experimental and should default to disabled)
+- Kernel benchmark: run
+- Real model validation: run
+
+## Next Checks
+- Compare these artifacts against previous runs for trend regressions.
+- Keep sparse vs dense and quant vs sparse audit metrics split in analysis.

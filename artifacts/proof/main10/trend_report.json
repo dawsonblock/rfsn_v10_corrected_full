@@ -1,0 +1,1136 @@
+{
+  "baseline_dir": "benchmarks/proof_baselines/main8_1",
+  "current_dir": "artifacts/proof/main10",
+  "thresholds": {
+    "kv": {
+      "latency_max_regression_pct": {
+        "store_latency_ms": 200.0,
+        "retrieve_latency_ms": 200.0
+      },
+      "quality_max_drop_abs": {
+        "key_cosine_sim": 0.008,
+        "value_cosine_sim": 0.02
+      },
+      "quality_max_rise_abs": {
+        "key_rel_mae": 0.02,
+        "value_rel_mae": 0.06,
+        "key_max_abs_error": 0.04,
+        "value_max_abs_error": 0.2
+      }
+    },
+    "e2e": {
+      "latency_max_regression_pct": {
+        "cache_miss_total_latency_ms": 30.0,
+        "cache_hit_total_latency_ms": 30.0
+      },
+      "quality_max_drop_abs": {
+        "quant_audit_cosine": 0.015,
+        "sparse_audit_cosine": 0.03,
+        "audit_cosine": 0.03
+      }
+    }
+  },
+  "strict_missing": true,
+  "sections": {
+    "kv": {
+      "compared_scenarios": [
+        "shape=(1, 32, 4096, 128)|k=8|v=3|incoherent=False",
+        "shape=(1, 32, 4096, 128)|k=8|v=3|incoherent=True",
+        "shape=(1, 32, 4096, 128)|k=8|v=8|incoherent=False",
+        "shape=(1, 8, 1024, 64)|k=8|v=3|incoherent=False",
+        "shape=(1, 8, 1024, 64)|k=8|v=3|incoherent=True",
+        "shape=(1, 8, 1024, 64)|k=8|v=8|incoherent=False",
+        "shape=(1, 8, 2048, 64)|k=8|v=3|incoherent=False",
+        "shape=(1, 8, 2048, 64)|k=8|v=3|incoherent=True",
+        "shape=(1, 8, 2048, 64)|k=8|v=8|incoherent=False"
+      ],
+      "missing_scenarios": [],
+      "extra_scenarios": [],
+      "metric_deltas": [
+        {
+          "section": "kv",
+          "scenario": "shape=(1, 32, 4096, 128)|k=8|v=3|incoherent=False",
+          "metric": "store_latency_ms",
+          "baseline": 19.921916667954065,
+          "current": 20.168152996726956,
+          "observed": 1.236007221980711,
+          "unit": "pct",
+          "rule": "latency_max_regression_pct",
+          "threshold": 200.0
+        },
+        {
+          "section": "kv",
+          "scenario": "shape=(1, 32, 4096, 128)|k=8|v=3|incoherent=False",
+          "metric": "retrieve_latency_ms",
+          "baseline": 27.278930332007196,
+          "current": 11.62847266823519,
+          "observed": -57.37196243875021,
+          "unit": "pct",
+          "rule": "latency_max_regression_pct",
+          "threshold": 200.0
+        },
+        {
+          "section": "kv",
+          "scenario": "shape=(1, 32, 4096, 128)|k=8|v=3|incoherent=False",
+          "metric": "key_cosine_sim",
+          "baseline": 0.999982476234436,
+          "current": 0.999982476234436,
+          "observed": 0.0,
+          "unit": "abs",
+          "rule": "quality_max_drop_abs",
+          "threshold": 0.008
+        },
+        {
+          "section": "kv",
+          "scenario": "shape=(1, 32, 4096, 128)|k=8|v=3|incoherent=False",
+          "metric": "value_cosine_sim",
+          "baseline": 0.9700300097465515,
+          "current": 0.9700300097465515,
+          "observed": 0.0,
+          "unit": "abs",
+          "rule": "quality_max_drop_abs",
+          "threshold": 0.02
+        },
+        {
+          "section": "kv",
+          "scenario": "shape=(1, 32, 4096, 128)|k=8|v=3|incoherent=False",
+          "metric": "key_rel_mae",
+          "baseline": 0.006306956522166729,
+          "current": 0.006306956522166729,
+          "observed": 0.0,
+          "unit": "abs",
+          "rule": "quality_max_rise_abs",
+          "threshold": 0.02
+        },
+        {
+          "section": "kv",
+          "scenario": "shape=(1, 32, 4096, 128)|k=8|v=3|incoherent=False",
+          "metric": "value_rel_mae",
+          "baseline": 0.26702815294265747,
+          "current": 0.26702815294265747,
+          "observed": 0.0,
+          "unit": "abs",
+          "rule": "quality_max_rise_abs",
+          "threshold": 0.06
+        },
+        {
+          "section": "kv",
+          "scenario": "shape=(1, 32, 4096, 128)|k=8|v=3|incoherent=False",
+          "metric": "key_max_abs_error",
+          "baseline": 0.02072286605834961,
+          "current": 0.02072286605834961,
+          "observed": 0.0,
+          "unit": "abs",
+          "rule": "quality_max_rise_abs",
+          "threshold": 0.04
+        },
+        {
+          "section": "kv",
+          "scenario": "shape=(1, 32, 4096, 128)|k=8|v=3|incoherent=False",
+          "metric": "value_max_abs_error",
+          "baseline": 0.8980423212051392,
+          "current": 0.8980423212051392,
+          "observed": 0.0,
+          "unit": "abs",
+          "rule": "quality_max_rise_abs",
+          "threshold": 0.2
+        },
+        {
+          "section": "kv",
+          "scenario": "shape=(1, 32, 4096, 128)|k=8|v=3|incoherent=True",
+          "metric": "store_latency_ms",
+          "baseline": 149.02216700041512,
+          "current": 182.91677799425088,
+          "observed": 22.74467730276754,
+          "unit": "pct",
+          "rule": "latency_max_regression_pct",
+          "threshold": 200.0
+        },
+        {
+          "section": "kv",
+          "scenario": "shape=(1, 32, 4096, 128)|k=8|v=3|incoherent=True",
+          "metric": "retrieve_latency_ms",
+          "baseline": 134.4225560023915,
+          "current": 129.61195800259398,
+          "observed": -3.5787133817868613,
+          "unit": "pct",
+          "rule": "latency_max_regression_pct",
+          "threshold": 200.0
+        },
+        {
+          "section": "kv",
+          "scenario": "shape=(1, 32, 4096, 128)|k=8|v=3|incoherent=True",
+          "metric": "key_cosine_sim",
+          "baseline": 0.999982476234436,
+          "current": 0.999982476234436,
+          "observed": 0.0,
+          "unit": "abs",
+          "rule": "quality_max_drop_abs",
+          "threshold": 0.008
+        },
+        {
+          "section": "kv",
+          "scenario": "shape=(1, 32, 4096, 128)|k=8|v=3|incoherent=True",
+          "metric": "value_cosine_sim",
+          "baseline": 0.9699910283088684,
+          "current": 0.9699910283088684,
+          "observed": 0.0,
+          "unit": "abs",
+          "rule": "quality_max_drop_abs",
+          "threshold": 0.02
+        },
+        {
+          "section": "kv",
+          "scenario": "shape=(1, 32, 4096, 128)|k=8|v=3|incoherent=True",
+          "metric": "key_rel_mae",
+          "baseline": 0.005860436242073774,
+          "current": 0.005860436242073774,
+          "observed": 0.0,
+          "unit": "abs",
+          "rule": "quality_max_rise_abs",
+          "threshold": 0.02
+        },
+        {
+          "section": "kv",
+          "scenario": "shape=(1, 32, 4096, 128)|k=8|v=3|incoherent=True",
+          "metric": "value_rel_mae",
+          "baseline": 0.24823878705501556,
+          "current": 0.24823878705501556,
+          "observed": 0.0,
+          "unit": "abs",
+          "rule": "quality_max_rise_abs",
+          "threshold": 0.06
+        },
+        {
+          "section": "kv",
+          "scenario": "shape=(1, 32, 4096, 128)|k=8|v=3|incoherent=True",
+          "metric": "key_max_abs_error",
+          "baseline": 0.042821288108825684,
+          "current": 0.042821288108825684,
+          "observed": 0.0,
+          "unit": "abs",
+          "rule": "quality_max_rise_abs",
+          "threshold": 0.04
+        },
+        {
+          "section": "kv",
+          "scenario": "shape=(1, 32, 4096, 128)|k=8|v=3|incoherent=True",
+          "metric": "value_max_abs_error",
+          "baseline": 1.919440507888794,
+          "current": 1.919440507888794,
+          "observed": 0.0,
+          "unit": "abs",
+          "rule": "quality_max_rise_abs",
+          "threshold": 0.2
+        },
+        {
+          "section": "kv",
+          "scenario": "shape=(1, 32, 4096, 128)|k=8|v=8|incoherent=False",
+          "metric": "store_latency_ms",
+          "baseline": 21.693694337348763,
+          "current": 18.10333299605797,
+          "observed": -16.550253200117602,
+          "unit": "pct",
+          "rule": "latency_max_regression_pct",
+          "threshold": 200.0
+        },
+        {
+          "section": "kv",
+          "scenario": "shape=(1, 32, 4096, 128)|k=8|v=8|incoherent=False",
+          "metric": "retrieve_latency_ms",
+          "baseline": 24.86922233219957,
+          "current": 10.492458667916557,
+          "observed": -57.80946212245895,
+          "unit": "pct",
+          "rule": "latency_max_regression_pct",
+          "threshold": 200.0
+        },
+        {
+          "section": "kv",
+          "scenario": "shape=(1, 32, 4096, 128)|k=8|v=8|incoherent=False",
+          "metric": "key_cosine_sim",
+          "baseline": 0.999982476234436,
+          "current": 0.999982476234436,
+          "observed": 0.0,
+          "unit": "abs",
+          "rule": "quality_max_drop_abs",
+          "threshold": 0.008
+        },
+        {
+          "section": "kv",
+          "scenario": "shape=(1, 32, 4096, 128)|k=8|v=8|incoherent=False",
+          "metric": "value_cosine_sim",
+          "baseline": 0.9999823570251465,
+          "current": 0.9999823570251465,
+          "observed": 0.0,
+          "unit": "abs",
+          "rule": "quality_max_drop_abs",
+          "threshold": 0.02
+        },
+        {
+          "section": "kv",
+          "scenario": "shape=(1, 32, 4096, 128)|k=8|v=8|incoherent=False",
+          "metric": "key_rel_mae",
+          "baseline": 0.006306956522166729,
+          "current": 0.006306956522166729,
+          "observed": 0.0,
+          "unit": "abs",
+          "rule": "quality_max_rise_abs",
+          "threshold": 0.02
+        },
+        {
+          "section": "kv",
+          "scenario": "shape=(1, 32, 4096, 128)|k=8|v=8|incoherent=False",
+          "metric": "value_rel_mae",
+          "baseline": 0.006302158813923597,
+          "current": 0.006302158813923597,
+          "observed": 0.0,
+          "unit": "abs",
+          "rule": "quality_max_rise_abs",
+          "threshold": 0.06
+        },
+        {
+          "section": "kv",
+          "scenario": "shape=(1, 32, 4096, 128)|k=8|v=8|incoherent=False",
+          "metric": "key_max_abs_error",
+          "baseline": 0.02072286605834961,
+          "current": 0.02072286605834961,
+          "observed": 0.0,
+          "unit": "abs",
+          "rule": "quality_max_rise_abs",
+          "threshold": 0.04
+        },
+        {
+          "section": "kv",
+          "scenario": "shape=(1, 32, 4096, 128)|k=8|v=8|incoherent=False",
+          "metric": "value_max_abs_error",
+          "baseline": 0.021274298429489136,
+          "current": 0.021274298429489136,
+          "observed": 0.0,
+          "unit": "abs",
+          "rule": "quality_max_rise_abs",
+          "threshold": 0.2
+        },
+        {
+          "section": "kv",
+          "scenario": "shape=(1, 8, 1024, 64)|k=8|v=3|incoherent=False",
+          "metric": "store_latency_ms",
+          "baseline": 0.9460416695219465,
+          "current": 2.0401529958083606,
+          "observed": 115.65149417142378,
+          "unit": "pct",
+          "rule": "latency_max_regression_pct",
+          "threshold": 200.0
+        },
+        {
+          "section": "kv",
+          "scenario": "shape=(1, 8, 1024, 64)|k=8|v=3|incoherent=False",
+          "metric": "retrieve_latency_ms",
+          "baseline": 1.1596943343950745,
+          "current": 1.1905556699881952,
+          "observed": 2.661161193757034,
+          "unit": "pct",
+          "rule": "latency_max_regression_pct",
+          "threshold": 200.0
+        },
+        {
+          "section": "kv",
+          "scenario": "shape=(1, 8, 1024, 64)|k=8|v=3|incoherent=False",
+          "metric": "key_cosine_sim",
+          "baseline": 0.9999824166297913,
+          "current": 0.9999824166297913,
+          "observed": 0.0,
+          "unit": "abs",
+          "rule": "quality_max_drop_abs",
+          "threshold": 0.008
+        },
+        {
+          "section": "kv",
+          "scenario": "shape=(1, 8, 1024, 64)|k=8|v=3|incoherent=False",
+          "metric": "value_cosine_sim",
+          "baseline": 0.9700178503990173,
+          "current": 0.9700178503990173,
+          "observed": 0.0,
+          "unit": "abs",
+          "rule": "quality_max_drop_abs",
+          "threshold": 0.02
+        },
+        {
+          "section": "kv",
+          "scenario": "shape=(1, 8, 1024, 64)|k=8|v=3|incoherent=False",
+          "metric": "key_rel_mae",
+          "baseline": 0.00631355307996273,
+          "current": 0.00631355307996273,
+          "observed": 0.0,
+          "unit": "abs",
+          "rule": "quality_max_rise_abs",
+          "threshold": 0.02
+        },
+        {
+          "section": "kv",
+          "scenario": "shape=(1, 8, 1024, 64)|k=8|v=3|incoherent=False",
+          "metric": "value_rel_mae",
+          "baseline": 0.267108291387558,
+          "current": 0.267108291387558,
+          "observed": 0.0,
+          "unit": "abs",
+          "rule": "quality_max_rise_abs",
+          "threshold": 0.06
+        },
+        {
+          "section": "kv",
+          "scenario": "shape=(1, 8, 1024, 64)|k=8|v=3|incoherent=False",
+          "metric": "key_max_abs_error",
+          "baseline": 0.019597060978412628,
+          "current": 0.019597060978412628,
+          "observed": 0.0,
+          "unit": "abs",
+          "rule": "quality_max_rise_abs",
+          "threshold": 0.04
+        },
+        {
+          "section": "kv",
+          "scenario": "shape=(1, 8, 1024, 64)|k=8|v=3|incoherent=False",
+          "metric": "value_max_abs_error",
+          "baseline": 0.7895931005477905,
+          "current": 0.7895931005477905,
+          "observed": 0.0,
+          "unit": "abs",
+          "rule": "quality_max_rise_abs",
+          "threshold": 0.2
+        },
+        {
+          "section": "kv",
+          "scenario": "shape=(1, 8, 1024, 64)|k=8|v=3|incoherent=True",
+          "metric": "store_latency_ms",
+          "baseline": 5.965083330617442,
+          "current": 4.633264000100705,
+          "observed": -22.326919117471594,
+          "unit": "pct",
+          "rule": "latency_max_regression_pct",
+          "threshold": 200.0
+        },
+        {
+          "section": "kv",
+          "scenario": "shape=(1, 8, 1024, 64)|k=8|v=3|incoherent=True",
+          "metric": "retrieve_latency_ms",
+          "baseline": 20.362791665926732,
+          "current": 8.081679993968768,
+          "observed": -60.311532295977244,
+          "unit": "pct",
+          "rule": "latency_max_regression_pct",
+          "threshold": 200.0
+        },
+        {
+          "section": "kv",
+          "scenario": "shape=(1, 8, 1024, 64)|k=8|v=3|incoherent=True",
+          "metric": "key_cosine_sim",
+          "baseline": 0.9999822974205017,
+          "current": 0.9999822974205017,
+          "observed": 0.0,
+          "unit": "abs",
+          "rule": "quality_max_drop_abs",
+          "threshold": 0.008
+        },
+        {
+          "section": "kv",
+          "scenario": "shape=(1, 8, 1024, 64)|k=8|v=3|incoherent=True",
+          "metric": "value_cosine_sim",
+          "baseline": 0.9700643420219421,
+          "current": 0.9700643420219421,
+          "observed": 0.0,
+          "unit": "abs",
+          "rule": "quality_max_drop_abs",
+          "threshold": 0.02
+        },
+        {
+          "section": "kv",
+          "scenario": "shape=(1, 8, 1024, 64)|k=8|v=3|incoherent=True",
+          "metric": "key_rel_mae",
+          "baseline": 0.005859941244125366,
+          "current": 0.005859941244125366,
+          "observed": 0.0,
+          "unit": "abs",
+          "rule": "quality_max_rise_abs",
+          "threshold": 0.02
+        },
+        {
+          "section": "kv",
+          "scenario": "shape=(1, 8, 1024, 64)|k=8|v=3|incoherent=True",
+          "metric": "value_rel_mae",
+          "baseline": 0.24806949496269226,
+          "current": 0.24806949496269226,
+          "observed": 0.0,
+          "unit": "abs",
+          "rule": "quality_max_rise_abs",
+          "threshold": 0.06
+        },
+        {
+          "section": "kv",
+          "scenario": "shape=(1, 8, 1024, 64)|k=8|v=3|incoherent=True",
+          "metric": "key_max_abs_error",
+          "baseline": 0.032712191343307495,
+          "current": 0.032712191343307495,
+          "observed": 0.0,
+          "unit": "abs",
+          "rule": "quality_max_rise_abs",
+          "threshold": 0.04
+        },
+        {
+          "section": "kv",
+          "scenario": "shape=(1, 8, 1024, 64)|k=8|v=3|incoherent=True",
+          "metric": "value_max_abs_error",
+          "baseline": 1.3542907238006592,
+          "current": 1.3542907238006592,
+          "observed": 0.0,
+          "unit": "abs",
+          "rule": "quality_max_rise_abs",
+          "threshold": 0.2
+        },
+        {
+          "section": "kv",
+          "scenario": "shape=(1, 8, 1024, 64)|k=8|v=8|incoherent=False",
+          "metric": "store_latency_ms",
+          "baseline": 0.9309863332115734,
+          "current": 1.739833004345807,
+          "observed": 86.88061707028488,
+          "unit": "pct",
+          "rule": "latency_max_regression_pct",
+          "threshold": 200.0
+        },
+        {
+          "section": "kv",
+          "scenario": "shape=(1, 8, 1024, 64)|k=8|v=8|incoherent=False",
+          "metric": "retrieve_latency_ms",
+          "baseline": 0.8399446669500321,
+          "current": 0.8045273328510424,
+          "observed": -4.2166270580174645,
+          "unit": "pct",
+          "rule": "latency_max_regression_pct",
+          "threshold": 200.0
+        },
+        {
+          "section": "kv",
+          "scenario": "shape=(1, 8, 1024, 64)|k=8|v=8|incoherent=False",
+          "metric": "key_cosine_sim",
+          "baseline": 0.9999824166297913,
+          "current": 0.9999824166297913,
+          "observed": 0.0,
+          "unit": "abs",
+          "rule": "quality_max_drop_abs",
+          "threshold": 0.008
+        },
+        {
+          "section": "kv",
+          "scenario": "shape=(1, 8, 1024, 64)|k=8|v=8|incoherent=False",
+          "metric": "value_cosine_sim",
+          "baseline": 0.9999824166297913,
+          "current": 0.9999824166297913,
+          "observed": 0.0,
+          "unit": "abs",
+          "rule": "quality_max_drop_abs",
+          "threshold": 0.02
+        },
+        {
+          "section": "kv",
+          "scenario": "shape=(1, 8, 1024, 64)|k=8|v=8|incoherent=False",
+          "metric": "key_rel_mae",
+          "baseline": 0.00631355307996273,
+          "current": 0.00631355307996273,
+          "observed": 0.0,
+          "unit": "abs",
+          "rule": "quality_max_rise_abs",
+          "threshold": 0.02
+        },
+        {
+          "section": "kv",
+          "scenario": "shape=(1, 8, 1024, 64)|k=8|v=8|incoherent=False",
+          "metric": "value_rel_mae",
+          "baseline": 0.006300057750195265,
+          "current": 0.006300057750195265,
+          "observed": 0.0,
+          "unit": "abs",
+          "rule": "quality_max_rise_abs",
+          "threshold": 0.06
+        },
+        {
+          "section": "kv",
+          "scenario": "shape=(1, 8, 1024, 64)|k=8|v=8|incoherent=False",
+          "metric": "key_max_abs_error",
+          "baseline": 0.019597060978412628,
+          "current": 0.019597060978412628,
+          "observed": 0.0,
+          "unit": "abs",
+          "rule": "quality_max_rise_abs",
+          "threshold": 0.04
+        },
+        {
+          "section": "kv",
+          "scenario": "shape=(1, 8, 1024, 64)|k=8|v=8|incoherent=False",
+          "metric": "value_max_abs_error",
+          "baseline": 0.019924819469451904,
+          "current": 0.019924819469451904,
+          "observed": 0.0,
+          "unit": "abs",
+          "rule": "quality_max_rise_abs",
+          "threshold": 0.2
+        },
+        {
+          "section": "kv",
+          "scenario": "shape=(1, 8, 2048, 64)|k=8|v=3|incoherent=False",
+          "metric": "store_latency_ms",
+          "baseline": 1.239111663987084,
+          "current": 1.6231530025834218,
+          "observed": 30.993279278851237,
+          "unit": "pct",
+          "rule": "latency_max_regression_pct",
+          "threshold": 200.0
+        },
+        {
+          "section": "kv",
+          "scenario": "shape=(1, 8, 2048, 64)|k=8|v=3|incoherent=False",
+          "metric": "retrieve_latency_ms",
+          "baseline": 1.4558193312647443,
+          "current": 1.0400556639069691,
+          "observed": -28.55874066437764,
+          "unit": "pct",
+          "rule": "latency_max_regression_pct",
+          "threshold": 200.0
+        },
+        {
+          "section": "kv",
+          "scenario": "shape=(1, 8, 2048, 64)|k=8|v=3|incoherent=False",
+          "metric": "key_cosine_sim",
+          "baseline": 0.9999822974205017,
+          "current": 0.9999822974205017,
+          "observed": 0.0,
+          "unit": "abs",
+          "rule": "quality_max_drop_abs",
+          "threshold": 0.008
+        },
+        {
+          "section": "kv",
+          "scenario": "shape=(1, 8, 2048, 64)|k=8|v=3|incoherent=False",
+          "metric": "value_cosine_sim",
+          "baseline": 0.9700464606285095,
+          "current": 0.9700464606285095,
+          "observed": 0.0,
+          "unit": "abs",
+          "rule": "quality_max_drop_abs",
+          "threshold": 0.02
+        },
+        {
+          "section": "kv",
+          "scenario": "shape=(1, 8, 2048, 64)|k=8|v=3|incoherent=False",
+          "metric": "key_rel_mae",
+          "baseline": 0.0063169547356665134,
+          "current": 0.0063169547356665134,
+          "observed": 0.0,
+          "unit": "abs",
+          "rule": "quality_max_rise_abs",
+          "threshold": 0.02
+        },
+        {
+          "section": "kv",
+          "scenario": "shape=(1, 8, 2048, 64)|k=8|v=3|incoherent=False",
+          "metric": "value_rel_mae",
+          "baseline": 0.2669861912727356,
+          "current": 0.2669861912727356,
+          "observed": 0.0,
+          "unit": "abs",
+          "rule": "quality_max_rise_abs",
+          "threshold": 0.06
+        },
+        {
+          "section": "kv",
+          "scenario": "shape=(1, 8, 2048, 64)|k=8|v=3|incoherent=False",
+          "metric": "key_max_abs_error",
+          "baseline": 0.020263373851776123,
+          "current": 0.020263373851776123,
+          "observed": 0.0,
+          "unit": "abs",
+          "rule": "quality_max_rise_abs",
+          "threshold": 0.04
+        },
+        {
+          "section": "kv",
+          "scenario": "shape=(1, 8, 2048, 64)|k=8|v=3|incoherent=False",
+          "metric": "value_max_abs_error",
+          "baseline": 0.8000398874282837,
+          "current": 0.8000398874282837,
+          "observed": 0.0,
+          "unit": "abs",
+          "rule": "quality_max_rise_abs",
+          "threshold": 0.2
+        },
+        {
+          "section": "kv",
+          "scenario": "shape=(1, 8, 2048, 64)|k=8|v=3|incoherent=True",
+          "metric": "store_latency_ms",
+          "baseline": 4.3145279996679164,
+          "current": 4.871096995581563,
+          "observed": 12.899881422869072,
+          "unit": "pct",
+          "rule": "latency_max_regression_pct",
+          "threshold": 200.0
+        },
+        {
+          "section": "kv",
+          "scenario": "shape=(1, 8, 2048, 64)|k=8|v=3|incoherent=True",
+          "metric": "retrieve_latency_ms",
+          "baseline": 4.854750002171689,
+          "current": 4.078124669225265,
+          "observed": -15.997226069293239,
+          "unit": "pct",
+          "rule": "latency_max_regression_pct",
+          "threshold": 200.0
+        },
+        {
+          "section": "kv",
+          "scenario": "shape=(1, 8, 2048, 64)|k=8|v=3|incoherent=True",
+          "metric": "key_cosine_sim",
+          "baseline": 0.9999824166297913,
+          "current": 0.9999824166297913,
+          "observed": 0.0,
+          "unit": "abs",
+          "rule": "quality_max_drop_abs",
+          "threshold": 0.008
+        },
+        {
+          "section": "kv",
+          "scenario": "shape=(1, 8, 2048, 64)|k=8|v=3|incoherent=True",
+          "metric": "value_cosine_sim",
+          "baseline": 0.9700079560279846,
+          "current": 0.9700079560279846,
+          "observed": 0.0,
+          "unit": "abs",
+          "rule": "quality_max_drop_abs",
+          "threshold": 0.02
+        },
+        {
+          "section": "kv",
+          "scenario": "shape=(1, 8, 2048, 64)|k=8|v=3|incoherent=True",
+          "metric": "key_rel_mae",
+          "baseline": 0.005844393279403448,
+          "current": 0.005844393279403448,
+          "observed": 0.0,
+          "unit": "abs",
+          "rule": "quality_max_rise_abs",
+          "threshold": 0.02
+        },
+        {
+          "section": "kv",
+          "scenario": "shape=(1, 8, 2048, 64)|k=8|v=3|incoherent=True",
+          "metric": "value_rel_mae",
+          "baseline": 0.248267263174057,
+          "current": 0.248267263174057,
+          "observed": 0.0,
+          "unit": "abs",
+          "rule": "quality_max_rise_abs",
+          "threshold": 0.06
+        },
+        {
+          "section": "kv",
+          "scenario": "shape=(1, 8, 2048, 64)|k=8|v=3|incoherent=True",
+          "metric": "key_max_abs_error",
+          "baseline": 0.03766840696334839,
+          "current": 0.03766840696334839,
+          "observed": 0.0,
+          "unit": "abs",
+          "rule": "quality_max_rise_abs",
+          "threshold": 0.04
+        },
+        {
+          "section": "kv",
+          "scenario": "shape=(1, 8, 2048, 64)|k=8|v=3|incoherent=True",
+          "metric": "value_max_abs_error",
+          "baseline": 1.540197491645813,
+          "current": 1.540197491645813,
+          "observed": 0.0,
+          "unit": "abs",
+          "rule": "quality_max_rise_abs",
+          "threshold": 0.2
+        },
+        {
+          "section": "kv",
+          "scenario": "shape=(1, 8, 2048, 64)|k=8|v=8|incoherent=False",
+          "metric": "store_latency_ms",
+          "baseline": 1.1638469974665593,
+          "current": 1.7879863347237308,
+          "observed": 53.627267039034045,
+          "unit": "pct",
+          "rule": "latency_max_regression_pct",
+          "threshold": 200.0
+        },
+        {
+          "section": "kv",
+          "scenario": "shape=(1, 8, 2048, 64)|k=8|v=8|incoherent=False",
+          "metric": "retrieve_latency_ms",
+          "baseline": 1.089069667311075,
+          "current": 0.9580969975407546,
+          "observed": -12.026105739745123,
+          "unit": "pct",
+          "rule": "latency_max_regression_pct",
+          "threshold": 200.0
+        },
+        {
+          "section": "kv",
+          "scenario": "shape=(1, 8, 2048, 64)|k=8|v=8|incoherent=False",
+          "metric": "key_cosine_sim",
+          "baseline": 0.9999822974205017,
+          "current": 0.9999822974205017,
+          "observed": 0.0,
+          "unit": "abs",
+          "rule": "quality_max_drop_abs",
+          "threshold": 0.008
+        },
+        {
+          "section": "kv",
+          "scenario": "shape=(1, 8, 2048, 64)|k=8|v=8|incoherent=False",
+          "metric": "value_cosine_sim",
+          "baseline": 0.9999824166297913,
+          "current": 0.9999824166297913,
+          "observed": 0.0,
+          "unit": "abs",
+          "rule": "quality_max_drop_abs",
+          "threshold": 0.02
+        },
+        {
+          "section": "kv",
+          "scenario": "shape=(1, 8, 2048, 64)|k=8|v=8|incoherent=False",
+          "metric": "key_rel_mae",
+          "baseline": 0.0063169547356665134,
+          "current": 0.0063169547356665134,
+          "observed": 0.0,
+          "unit": "abs",
+          "rule": "quality_max_rise_abs",
+          "threshold": 0.02
+        },
+        {
+          "section": "kv",
+          "scenario": "shape=(1, 8, 2048, 64)|k=8|v=8|incoherent=False",
+          "metric": "value_rel_mae",
+          "baseline": 0.0062971399165689945,
+          "current": 0.0062971399165689945,
+          "observed": 0.0,
+          "unit": "abs",
+          "rule": "quality_max_rise_abs",
+          "threshold": 0.06
+        },
+        {
+          "section": "kv",
+          "scenario": "shape=(1, 8, 2048, 64)|k=8|v=8|incoherent=False",
+          "metric": "key_max_abs_error",
+          "baseline": 0.020263373851776123,
+          "current": 0.020263373851776123,
+          "observed": 0.0,
+          "unit": "abs",
+          "rule": "quality_max_rise_abs",
+          "threshold": 0.04
+        },
+        {
+          "section": "kv",
+          "scenario": "shape=(1, 8, 2048, 64)|k=8|v=8|incoherent=False",
+          "metric": "value_max_abs_error",
+          "baseline": 0.018954992294311523,
+          "current": 0.018954992294311523,
+          "observed": 0.0,
+          "unit": "abs",
+          "rule": "quality_max_rise_abs",
+          "threshold": 0.2
+        }
+      ],
+      "breaches": []
+    },
+    "e2e": {
+      "compared_scenarios": [
+        "cache_hit_compressed_path",
+        "cache_miss_full_precision_path",
+        "cache_miss_use_compressed_on_miss_path",
+        "dense_decode_path",
+        "sparse_decode_path"
+      ],
+      "missing_scenarios": [],
+      "extra_scenarios": [],
+      "metric_deltas": [
+        {
+          "section": "e2e",
+          "scenario": "cache_hit_compressed_path",
+          "metric": "cache_miss_total_latency_ms",
+          "baseline": 11.400625000533182,
+          "current": 11.935457994695753,
+          "observed": 4.691260296146551,
+          "unit": "pct",
+          "rule": "latency_max_regression_pct",
+          "threshold": 30.0
+        },
+        {
+          "section": "e2e",
+          "scenario": "cache_hit_compressed_path",
+          "metric": "cache_hit_total_latency_ms",
+          "baseline": 6.987416333383105,
+          "current": 5.974472660454921,
+          "observed": -14.496684104663121,
+          "unit": "pct",
+          "rule": "latency_max_regression_pct",
+          "threshold": 30.0
+        },
+        {
+          "section": "e2e",
+          "scenario": "cache_hit_compressed_path",
+          "metric": "quant_audit_cosine",
+          "baseline": 0.9726684093475342,
+          "current": 0.9678987264633179,
+          "observed": 0.004769682884216309,
+          "unit": "abs",
+          "rule": "quality_max_drop_abs",
+          "threshold": 0.015
+        },
+        {
+          "section": "e2e",
+          "scenario": "cache_hit_compressed_path",
+          "metric": "sparse_audit_cosine",
+          "baseline": 0.7592752575874329,
+          "current": 0.7475833296775818,
+          "observed": 0.011691927909851074,
+          "unit": "abs",
+          "rule": "quality_max_drop_abs",
+          "threshold": 0.03
+        },
+        {
+          "section": "e2e",
+          "scenario": "cache_hit_compressed_path",
+          "metric": "audit_cosine",
+          "baseline": 0.7592752575874329,
+          "current": 0.7475833296775818,
+          "observed": 0.011691927909851074,
+          "unit": "abs",
+          "rule": "quality_max_drop_abs",
+          "threshold": 0.03
+        },
+        {
+          "section": "e2e",
+          "scenario": "cache_miss_full_precision_path",
+          "metric": "cache_miss_total_latency_ms",
+          "baseline": 60.91620799998054,
+          "current": 11.182916001416743,
+          "observed": -81.64213372995852,
+          "unit": "pct",
+          "rule": "latency_max_regression_pct",
+          "threshold": 30.0
+        },
+        {
+          "section": "e2e",
+          "scenario": "cache_miss_full_precision_path",
+          "metric": "cache_hit_total_latency_ms",
+          "baseline": 15.11901400226634,
+          "current": 5.70672199925563,
+          "observed": -62.25466820521369,
+          "unit": "pct",
+          "rule": "latency_max_regression_pct",
+          "threshold": 30.0
+        },
+        {
+          "section": "e2e",
+          "scenario": "cache_miss_full_precision_path",
+          "metric": "quant_audit_cosine",
+          "baseline": 0.9726684093475342,
+          "current": 0.9678987264633179,
+          "observed": 0.004769682884216309,
+          "unit": "abs",
+          "rule": "quality_max_drop_abs",
+          "threshold": 0.015
+        },
+        {
+          "section": "e2e",
+          "scenario": "cache_miss_full_precision_path",
+          "metric": "sparse_audit_cosine",
+          "baseline": 0.7592752575874329,
+          "current": 0.7475833296775818,
+          "observed": 0.011691927909851074,
+          "unit": "abs",
+          "rule": "quality_max_drop_abs",
+          "threshold": 0.03
+        },
+        {
+          "section": "e2e",
+          "scenario": "cache_miss_full_precision_path",
+          "metric": "audit_cosine",
+          "baseline": 0.7592752575874329,
+          "current": 0.7475833296775818,
+          "observed": 0.011691927909851074,
+          "unit": "abs",
+          "rule": "quality_max_drop_abs",
+          "threshold": 0.03
+        },
+        {
+          "section": "e2e",
+          "scenario": "cache_miss_use_compressed_on_miss_path",
+          "metric": "cache_miss_total_latency_ms",
+          "baseline": 55.98737499531126,
+          "current": 11.398624992580153,
+          "observed": -79.64072258516363,
+          "unit": "pct",
+          "rule": "latency_max_regression_pct",
+          "threshold": 30.0
+        },
+        {
+          "section": "e2e",
+          "scenario": "cache_miss_use_compressed_on_miss_path",
+          "metric": "cache_hit_total_latency_ms",
+          "baseline": 9.563847333386851,
+          "current": 5.334388668416068,
+          "observed": -44.22340212610862,
+          "unit": "pct",
+          "rule": "latency_max_regression_pct",
+          "threshold": 30.0
+        },
+        {
+          "section": "e2e",
+          "scenario": "cache_miss_use_compressed_on_miss_path",
+          "metric": "quant_audit_cosine",
+          "baseline": 0.9726684093475342,
+          "current": 0.9678987264633179,
+          "observed": 0.004769682884216309,
+          "unit": "abs",
+          "rule": "quality_max_drop_abs",
+          "threshold": 0.015
+        },
+        {
+          "section": "e2e",
+          "scenario": "cache_miss_use_compressed_on_miss_path",
+          "metric": "sparse_audit_cosine",
+          "baseline": 0.7592752575874329,
+          "current": 0.7475833296775818,
+          "observed": 0.011691927909851074,
+          "unit": "abs",
+          "rule": "quality_max_drop_abs",
+          "threshold": 0.03
+        },
+        {
+          "section": "e2e",
+          "scenario": "cache_miss_use_compressed_on_miss_path",
+          "metric": "audit_cosine",
+          "baseline": 0.7592752575874329,
+          "current": 0.7475833296775818,
+          "observed": 0.011691927909851074,
+          "unit": "abs",
+          "rule": "quality_max_drop_abs",
+          "threshold": 0.03
+        },
+        {
+          "section": "e2e",
+          "scenario": "dense_decode_path",
+          "metric": "cache_miss_total_latency_ms",
+          "baseline": 17.036458004440647,
+          "current": 9.657667003921233,
+          "observed": -43.31176702690249,
+          "unit": "pct",
+          "rule": "latency_max_regression_pct",
+          "threshold": 30.0
+        },
+        {
+          "section": "e2e",
+          "scenario": "dense_decode_path",
+          "metric": "cache_hit_total_latency_ms",
+          "baseline": 6.817458335717674,
+          "current": 5.787791664867352,
+          "observed": -15.103380470339603,
+          "unit": "pct",
+          "rule": "latency_max_regression_pct",
+          "threshold": 30.0
+        },
+        {
+          "section": "e2e",
+          "scenario": "dense_decode_path",
+          "metric": "quant_audit_cosine",
+          "baseline": 0.9710960388183594,
+          "current": 0.9718087315559387,
+          "observed": -0.0007126927375793457,
+          "unit": "abs",
+          "rule": "quality_max_drop_abs",
+          "threshold": 0.015
+        },
+        {
+          "section": "e2e",
+          "scenario": "dense_decode_path",
+          "metric": "sparse_audit_cosine",
+          "baseline": null,
+          "current": null,
+          "observed": null,
+          "unit": "abs",
+          "rule": "quality_max_drop_abs",
+          "threshold": 0.03
+        },
+        {
+          "section": "e2e",
+          "scenario": "dense_decode_path",
+          "metric": "audit_cosine",
+          "baseline": 0.9999999403953552,
+          "current": 0.9999999403953552,
+          "observed": 0.0,
+          "unit": "abs",
+          "rule": "quality_max_drop_abs",
+          "threshold": 0.03
+        },
+        {
+          "section": "e2e",
+          "scenario": "sparse_decode_path",
+          "metric": "cache_miss_total_latency_ms",
+          "baseline": 20.03008400060935,
+          "current": 9.497708000708371,
+          "observed": -52.58278497274682,
+          "unit": "pct",
+          "rule": "latency_max_regression_pct",
+          "threshold": 30.0
+        },
+        {
+          "section": "e2e",
+          "scenario": "sparse_decode_path",
+          "metric": "cache_hit_total_latency_ms",
+          "baseline": 6.885486000101082,
+          "current": 5.086374667977604,
+          "observed": -26.12903914258291,
+          "unit": "pct",
+          "rule": "latency_max_regression_pct",
+          "threshold": 30.0
+        },
+        {
+          "section": "e2e",
+          "scenario": "sparse_decode_path",
+          "metric": "quant_audit_cosine",
+          "baseline": 0.9726684093475342,
+          "current": 0.9678987264633179,
+          "observed": 0.004769682884216309,
+          "unit": "abs",
+          "rule": "quality_max_drop_abs",
+          "threshold": 0.015
+        },
+        {
+          "section": "e2e",
+          "scenario": "sparse_decode_path",
+          "metric": "sparse_audit_cosine",
+          "baseline": 0.5965045094490051,
+          "current": 0.5828843712806702,
+          "observed": 0.013620138168334961,
+          "unit": "abs",
+          "rule": "quality_max_drop_abs",
+          "threshold": 0.03
+        },
+        {
+          "section": "e2e",
+          "scenario": "sparse_decode_path",
+          "metric": "audit_cosine",
+          "baseline": 0.5965045094490051,
+          "current": 0.5828843712806702,
+          "observed": 0.013620138168334961,
+          "unit": "abs",
+          "rule": "quality_max_drop_abs",
+          "threshold": 0.03
+        }
+      ],
+      "breaches": []
+    }
+  },
+  "total_breaches": 0
+}

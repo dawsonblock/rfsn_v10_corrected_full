@@ -1,0 +1,446 @@
+{
+  "runs": [
+    {
+      "shape": [
+        1,
+        4,
+        512,
+        64
+      ],
+      "bits": 8,
+      "mode": "sequential_reference",
+      "route": "sequential_reference",
+      "latency_ms_mean": 1.2346580013399944,
+      "latency_ms_p50": 1.1242909968132153,
+      "latency_ms_p95": 1.674041006481275,
+      "kv_reconstruction_kernel": "sequential_reference",
+      "fallback_used": false,
+      "max_abs_diff_vs_reference": 0.0,
+      "cosine_vs_reference": 1.0,
+      "status": "valid",
+      "speedup_vs_reference": 1.0
+    },
+    {
+      "shape": [
+        1,
+        4,
+        512,
+        64
+      ],
+      "bits": 8,
+      "mode": "metal_dequant",
+      "route": "metal_dequant",
+      "latency_ms_mean": 0.0631250033620745,
+      "latency_ms_p50": 0.045666005462408066,
+      "latency_ms_p95": 0.11125000310130417,
+      "kv_reconstruction_kernel": "metal_dequant",
+      "fallback_used": false,
+      "max_abs_diff_vs_reference": 0.0,
+      "cosine_vs_reference": 1.0,
+      "status": "valid",
+      "speedup_vs_reference": 24.61986734834348
+    },
+    {
+      "shape": [
+        1,
+        4,
+        512,
+        64
+      ],
+      "bits": 8,
+      "mode": "metal_dequant_wht",
+      "route": "metal_dequant_wht",
+      "latency_ms_mean": 0.08291660051327199,
+      "latency_ms_p50": 0.07749999349471182,
+      "latency_ms_p95": 0.10145800479222089,
+      "kv_reconstruction_kernel": "metal_dequant_wht",
+      "fallback_used": false,
+      "max_abs_diff_vs_reference": 0.0,
+      "cosine_vs_reference": 1.0,
+      "status": "valid",
+      "speedup_vs_reference": 14.50698182174597
+    },
+    {
+      "shape": [
+        1,
+        4,
+        512,
+        64
+      ],
+      "bits": 8,
+      "mode": "metal_dequant_sign",
+      "route": "metal_dequant_sign",
+      "latency_ms_mean": 0.08972500218078494,
+      "latency_ms_p50": 0.08533299842383713,
+      "latency_ms_p95": 0.11375000758562237,
+      "kv_reconstruction_kernel": "metal_dequant_sign",
+      "fallback_used": false,
+      "max_abs_diff_vs_reference": 0.0,
+      "cosine_vs_reference": 1.0,
+      "status": "valid",
+      "speedup_vs_reference": 13.175336828421502
+    },
+    {
+      "shape": [
+        1,
+        4,
+        512,
+        64
+      ],
+      "bits": 8,
+      "mode": "metal_dequant_wht_sign",
+      "route": "metal_dequant_wht_sign",
+      "latency_ms_mean": 0.11511660413816571,
+      "latency_ms_p50": 0.11270800314377993,
+      "latency_ms_p95": 0.12937499559484422,
+      "kv_reconstruction_kernel": "metal_dequant_wht_sign",
+      "fallback_used": false,
+      "max_abs_diff_vs_reference": 0.0,
+      "cosine_vs_reference": 1.0,
+      "status": "valid",
+      "speedup_vs_reference": 9.975254333793616
+    },
+    {
+      "shape": [
+        1,
+        8,
+        1024,
+        64
+      ],
+      "bits": 8,
+      "mode": "sequential_reference",
+      "route": "sequential_reference",
+      "latency_ms_mean": 1.1216829996556044,
+      "latency_ms_p50": 0.9958330047084019,
+      "latency_ms_p95": 1.6421660111518577,
+      "kv_reconstruction_kernel": "sequential_reference",
+      "fallback_used": false,
+      "max_abs_diff_vs_reference": 0.0,
+      "cosine_vs_reference": 1.0,
+      "status": "valid",
+      "speedup_vs_reference": 1.0
+    },
+    {
+      "shape": [
+        1,
+        8,
+        1024,
+        64
+      ],
+      "bits": 8,
+      "mode": "metal_dequant",
+      "route": "metal_dequant",
+      "latency_ms_mean": 0.06516700086649507,
+      "latency_ms_p50": 0.06337500235531479,
+      "latency_ms_p95": 0.09241700172424316,
+      "kv_reconstruction_kernel": "metal_dequant",
+      "fallback_used": false,
+      "max_abs_diff_vs_reference": 0.0,
+      "cosine_vs_reference": 0.9999999403953552,
+      "status": "valid",
+      "speedup_vs_reference": 15.713340713191922
+    },
+    {
+      "shape": [
+        1,
+        8,
+        1024,
+        64
+      ],
+      "bits": 8,
+      "mode": "metal_dequant_wht",
+      "route": "metal_dequant_wht",
+      "latency_ms_mean": 0.08353340090252459,
+      "latency_ms_p50": 0.07391699182335287,
+      "latency_ms_p95": 0.10658300016075373,
+      "kv_reconstruction_kernel": "metal_dequant_wht",
+      "fallback_used": false,
+      "max_abs_diff_vs_reference": 0.0,
+      "cosine_vs_reference": 1.0000001192092896,
+      "status": "valid",
+      "speedup_vs_reference": 13.472315094860024
+    },
+    {
+      "shape": [
+        1,
+        8,
+        1024,
+        64
+      ],
+      "bits": 8,
+      "mode": "metal_dequant_sign",
+      "route": "metal_dequant_sign",
+      "latency_ms_mean": 0.1001497992547229,
+      "latency_ms_p50": 0.08791600703261793,
+      "latency_ms_p95": 0.13612498878501356,
+      "kv_reconstruction_kernel": "metal_dequant_sign",
+      "fallback_used": false,
+      "max_abs_diff_vs_reference": 0.0,
+      "cosine_vs_reference": 0.9999999403953552,
+      "status": "valid",
+      "speedup_vs_reference": 11.327095466687148
+    },
+    {
+      "shape": [
+        1,
+        8,
+        1024,
+        64
+      ],
+      "bits": 8,
+      "mode": "metal_dequant_wht_sign",
+      "route": "metal_dequant_wht_sign",
+      "latency_ms_mean": 0.10814180132001638,
+      "latency_ms_p50": 0.10874999861698598,
+      "latency_ms_p95": 0.1171670010080561,
+      "kv_reconstruction_kernel": "metal_dequant_wht_sign",
+      "fallback_used": false,
+      "max_abs_diff_vs_reference": 0.0,
+      "cosine_vs_reference": 0.9999999403953552,
+      "status": "valid",
+      "speedup_vs_reference": 9.157085217220958
+    },
+    {
+      "shape": [
+        1,
+        8,
+        2048,
+        64
+      ],
+      "bits": 8,
+      "mode": "sequential_reference",
+      "route": "sequential_reference",
+      "latency_ms_mean": 1.2660916021559387,
+      "latency_ms_p50": 1.136250008130446,
+      "latency_ms_p95": 1.8857910035876557,
+      "kv_reconstruction_kernel": "sequential_reference",
+      "fallback_used": false,
+      "max_abs_diff_vs_reference": 0.0,
+      "cosine_vs_reference": 0.9999998807907104,
+      "status": "valid",
+      "speedup_vs_reference": 1.0
+    },
+    {
+      "shape": [
+        1,
+        8,
+        2048,
+        64
+      ],
+      "bits": 8,
+      "mode": "metal_dequant",
+      "route": "metal_dequant",
+      "latency_ms_mean": 0.04995839553885162,
+      "latency_ms_p50": 0.04429099499247968,
+      "latency_ms_p95": 0.07233399082906544,
+      "kv_reconstruction_kernel": "metal_dequant",
+      "fallback_used": false,
+      "max_abs_diff_vs_reference": 0.0,
+      "cosine_vs_reference": 0.9999998807907104,
+      "status": "valid",
+      "speedup_vs_reference": 25.65419919609785
+    },
+    {
+      "shape": [
+        1,
+        8,
+        2048,
+        64
+      ],
+      "bits": 8,
+      "mode": "metal_dequant_wht",
+      "route": "metal_dequant_wht",
+      "latency_ms_mean": 0.09562499762978405,
+      "latency_ms_p50": 0.09329199383500963,
+      "latency_ms_p95": 0.13104100071359426,
+      "kv_reconstruction_kernel": "metal_dequant_wht",
+      "fallback_used": false,
+      "max_abs_diff_vs_reference": 0.0,
+      "cosine_vs_reference": 1.0,
+      "status": "valid",
+      "speedup_vs_reference": 12.179501813842103
+    },
+    {
+      "shape": [
+        1,
+        8,
+        2048,
+        64
+      ],
+      "bits": 8,
+      "mode": "metal_dequant_sign",
+      "route": "metal_dequant_sign",
+      "latency_ms_mean": 0.07518319762311876,
+      "latency_ms_p50": 0.07237499812617898,
+      "latency_ms_p95": 0.09304100240115076,
+      "kv_reconstruction_kernel": "metal_dequant_sign",
+      "fallback_used": false,
+      "max_abs_diff_vs_reference": 0.0,
+      "cosine_vs_reference": 0.9999998807907104,
+      "status": "valid",
+      "speedup_vs_reference": 15.699482384089343
+    },
+    {
+      "shape": [
+        1,
+        8,
+        2048,
+        64
+      ],
+      "bits": 8,
+      "mode": "metal_dequant_wht_sign",
+      "route": "metal_dequant_wht_sign",
+      "latency_ms_mean": 0.11082499986514449,
+      "latency_ms_p50": 0.11495899525471032,
+      "latency_ms_p95": 0.1332079991698265,
+      "kv_reconstruction_kernel": "metal_dequant_wht_sign",
+      "fallback_used": false,
+      "max_abs_diff_vs_reference": 0.0,
+      "cosine_vs_reference": 0.9999998807907104,
+      "status": "valid",
+      "speedup_vs_reference": 9.883959107444351
+    },
+    {
+      "shape": [
+        1,
+        32,
+        4096,
+        128
+      ],
+      "bits": 8,
+      "mode": "sequential_reference",
+      "route": "sequential_reference",
+      "latency_ms_mean": 17.49009999912232,
+      "latency_ms_p50": 5.248250003205612,
+      "latency_ms_p95": 66.70333299553022,
+      "kv_reconstruction_kernel": "sequential_reference",
+      "fallback_used": false,
+      "max_abs_diff_vs_reference": 0.0,
+      "cosine_vs_reference": 1.0,
+      "status": "valid",
+      "speedup_vs_reference": 1.0
+    },
+    {
+      "shape": [
+        1,
+        32,
+        4096,
+        128
+      ],
+      "bits": 8,
+      "mode": "metal_dequant",
+      "route": "metal_dequant",
+      "latency_ms_mean": 0.11147480108775198,
+      "latency_ms_p50": 0.10141600796487182,
+      "latency_ms_p95": 0.17537499661557376,
+      "kv_reconstruction_kernel": "metal_dequant",
+      "fallback_used": false,
+      "max_abs_diff_vs_reference": 0.0,
+      "cosine_vs_reference": 1.0000001192092896,
+      "status": "valid",
+      "speedup_vs_reference": 51.749719876801755
+    },
+    {
+      "shape": [
+        1,
+        32,
+        4096,
+        128
+      ],
+      "bits": 8,
+      "mode": "metal_dequant_wht",
+      "route": "metal_dequant_wht",
+      "latency_ms_mean": 0.20033319597132504,
+      "latency_ms_p50": 0.20491599570959806,
+      "latency_ms_p95": 0.23549998877570033,
+      "kv_reconstruction_kernel": "metal_dequant_wht",
+      "fallback_used": false,
+      "max_abs_diff_vs_reference": 0.0,
+      "cosine_vs_reference": 1.0,
+      "status": "valid",
+      "speedup_vs_reference": 25.611714620089025
+    },
+    {
+      "shape": [
+        1,
+        32,
+        4096,
+        128
+      ],
+      "bits": 8,
+      "mode": "metal_dequant_sign",
+      "route": "metal_dequant_sign",
+      "latency_ms_mean": 0.13825819769408554,
+      "latency_ms_p50": 0.14187500346451998,
+      "latency_ms_p95": 0.16770799993537366,
+      "kv_reconstruction_kernel": "metal_dequant_sign",
+      "fallback_used": false,
+      "max_abs_diff_vs_reference": 0.0,
+      "cosine_vs_reference": 1.0000001192092896,
+      "status": "valid",
+      "speedup_vs_reference": 36.99206960384739
+    },
+    {
+      "shape": [
+        1,
+        32,
+        4096,
+        128
+      ],
+      "bits": 8,
+      "mode": "metal_dequant_wht_sign",
+      "route": "metal_dequant_wht_sign",
+      "latency_ms_mean": 0.1953416009200737,
+      "latency_ms_p50": 0.179541006218642,
+      "latency_ms_p95": 0.26070899912156165,
+      "kv_reconstruction_kernel": "metal_dequant_wht_sign",
+      "fallback_used": false,
+      "max_abs_diff_vs_reference": 0.0,
+      "cosine_vs_reference": 1.0,
+      "status": "valid",
+      "speedup_vs_reference": 29.231483735890297
+    }
+  ],
+  "summary": {
+    "equivalence_pass_modes": [
+      "sequential_reference",
+      "metal_dequant",
+      "metal_dequant_wht",
+      "metal_dequant_sign",
+      "metal_dequant_wht_sign",
+      "sequential_reference",
+      "metal_dequant",
+      "metal_dequant_wht",
+      "metal_dequant_sign",
+      "metal_dequant_wht_sign",
+      "sequential_reference",
+      "metal_dequant",
+      "metal_dequant_wht",
+      "metal_dequant_sign",
+      "metal_dequant_wht_sign",
+      "sequential_reference",
+      "metal_dequant",
+      "metal_dequant_wht",
+      "metal_dequant_sign",
+      "metal_dequant_wht_sign"
+    ],
+    "speedup_modes": [
+      "metal_dequant",
+      "metal_dequant_wht",
+      "metal_dequant_sign",
+      "metal_dequant_wht_sign",
+      "metal_dequant",
+      "metal_dequant_wht",
+      "metal_dequant_sign",
+      "metal_dequant_wht_sign",
+      "metal_dequant",
+      "metal_dequant_wht",
+      "metal_dequant_sign",
+      "metal_dequant_wht_sign",
+      "metal_dequant",
+      "metal_dequant_wht",
+      "metal_dequant_sign",
+      "metal_dequant_wht_sign"
+    ]
+  }
+}
