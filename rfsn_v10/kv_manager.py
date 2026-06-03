@@ -11,7 +11,7 @@ from __future__ import annotations
 import hashlib
 import math
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from threading import RLock, get_ident
 from typing import Optional
@@ -48,6 +48,14 @@ class TurboQuantKVCache:
     k_n_values: int = 0
     v_n_values: int = 0
     token_count: int = 0
+    block_size: int = 64
+    num_blocks: int = 0
+    k_block_packed_offsets: list[int] = field(default_factory=list)
+    k_block_scale_offsets: list[int] = field(default_factory=list)
+    k_block_n_values: list[int] = field(default_factory=list)
+    v_block_packed_offsets: list[int] = field(default_factory=list)
+    v_block_scale_offsets: list[int] = field(default_factory=list)
+    v_block_n_values: list[int] = field(default_factory=list)
     pinned: bool = False
     last_used: float = 0.0
 
@@ -81,6 +89,7 @@ class RFSNTurboQuantKVManager:
         max_pinned_memory_gb: float = 0.5,
         cache_dir: str = ".rfsn_cache",
         group_size: int = 64,
+        block_size: int = 64,
     ):
         # Validate parameters
         if not (2 <= k_bits <= 8):
@@ -89,6 +98,10 @@ class RFSNTurboQuantKVManager:
             raise ValueError(f"v_bits must be between 2 and 8, got {v_bits}")
         if group_size <= 0:
             raise ValueError(f"group_size must be positive, got {group_size}")
+        if block_size <= 0:
+            raise ValueError(
+                f"block_size must be positive, got {block_size}"
+            )
 
         if use_wht is None and use_incoherent_signs is None:
             legacy = True if use_incoherent is None else bool(use_incoherent)
@@ -114,6 +127,7 @@ class RFSNTurboQuantKVManager:
         self.max_pinned_memory_gb = max_pinned_memory_gb
         self.cache_dir = Path(cache_dir)
         self.group_size = group_size
+        self.block_size = block_size
         # Cache for sign masks to avoid regenerating for same shape/seed/dtype.
         self._sign_cache: dict[tuple[tuple[int, ...], int, mx.Dtype, int], mx.array] = {}
         self._sign_cache_lock = RLock()
@@ -145,7 +159,12 @@ class RFSNTurboQuantKVManager:
     # ------------------------------------------------------------------
     # Randomized sign preconditioning (deterministic, self-inverse)
     # ------------------------------------------------------------------
-    def _apply_signs_on_the_fly(self, x: mx.array, seed: int) -> mx.array:
+    def _apply_signs_on_the_fly(
+        self,
+        x: mx.array,
+        seed: int,
+        indices: Optional[mx.array] = None,
+    ) -> mx.array:
         """Apply deterministic sign preconditioning (self-inverse).
 
         Uses hash-based deterministic signs instead of global RNG to avoid
@@ -155,30 +174,42 @@ class RFSNTurboQuantKVManager:
         and multiplies element-wise. Calling twice with the same seed
         restores the original tensor.
 
+        Args:
+            x: Input array.
+            seed: Deterministic seed for sign generation.
+            indices: Optional flat uint32 index array. If provided, signs
+                are computed from these indices instead of 0..n-1.
+
         Includes caching to avoid regenerating sign masks for identical
         shape/seed/dtype combinations.
         """
-        if self.prefer_metal_kernels and maybe_supports_metal_kernels():
+        if (
+            indices is None
+            and self.prefer_metal_kernels
+            and maybe_supports_metal_kernels()
+        ):
             try:
                 return apply_hash_signs_metal(x, seed)
             except Exception:
-                # Fall back to deterministic MLX math when metal invocation fails.
                 pass
 
         shape = x.shape
-
-        # Check cache first
-        # MLX arrays are stream/thread-bound; keep cache entries thread-local.
-        cache_key = (shape, seed, x.dtype, get_ident())
-        with self._sign_cache_lock:
-            signs = self._sign_cache.get(cache_key)
-        if signs is not None:
-            return x * signs
-
-        # Vectorized deterministic hash-like mixing (SplitMix-style) over indices.
         n = x.size
+
+        # Check cache first (only when using default indices)
+        if indices is None:
+            cache_key = (shape, seed, x.dtype, get_ident())
+            with self._sign_cache_lock:
+                signs = self._sign_cache.get(cache_key)
+            if signs is not None:
+                return x * signs
+
+        # Vectorized deterministic hash-like mixing (SplitMix-style)
         seed_u32 = mx.array(seed & 0xFFFFFFFF, dtype=mx.uint32)
-        idx = mx.arange(n, dtype=mx.uint32)
+        if indices is not None:
+            idx = indices.reshape(-1).astype(mx.uint32)
+        else:
+            idx = mx.arange(n, dtype=mx.uint32)
         z = idx ^ seed_u32
         z = z + mx.array(0x9E3779B9, dtype=mx.uint32)
         z = (z ^ (z >> 16)) * mx.array(0x85EBCA6B, dtype=mx.uint32)
@@ -191,14 +222,46 @@ class RFSNTurboQuantKVManager:
             mx.array(-1.0, dtype=x.dtype),
         ).reshape(shape)
 
-        # Cache the result (bounded) with lock to avoid concurrent mutation races.
-        with self._sign_cache_lock:
-            if cache_key not in self._sign_cache and len(self._sign_cache) < 128:
-                self._sign_cache[cache_key] = signs
-            else:
-                signs = self._sign_cache.get(cache_key, signs)
+        # Cache the result (only for default indices)
+        if indices is None:
+            with self._sign_cache_lock:
+                if (
+                    cache_key not in self._sign_cache
+                    and len(self._sign_cache) < 128
+                ):
+                    self._sign_cache[cache_key] = signs
+                else:
+                    signs = self._sign_cache.get(cache_key, signs)
 
         return x * signs
+
+    def _apply_signs_to_block(
+        self,
+        x: mx.array,
+        seed: int,
+        block_idx: int,
+        block_size: int,
+        full_shape: tuple,
+    ) -> mx.array:
+        """Apply signs to a block using global flat indices."""
+        b, h, t_block, d = x.shape
+        b_full, h_full, t_full, d_full = full_shape
+        assert b == b_full and h == h_full and d == d_full
+
+        t_start = block_idx * block_size
+        # Build global flat index for each element in the block
+        b_idx = mx.arange(b, dtype=mx.uint32).reshape(b, 1, 1, 1)
+        h_idx = mx.arange(h, dtype=mx.uint32).reshape(1, h, 1, 1)
+        t_idx = mx.arange(t_block, dtype=mx.uint32).reshape(1, 1, t_block, 1)
+        d_idx = mx.arange(d, dtype=mx.uint32).reshape(1, 1, 1, d)
+
+        global_idx = (
+            b_idx * h_full * t_full * d_full
+            + h_idx * t_full * d_full
+            + (t_start + t_idx) * d_full
+            + d_idx
+        )
+        return self._apply_signs_on_the_fly(x, seed, indices=global_idx)
 
     def estimate_compressed_bytes_for_shape(
         self,
@@ -399,7 +462,8 @@ class RFSNTurboQuantKVManager:
         out_dtype: mx.Dtype = mx.float32,
         use_incoherent: Optional[bool] = None,
     ) -> mx.array:
-        """Packed-dequant-WHT reconstruction path: unpack → dequant → reshape → WHT → optional signs.
+        """Packed-dequant-WHT reconstruction: unpack → dequant →
+        reshape → WHT → optional signs.
 
         Raises:
             ValueError: If any validation fails (out_dtype, shape product,
@@ -597,6 +661,105 @@ class RFSNTurboQuantKVManager:
             out_dtype=out_dtype,
         )
 
+    def _reconstruct_block(
+        self,
+        packed: mx.array,
+        scales: mx.array,
+        packed_start: int,
+        packed_end: int,
+        scale_start: int,
+        scale_end: int,
+        n_values: int,
+        block_shape: tuple,
+        bits: int,
+        seed: int,
+        use_wht: bool,
+        use_incoherent_signs: bool,
+        out_dtype: mx.Dtype,
+    ) -> mx.array:
+        """Reconstruct a single token block from sliced packed/scales."""
+        return self._reconstruct_cached_tensor(
+            packed=packed[packed_start:packed_end],
+            scales=scales[scale_start:scale_end],
+            n_values=n_values,
+            shape=block_shape,
+            bits=bits,
+            seed=seed,
+            use_wht=use_wht,
+            use_incoherent_signs=use_incoherent_signs,
+            out_dtype=out_dtype,
+        )
+
+    def _reconstruct_all_blocks(
+        self,
+        cache: TurboQuantKVCache,
+        is_key: bool,
+        out_dtype: mx.Dtype,
+    ) -> mx.array:
+        """Reconstruct all blocks for K or V and concatenate along T."""
+        if is_key:
+            packed = cache.k_packed
+            scales = cache.k_scales
+            poff = cache.k_block_packed_offsets
+            soff = cache.k_block_scale_offsets
+            bnv = cache.k_block_n_values
+            bits = cache.k_bits
+        else:
+            packed = cache.v_packed
+            scales = cache.v_scales
+            poff = cache.v_block_packed_offsets
+            soff = cache.v_block_scale_offsets
+            bnv = cache.v_block_n_values
+            bits = cache.v_bits
+
+        _b, _h, t, _d = cache.shape
+        blocks: list[mx.array] = []
+        for blk in range(cache.num_blocks):
+            start = blk * cache.block_size
+            end = min(start + cache.block_size, t)
+            block_shape = (_b, _h, end - start, _d)
+            block = self._reconstruct_block(
+                packed=packed,
+                scales=scales,
+                packed_start=poff[blk],
+                packed_end=poff[blk + 1],
+                scale_start=soff[blk],
+                scale_end=soff[blk + 1],
+                n_values=bnv[blk],
+                block_shape=block_shape,
+                bits=bits,
+                seed=cache.seed,
+                use_wht=cache.use_wht,
+                use_incoherent_signs=False,
+                out_dtype=out_dtype,
+            )
+            blocks.append(block)
+        result = mx.concatenate(blocks, axis=2)
+        if cache.use_incoherent_signs:
+            result = self._apply_signs_on_the_fly(result, cache.seed)
+
+        # Restore expected kernel label for backward compatibility
+        if self.prefer_metal_kernels and maybe_supports_metal_kernels():
+            if cache.use_wht and cache.use_incoherent_signs:
+                self.last_reconstruction_kernel = (
+                    "metal_multikernel_dequant_wht_sign"
+                )
+            elif cache.use_wht:
+                self.last_reconstruction_kernel = (
+                    "metal_multikernel_dequant_wht"
+                )
+            elif cache.use_incoherent_signs:
+                self.last_reconstruction_kernel = (
+                    "metal_multikernel_dequant_sign"
+                )
+            else:
+                self.last_reconstruction_kernel = (
+                    "metal_multikernel_dequant"
+                )
+        else:
+            self.last_reconstruction_kernel = "sequential_reference"
+        return result
+
     def evict_lru(self, target_bytes: int | None = None) -> int:
         """Evict least-recently-used unpinned caches.
 
@@ -718,17 +881,57 @@ class RFSNTurboQuantKVManager:
             k_pre = self._apply_wht_pretransform(k_pre)
             v_pre = self._apply_wht_pretransform(v_pre)
 
-        # Flatten for quantization
-        k_flat = k_pre.reshape(-1)
-        v_flat = v_pre.reshape(-1)
+        # Per-block quantization along the token dimension
+        _bsz, _num_h, t_len, _head_dim = keys.shape
+        block_size = self.block_size
+        num_blocks = max(1, (t_len + block_size - 1) // block_size)
 
-        # Quantize
-        k_codes, k_scales = self._quantize(k_flat, self.k_bits)
-        v_codes, v_scales = self._quantize(v_flat, self.v_bits)
+        def _quantize_blocks(pre: mx.array, bits: int) -> tuple:
+            """Quantize pre-transformed tensor block by block.
 
-        # Pack
-        k_packed, k_n = BitPackedQuantizer.pack(k_codes, self.k_bits)
-        v_packed, v_n = BitPackedQuantizer.pack(v_codes, self.v_bits)
+            Returns (packed, scales, packed_offsets, scale_offsets,
+                     block_n_values, total_n).
+            """
+            packed_blocks: list[mx.array] = []
+            scale_blocks: list[mx.array] = []
+            packed_offsets = [0]
+            scale_offsets = [0]
+            block_n_values: list[int] = []
+
+            for blk in range(num_blocks):
+                start = blk * block_size
+                end = min((blk + 1) * block_size, t_len)
+                block = pre[:, :, start:end, :]
+                flat = block.reshape(-1)
+                codes, scales = self._quantize(flat, bits)
+                packed, n = BitPackedQuantizer.pack(codes, bits)
+                packed_blocks.append(packed)
+                scale_blocks.append(scales)
+                packed_offsets.append(
+                    packed_offsets[-1] + int(packed.size)
+                )
+                scale_offsets.append(
+                    scale_offsets[-1] + int(scales.size)
+                )
+                block_n_values.append(n)
+
+            return (
+                mx.concatenate(packed_blocks),
+                mx.concatenate(scale_blocks),
+                packed_offsets,
+                scale_offsets,
+                block_n_values,
+                sum(block_n_values),
+            )
+
+        (
+            k_packed, k_scales, k_poff, k_soff,
+            k_bnv, k_n,
+        ) = _quantize_blocks(k_pre, self.k_bits)
+        (
+            v_packed, v_scales, v_poff, v_soff,
+            v_bnv, v_n,
+        ) = _quantize_blocks(v_pre, self.v_bits)
 
         # Create cache entry
         cache = TurboQuantKVCache(
@@ -747,6 +950,14 @@ class RFSNTurboQuantKVManager:
             k_n_values=k_n,
             v_n_values=v_n,
             token_count=token_count,
+            block_size=block_size,
+            num_blocks=num_blocks,
+            k_block_packed_offsets=k_poff,
+            k_block_scale_offsets=k_soff,
+            k_block_n_values=k_bnv,
+            v_block_packed_offsets=v_poff,
+            v_block_scale_offsets=v_soff,
+            v_block_n_values=v_bnv,
         )
         # Set last_used timestamp for newly created cache
         cache.last_used = time.monotonic()
@@ -817,30 +1028,38 @@ class RFSNTurboQuantKVManager:
                 f"current group_size={self.group_size}"
             )
 
-        k_rec = self._reconstruct_cached_tensor(
-            packed=cache.k_packed,
-            scales=cache.k_scales,
-            n_values=cache.k_n_values,
-            shape=cache.shape,
-            bits=cache.k_bits,
-            seed=cache.seed,
-            use_wht=cache.use_wht,
-            use_incoherent_signs=cache.use_incoherent_signs,
-            out_dtype=out_dtype,
-        )
+        if cache.num_blocks == 0:
+            # Legacy cache without per-block offsets
+            k_rec = self._reconstruct_cached_tensor(
+                packed=cache.k_packed,
+                scales=cache.k_scales,
+                n_values=cache.k_n_values,
+                shape=cache.shape,
+                bits=cache.k_bits,
+                seed=cache.seed,
+                use_wht=cache.use_wht,
+                use_incoherent_signs=cache.use_incoherent_signs,
+                out_dtype=out_dtype,
+            )
+            v_rec = self._reconstruct_cached_tensor(
+                packed=cache.v_packed,
+                scales=cache.v_scales,
+                n_values=cache.v_n_values,
+                shape=cache.shape,
+                bits=cache.v_bits,
+                seed=cache.seed,
+                use_wht=cache.use_wht,
+                use_incoherent_signs=cache.use_incoherent_signs,
+                out_dtype=out_dtype,
+            )
+            return k_rec, v_rec
 
-        v_rec = self._reconstruct_cached_tensor(
-            packed=cache.v_packed,
-            scales=cache.v_scales,
-            n_values=cache.v_n_values,
-            shape=cache.shape,
-            bits=cache.v_bits,
-            seed=cache.seed,
-            use_wht=cache.use_wht,
-            use_incoherent_signs=cache.use_incoherent_signs,
-            out_dtype=out_dtype,
+        k_rec = self._reconstruct_all_blocks(
+            cache=cache, is_key=True, out_dtype=out_dtype,
         )
-
+        v_rec = self._reconstruct_all_blocks(
+            cache=cache, is_key=False, out_dtype=out_dtype,
+        )
         return k_rec, v_rec
 
     def retrieve_blocks(
@@ -887,24 +1106,68 @@ class RFSNTurboQuantKVManager:
                 f"block index {max(block_indices)} >= max_blocks {max_blocks}"
             )
 
-        # Full reconstruct then slice — current packed format does not
-        # permit token-level slicing without unpack/repack.
-        k_full, v_full = self.retrieve(skill_pattern, out_dtype=out_dtype)
-        if k_full is None:
-            return None
+        if cache.num_blocks == 0:
+            # Legacy cache: full reconstruct then slice
+            k_full, v_full = self.retrieve(skill_pattern, out_dtype=out_dtype)
+            if k_full is None:
+                return None
+            token_indices: list[int] = []
+            for blk in sorted(set(block_indices)):
+                start = blk * block_size
+                end = min(start + block_size, t)
+                token_indices.extend(range(start, end))
+            idx_mx = mx.array(token_indices, dtype=mx.uint32)
+            return k_full[:, :, idx_mx, :], v_full[:, :, idx_mx, :]
 
-        token_indices: list[int] = []
+        k_blocks = []
+        v_blocks = []
         for blk in sorted(set(block_indices)):
-            start = blk * block_size
-            end = min(start + block_size, t)
-            token_indices.extend(range(start, end))
-
-        # Gather selected tokens along the time axis (axis=2)
-        idx_mx = mx.array(token_indices, dtype=mx.uint32)
-        k_sliced = k_full[:, :, idx_mx, :]
-        v_sliced = v_full[:, :, idx_mx, :]
-
-        return k_sliced, v_sliced
+            start = blk * cache.block_size
+            end = min(start + cache.block_size, t)
+            block_shape = (_b, _h, end - start, _d)
+            k_block = self._reconstruct_block(
+                packed=cache.k_packed,
+                scales=cache.k_scales,
+                packed_start=cache.k_block_packed_offsets[blk],
+                packed_end=cache.k_block_packed_offsets[blk + 1],
+                scale_start=cache.k_block_scale_offsets[blk],
+                scale_end=cache.k_block_scale_offsets[blk + 1],
+                n_values=cache.k_block_n_values[blk],
+                block_shape=block_shape,
+                bits=cache.k_bits,
+                seed=cache.seed,
+                use_wht=cache.use_wht,
+                use_incoherent_signs=False,
+                out_dtype=out_dtype,
+            )
+            v_block = self._reconstruct_block(
+                packed=cache.v_packed,
+                scales=cache.v_scales,
+                packed_start=cache.v_block_packed_offsets[blk],
+                packed_end=cache.v_block_packed_offsets[blk + 1],
+                scale_start=cache.v_block_scale_offsets[blk],
+                scale_end=cache.v_block_scale_offsets[blk + 1],
+                n_values=cache.v_block_n_values[blk],
+                block_shape=block_shape,
+                bits=cache.v_bits,
+                seed=cache.seed,
+                use_wht=cache.use_wht,
+                use_incoherent_signs=False,
+                out_dtype=out_dtype,
+            )
+            if cache.use_incoherent_signs:
+                k_block = self._apply_signs_to_block(
+                    k_block, cache.seed, blk, cache.block_size, cache.shape,
+                )
+                v_block = self._apply_signs_to_block(
+                    v_block, cache.seed, blk, cache.block_size, cache.shape,
+                )
+            k_blocks.append(k_block)
+            v_blocks.append(v_block)
+        return (
+            mx.concatenate(k_blocks, axis=2),
+            mx.concatenate(v_blocks, axis=2),
+        )
 
     # ------------------------------------------------------------------
     # Pin cache (budget enforcement)

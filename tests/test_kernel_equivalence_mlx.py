@@ -74,28 +74,36 @@ def test_metal_reconstruction_matches_reference(
     assert manager.last_reconstruction_kernel == expected_label
 
     cache = manager.active_caches["kernel_eq"]
-    ref_k = manager._reconstruct_packed_dequant_wht(
-        packed=cache.k_packed,
-        scales=cache.k_scales,
-        n_values=cache.k_n_values,
-        shape=cache.shape,
-        bits=cache.k_bits,
-        seed=cache.seed,
-        use_wht=cache.use_wht,
-        use_incoherent_signs=cache.use_incoherent_signs,
-        out_dtype=mx.float32,
-    )
-    ref_v = manager._reconstruct_packed_dequant_wht(
-        packed=cache.v_packed,
-        scales=cache.v_scales,
-        n_values=cache.v_n_values,
-        shape=cache.shape,
-        bits=cache.v_bits,
-        seed=cache.seed,
-        use_wht=cache.use_wht,
-        use_incoherent_signs=cache.use_incoherent_signs,
-        out_dtype=mx.float32,
-    )
+    if cache.num_blocks > 0:
+        ref_k = manager._reconstruct_all_blocks(
+            cache=cache, is_key=True, out_dtype=mx.float32,
+        )
+        ref_v = manager._reconstruct_all_blocks(
+            cache=cache, is_key=False, out_dtype=mx.float32,
+        )
+    else:
+        ref_k = manager._reconstruct_packed_dequant_wht(
+            packed=cache.k_packed,
+            scales=cache.k_scales,
+            n_values=cache.k_n_values,
+            shape=cache.shape,
+            bits=cache.k_bits,
+            seed=cache.seed,
+            use_wht=cache.use_wht,
+            use_incoherent_signs=cache.use_incoherent_signs,
+            out_dtype=mx.float32,
+        )
+        ref_v = manager._reconstruct_packed_dequant_wht(
+            packed=cache.v_packed,
+            scales=cache.v_scales,
+            n_values=cache.v_n_values,
+            shape=cache.shape,
+            bits=cache.v_bits,
+            seed=cache.seed,
+            use_wht=cache.use_wht,
+            use_incoherent_signs=cache.use_incoherent_signs,
+            out_dtype=mx.float32,
+        )
 
     mx.eval(metal_k, metal_v, ref_k, ref_v)
     assert cosine_similarity(metal_k, ref_k) > 0.999
@@ -145,28 +153,36 @@ def test_strict_metal_uses_metal_route(
     k_rec, v_rec = manager.retrieve(key, out_dtype=mx.float32)
 
     cache = manager.active_caches[key]
-    ref_k = manager._reconstruct_packed_dequant_wht(
-        packed=cache.k_packed,
-        scales=cache.k_scales,
-        n_values=cache.k_n_values,
-        shape=cache.shape,
-        bits=cache.k_bits,
-        seed=cache.seed,
-        use_wht=cache.use_wht,
-        use_incoherent_signs=cache.use_incoherent_signs,
-        out_dtype=mx.float32,
-    )
-    ref_v = manager._reconstruct_packed_dequant_wht(
-        packed=cache.v_packed,
-        scales=cache.v_scales,
-        n_values=cache.v_n_values,
-        shape=cache.shape,
-        bits=cache.v_bits,
-        seed=cache.seed,
-        use_wht=cache.use_wht,
-        use_incoherent_signs=cache.use_incoherent_signs,
-        out_dtype=mx.float32,
-    )
+    if cache.num_blocks > 0:
+        ref_k = manager._reconstruct_all_blocks(
+            cache=cache, is_key=True, out_dtype=mx.float32,
+        )
+        ref_v = manager._reconstruct_all_blocks(
+            cache=cache, is_key=False, out_dtype=mx.float32,
+        )
+    else:
+        ref_k = manager._reconstruct_packed_dequant_wht(
+            packed=cache.k_packed,
+            scales=cache.k_scales,
+            n_values=cache.k_n_values,
+            shape=cache.shape,
+            bits=cache.k_bits,
+            seed=cache.seed,
+            use_wht=cache.use_wht,
+            use_incoherent_signs=cache.use_incoherent_signs,
+            out_dtype=mx.float32,
+        )
+        ref_v = manager._reconstruct_packed_dequant_wht(
+            packed=cache.v_packed,
+            scales=cache.v_scales,
+            n_values=cache.v_n_values,
+            shape=cache.shape,
+            bits=cache.v_bits,
+            seed=cache.seed,
+            use_wht=cache.use_wht,
+            use_incoherent_signs=cache.use_incoherent_signs,
+            out_dtype=mx.float32,
+        )
     mx.eval(k_rec, v_rec, ref_k, ref_v)
 
     assert manager.last_reconstruction_kernel == expected_label
