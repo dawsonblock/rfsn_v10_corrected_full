@@ -843,6 +843,69 @@ class RFSNTurboQuantKVManager:
 
         return k_rec, v_rec
 
+    def retrieve_blocks(
+        self,
+        skill_pattern: str,
+        block_indices: list[int],
+        block_size: int = 64,
+        out_dtype: mx.Dtype = mx.float32,
+    ) -> Optional[tuple[mx.array, mx.array]]:
+        """Retrieve and dequantize only selected token blocks.
+
+        This reconstructs the full cache entry internally, then slices
+        along the token dimension to return only the requested blocks.
+        The reconstruction cost is the same as a full retrieve; the
+        savings are in memory bandwidth and downstream compute.
+
+        Args:
+            skill_pattern: Cache key to retrieve.
+            block_indices: Sorted list of 0-based block indices to keep.
+            block_size: Tokens per block (must match attention block_size).
+            out_dtype: Output dtype (float32 or float16).
+
+        Returns:
+            (keys, values) with shape [B, H, len(block_indices)*block_size, D]
+            where T may be smaller than the original if blocks are skipped.
+            Returns None if the cache key is not found.
+
+        Raises:
+            ValueError: If block_indices is empty or out of range.
+        """
+        if skill_pattern not in self.active_caches:
+            return None
+
+        cache = self.active_caches[skill_pattern]
+        cache.last_used = time.monotonic()
+
+        if not block_indices:
+            raise ValueError("block_indices must not be empty")
+
+        _b, _h, t, _d = cache.shape
+        max_blocks = max(1, (t + block_size - 1) // block_size)
+        if max(block_indices) >= max_blocks:
+            raise ValueError(
+                f"block index {max(block_indices)} >= max_blocks {max_blocks}"
+            )
+
+        # Full reconstruct then slice — current packed format does not
+        # permit token-level slicing without unpack/repack.
+        k_full, v_full = self.retrieve(skill_pattern, out_dtype=out_dtype)
+        if k_full is None:
+            return None
+
+        token_indices: list[int] = []
+        for blk in sorted(set(block_indices)):
+            start = blk * block_size
+            end = min(start + block_size, t)
+            token_indices.extend(range(start, end))
+
+        # Gather selected tokens along the time axis (axis=2)
+        idx_mx = mx.array(token_indices, dtype=mx.uint32)
+        k_sliced = k_full[:, :, idx_mx, :]
+        v_sliced = v_full[:, :, idx_mx, :]
+
+        return k_sliced, v_sliced
+
     # ------------------------------------------------------------------
     # Pin cache (budget enforcement)
     # ------------------------------------------------------------------
