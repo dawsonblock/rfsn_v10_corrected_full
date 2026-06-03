@@ -27,6 +27,12 @@ def main() -> None:
         help="Comma-separated token counts",
     )
     parser.add_argument(
+        "--positions",
+        type=int,
+        default=64,
+        help="Number of decode positions to evaluate (causal NLL scoring)",
+    )
+    parser.add_argument(
         "--configs",
         default="baseline_fp16,k8_v3_gs64,k8_v4_gs64,k8_v5_gs64,"
         "k6_v6_gs64,k8_v4_gs32,k8_v5_gs32,k4_v4_gs64",
@@ -34,7 +40,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--out",
-        default="artifacts/proof/main25/long_context_validation.json",
+        default="artifacts/proof/main26/long_context_validation.json",
         help="Output JSON path",
     )
     args = parser.parse_args()
@@ -44,6 +50,7 @@ def main() -> None:
         sys.executable, str(script),
         "--model", args.model,
         "--contexts", args.contexts,
+        "--positions", str(args.positions),
         "--configs", args.configs,
         "--long-context-out", args.out,
     ]

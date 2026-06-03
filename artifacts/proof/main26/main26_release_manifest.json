@@ -1,0 +1,13 @@
+{
+  "release": "main26",
+  "title": "Documentation + Causal NLL Validation Correction",
+  "status": "alpha",
+  "purpose": "Fix stale documentation, correct causal LM NLL validation, regenerate proof artifacts, and harden release checks.",
+  "not_claimed": [
+    "production readiness",
+    "sparse decode safety",
+    "polar quantization",
+    "true arbitrary partial dequantization",
+    "full end-to-end throughput validation"
+  ]
+}

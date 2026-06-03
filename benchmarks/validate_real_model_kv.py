@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Main 25 real-model KV validation runner.
+"""Main 26 real-model KV validation runner.
 
-Runs a HuggingFace causal LM (auto-downloaded) in baseline and compressed modes.
-Compresses KV past tensors via RFSN TurboQuant, then decodes and compares logits.
+Runs a HuggingFace causal LM (auto-downloaded) in baseline and compressed
+modes. Compresses KV past tensors via RFSN TurboQuant, then decodes and
+compares logits.
 
 Supports:
 - --model: HuggingFace model ID (default: Qwen/Qwen2.5-0.5B-Instruct)
@@ -47,7 +48,8 @@ def _parse_config(name: str) -> dict[str, Any]:
     parts = name.split("_")
     if len(parts) != 3:
         raise ValueError(
-            f"Config '{name}' must have format k{{bits}}_v{{bits}}_gs{{group_size}}"
+            f"Config '{name}' must have format "
+            f"k{{bits}}_v{{bits}}_gs{{group_size}}"
         )
     try:
         k_bits = int(parts[0][1:])
@@ -55,9 +57,15 @@ def _parse_config(name: str) -> dict[str, Any]:
         group_size = int(parts[2][2:])
     except (IndexError, ValueError) as exc:
         raise ValueError(
-            f"Config '{name}' must have format k{{bits}}_v{{bits}}_gs{{group_size}}"
+            f"Config '{name}' must have format "
+            f"k{{bits}}_v{{bits}}_gs{{group_size}}"
         ) from exc
-    return {"name": name, "k_bits": k_bits, "v_bits": v_bits, "group_size": group_size}
+    return {
+        "name": name,
+        "k_bits": k_bits,
+        "v_bits": v_bits,
+        "group_size": group_size,
+    }
 
 
 def _has_nan_or_inf(t: torch.Tensor) -> bool:
@@ -97,33 +105,133 @@ def _topk_overlap(a: torch.Tensor, b: torch.Tensor, k: int) -> float:
 
 def _decode_nll(
     model, past, decode_token: torch.Tensor,
-) -> tuple[torch.Tensor, float]:
-    """Decode one token and return (logits_fp32, nll)."""
+) -> tuple[torch.Tensor, Any]:
+    """Decode one token and return (logits_fp32, past_key_values).
+
+    The returned logits are produced AFTER feeding decode_token, so they
+    predict the token that would follow decode_token.
+    """
     with torch.no_grad():
         out = model(
             input_ids=decode_token, past_key_values=past, use_cache=True
         )
     logits = out.logits[:, -1, :].float()
-    if _has_nan_or_inf(logits):
-        return logits, float("nan")
-    target = decode_token[:, 0]
-    nll = float(F.cross_entropy(logits, target).item())
-    return logits, nll
+    return logits, out.past_key_values
 
 
 def _decode_nll_multi(
     model,
     past,
     decode_tokens: torch.Tensor,
-    n_positions: int = 5,
+    n_positions: int = 64,
 ) -> tuple[torch.Tensor, float]:
-    """Auto-regressive multi-position decode; return (first_logits, avg_nll)."""
+    """Causal-correct multi-position NLL; return (first_logits, avg_nll).
+
+    Scoring rule (causal LM):
+      - logits produced by feeding token t predict token t+1.
+      - To score decode_tokens[i], we must use the logits that were live
+        *before* decode_tokens[i] was fed (i.e. after feeding
+        decode_tokens[i-1], or the context forward pass for i==0).
+
+    Procedure:
+      1. The caller has already run the context forward pass and stored the
+         resulting past + logits in `past` (we re-derive pre-token-0 logits
+         by running the context forward pass implicitly via the initial `past`).
+      2. For each position i in [0, n):
+           a. Obtain logits_i = logits predicting decode_tokens[i].
+              For i==0 these come from a short forward pass with no new tokens
+              (we feed an empty slice — but since past already contains the
+              context, we instead get them by passing the LAST context token
+              again is wrong; the correct approach is: the caller must pass
+              the pre-decode logits directly.)
+
+    Because the caller computes baseline_logits as the last context logits
+    (logits after the context forward pass, before any decode token is fed),
+    we receive those as `past` implicitly via the cache state.  We therefore:
+      - Use the logits returned by the PREVIOUS forward pass to score the
+        CURRENT token, advancing the cache with the current token after scoring.
+    """
     n = min(n_positions, decode_tokens.shape[1])
-    first_logits: torch.Tensor | None = None
+    if n == 0:
+        dummy = torch.zeros(1, 1)
+        return dummy, float("nan")
+
     nlls: list[float] = []
     current_past = past
-    for i in range(n):
-        tok = decode_tokens[:, i : i + 1]
+    first_logits: torch.Tensor | None = None
+
+    # Get the logits that predict decode_tokens[:, 0] by running a zero-length
+    # "peek" — actually we must derive them from context.  The context forward
+    # pass was already run by the caller; `past` holds that KV state.  We do
+    # one forward pass with the first decode token to (a) score it against the
+    # pre-existing context logits and (b) advance the cache.
+    #
+    # The correct scoring sequence:
+    #   prev_logits = context_last_logits   (caller computed these)
+    #   for i in range(n):
+    #       nll[i] = cross_entropy(prev_logits, decode_tokens[i])
+    #       prev_logits, current_past = forward(decode_tokens[i], current_past)
+    #
+    # But we don't receive context_last_logits here. We recover them by running
+    # a single forward pass over decode_tokens[:,0:1] BEFORE scoring, capture
+    # logits (which predict token 1), then score token 0 against the pre-feed
+    # logits obtained from a context-peek forward pass.
+    #
+    # Simpler and equivalent: run a forward pass with NO new tokens but with the
+    # current past to get the logits predicting the next (first decode) token.
+    # HuggingFace models don't support input_ids of length 0 cleanly, so we
+    # a single peek token (the first decode token) and score it against the
+    # logits from the context-only cache by doing:
+    #   peek_out = model(input_ids=decode_tokens[:,0:1], past=current_past)
+    #   peek_logits = peek_out.logits[:, -1, :]   # predicts token 1
+    #   But to get logits that predict token 0 we need the logits BEFORE
+    #   feeding token 0, which are the context's final logits.
+    #
+    # Resolution: the caller always passes `past` from a context forward pass
+    # that also returned logits.  We accept an optional `context_last_logits`
+    # parameter; if not provided we run one additional context-peek step.
+    # For backward-compat this function signature keeps `past` only and we
+    # do the peek internally.
+
+    # Step 0: obtain logits that predict decode_tokens[:,0] by running the
+    # context past through a dummy forward of shape (1,1) =
+    # decode_tokens[:,0:1].
+    # The logits of THIS forward predict decode_tokens[:,1], but the logits
+    # WE NEED to score decode_tokens[:,0] are the output of the CONTEXT pass.
+    # We recover them with a separate peek: feed a zero-pad or use the cache
+    # approach below.
+    #
+    # The cleanest approach that doesn't require changing callers:
+    #   score_logits[i] = logits produced by forward(decode_tokens[i-1], ...)
+    #   For i==0: score_logits[0] = logits produced by forward(context, ...)
+    #             which the caller stored in `past` but didn't return.
+    # We run one additional forward with decode_tokens[:,0:1] to get its output
+    # logits (which score token 1), then iterate from token 1 onward.
+    # For token 0 we score it against the logits from the context forward pass,
+    # which we obtain by running a no-op that passes the full context — too
+    # expensive.  Instead, we use the convention that `past` was built from
+    # `context_ids` and we also pass `context_logits` as an optional arg.
+    #
+    # To avoid a large refactor of all call sites we use a pragmatic approach:
+    # perform scoring using the SHIFTED window — score decode_tokens[1..n]
+    # using logits from decode_tokens[0..n-1] forward passes, starting from the
+    # context KV state.  Token 0 is used only to advance the cache (not scored).
+    # This gives n-1 correctly scored positions.  n is bumped by 1 so that we
+    # still evaluate `n_positions` correctly-scored tokens.
+    #
+    # Concretely:
+    #   i=0: feed tok[0] -> get logits_0 (predicts tok[1]); cache advances
+    #   i=1: score tok[1] against logits_0; feed tok[1] -> logits_1
+    #   ...
+    #   i=n: score tok[n] against logits_{n-1}
+    # We evaluate n_positions scored tokens by consuming n_positions+1
+    # decode tokens.
+
+    n_consume = min(n_positions + 1, decode_tokens.shape[1])
+    prev_logits: torch.Tensor | None = None
+
+    for i in range(n_consume):
+        tok = decode_tokens[:, i:i + 1]
         with torch.no_grad():
             out = model(
                 input_ids=tok,
@@ -132,12 +240,19 @@ def _decode_nll_multi(
             )
         logits = out.logits[:, -1, :].float()
         current_past = out.past_key_values
-        if first_logits is None:
-            first_logits = logits
-        if _has_nan_or_inf(logits):
-            return logits, float("nan")
-        nll = float(F.cross_entropy(logits, tok[:, 0]).item())
-        nlls.append(nll)
+
+        if prev_logits is not None:
+            # Score tok[i] against logits produced BEFORE feeding tok[i]
+            if first_logits is None:
+                first_logits = prev_logits
+            if _has_nan_or_inf(prev_logits):
+                dummy = torch.zeros(1, 1)
+                return dummy, float("nan")
+            nll = float(F.cross_entropy(prev_logits, tok[:, 0]).item())
+            nlls.append(nll)
+
+        prev_logits = logits
+
     if first_logits is None or not nlls:
         dummy = torch.zeros(1, 1)
         return dummy, float("nan")
@@ -220,7 +335,7 @@ def _from_legacy_cache(legacy_cache, cache_cls):
 
 
 def _clone_legacy_cache(legacy_cache):
-    """Deep-clone tensors in a legacy-format cache to avoid in-place mutation."""
+    """Deep-clone tensors in legacy cache to avoid in-place mutation."""
     if legacy_cache is None:
         return None
     return tuple((k.clone(), v.clone()) for k, v in legacy_cache)
@@ -238,7 +353,7 @@ def _evaluate_config(
     baseline_nll: float,
     device: torch.device,
     compress_layers: set[int] | None = None,
-    n_decode_positions: int = 5,
+    n_decode_positions: int = 64,
 ) -> dict[str, Any]:
     if config["name"] != "baseline_fp16":
         past_legacy = _compress_decompress_past(
@@ -251,6 +366,8 @@ def _evaluate_config(
     logits, nll = _decode_nll_multi(
         model, past, decode_tokens, n_positions=n_decode_positions
     )
+    decode_len = decode_tokens.shape[1]
+    actual_positions = min(n_decode_positions, max(0, decode_len - 1))
     dt = (time.perf_counter() - t0) * 1000.0
 
     nan_logits = _has_nan_or_inf(logits)
@@ -281,7 +398,7 @@ def _evaluate_config(
         "top1_match_rate": top1_match,
         "top5_overlap_mean": top5,
         "avg_nll_delta": nll - baseline_nll,
-        "token_positions_evaluated": n_decode_positions,
+        "token_positions_evaluated": actual_positions,
         "kl_divergence_mean": kl,
         "latency_ms": dt,
         "route_used": "retrieve"
@@ -338,6 +455,28 @@ def _determine_status(result: dict[str, Any], *, baseline_nll: float = 0.0) -> s
     return "pass"
 
 
+_DEFAULT_VALIDATION_PROMPTS: list[str] = [
+    "The quick brown fox jumps over the lazy dog. " * 200,
+    (
+        "In the beginning, there was light. The universe expanded rapidly, "
+        "and galaxies formed from the primordial soup of hydrogen and helium. "
+        "Stars ignited and burned for millions of years before exploding. "
+        "Heavy elements were forged in these stellar furnaces and "
+        "scattered across the cosmos. Planets formed, oceans arose, "
+        "and life began. " * 15
+    ),
+    (
+        "Machine learning models are trained on large datasets to learn "
+        "statistical patterns. The transformer architecture uses self-attention "
+        "to process sequences in parallel, enabling scalable training. "
+        "Key-value caches store attention states to accelerate "
+        "autoregressive decoding by avoiding redundant computation. "
+        "Quantization reduces memory bandwidth at the cost of "
+        "numerical precision. " * 15
+    ),
+]
+
+
 def _run_real_model_validation(
     model_id: str,
     tokens: int,
@@ -345,7 +484,12 @@ def _run_real_model_validation(
     device: torch.device,
     out_path: Path,
     trust_remote_code: bool = False,
+    prompt_texts: list[str] | None = None,
+    n_decode_positions: int = 64,
 ) -> dict[str, Any]:
+    if prompt_texts is None:
+        prompt_texts = _DEFAULT_VALIDATION_PROMPTS
+
     dtype = torch.float16 if device.type == "mps" else torch.float32
 
     tokenizer = AutoTokenizer.from_pretrained(
@@ -359,69 +503,139 @@ def _run_real_model_validation(
     model.to(device)
     model.eval()
 
-    # Build a prompt of roughly the target length
-    prompt_text = "The quick brown fox jumps over the lazy dog. " * 200
-    inputs = tokenizer(prompt_text, return_tensors="pt")
-    if inputs["input_ids"].shape[1] < tokens:
-        print(
-            f"WARNING: requested {tokens} tokens but prompt only has "
-            f"{inputs['input_ids'].shape[1]}. Testing with available tokens."
+    # Per-prompt results accumulator: config_name -> list of single-prompt
+    # results
+    prompt_results_by_config: dict[str, list[dict[str, Any]]] = {
+        c["name"]: [] for c in configs
+    }
+
+    for prompt_idx, prompt_text in enumerate(prompt_texts):
+        print(f"Prompt {prompt_idx + 1}/{len(prompt_texts)} ...")
+        inputs = tokenizer(prompt_text, return_tensors="pt")
+        if inputs["input_ids"].shape[1] < tokens:
+            print(
+                f"  WARNING: requested {tokens} tokens but prompt only has "
+                f"{inputs['input_ids'].shape[1]}. Using available tokens."
+            )
+        input_ids = inputs["input_ids"][:, :tokens]
+        if input_ids.shape[1] < 67:
+            print(
+                f"  Skipping prompt {prompt_idx}: only "
+                f"{input_ids.shape[1]} tokens available (need 67+)"
+            )
+            continue
+
+        input_ids = input_ids.to(device)
+        context_ids = input_ids[:, :-65]
+        decode_tokens = input_ids[:, -65:]
+
+        with torch.no_grad():
+            baseline_ctx = model(input_ids=context_ids, use_cache=True)
+        baseline_legacy, baseline_cache_cls = _to_legacy_cache(
+            baseline_ctx.past_key_values
         )
-    input_ids = inputs["input_ids"][:, :tokens]
-    if input_ids.shape[1] < 2:
-        raise ValueError("Need at least 2 tokens")
+        baseline_past = _from_legacy_cache(baseline_legacy, baseline_cache_cls)
+        baseline_logits, baseline_nll = _decode_nll_multi(
+            model, baseline_past, decode_tokens, n_positions=n_decode_positions
+        )
 
-    input_ids = input_ids.to(device)
-    context_ids = input_ids[:, :-6]
-    decode_tokens = input_ids[:, -6:]
+        for config in configs:
+            result = _evaluate_config(
+                config,
+                model=model,
+                tokenizer=tokenizer,
+                past_legacy=_clone_legacy_cache(baseline_legacy),
+                cache_cls=baseline_cache_cls,
+                decode_tokens=decode_tokens,
+                baseline_logits=baseline_logits,
+                baseline_nll=baseline_nll,
+                device=device,
+                n_decode_positions=n_decode_positions,
+            )
+            result["prompt_idx"] = prompt_idx
+            prompt_results_by_config[config["name"]].append(result)
 
-    with torch.no_grad():
-        baseline_ctx = model(input_ids=context_ids, use_cache=True)
-    baseline_legacy, baseline_cache_cls = _to_legacy_cache(
-        baseline_ctx.past_key_values
-    )
-    baseline_past = _from_legacy_cache(baseline_legacy, baseline_cache_cls)
-    baseline_logits, baseline_nll = _decode_nll_multi(
-        model, baseline_past, decode_tokens, n_positions=5
-    )
+    # Aggregate: mean each metric across prompts per config
+    def _finite_mean(vals: list[float]) -> float:
+        finite = [v for v in vals if math.isfinite(v)]
+        return float(sum(finite) / len(finite)) if finite else float("nan")
 
     config_results: list[dict[str, Any]] = []
     for config in configs:
-        print(f"  Evaluating config: {config['name']} ...")
-        result = _evaluate_config(
-            config,
-            model=model,
-            tokenizer=tokenizer,
-            past_legacy=_clone_legacy_cache(baseline_legacy),
-            cache_cls=baseline_cache_cls,
-            decode_tokens=decode_tokens,
-            baseline_logits=baseline_logits,
-            baseline_nll=baseline_nll,
-            device=device,
-        )
-        result["status"] = _determine_status(result, baseline_nll=baseline_nll)
-        config_results.append(result)
-        nll_delta = result.get("avg_nll_delta", 0.0)
+        per_prompt = prompt_results_by_config[config["name"]]
+        if not per_prompt:
+            config_results.append({
+                "name": config["name"],
+                "k_bits": config["k_bits"],
+                "v_bits": config["v_bits"],
+                "group_size": config["group_size"],
+                "status": "skipped",
+                "per_prompt": [],
+            })
+            continue
+
+        agg: dict[str, Any] = {
+            "name": config["name"],
+            "k_bits": config["k_bits"],
+            "v_bits": config["v_bits"],
+            "group_size": config["group_size"],
+            "logit_cosine_mean": _finite_mean(
+                [r["logit_cosine_mean"] for r in per_prompt]
+            ),
+            "logit_cosine_min": min(
+                r["logit_cosine_min"] for r in per_prompt
+                if math.isfinite(r["logit_cosine_min"])
+            ) if any(
+                math.isfinite(r["logit_cosine_min"]) for r in per_prompt
+            ) else float("nan"),
+            "logit_max_abs_diff": _finite_mean(
+                [r["logit_max_abs_diff"] for r in per_prompt]
+            ),
+            "top1_match_rate": _finite_mean(
+                [r["top1_match_rate"] for r in per_prompt]
+            ),
+            "top5_overlap_mean": _finite_mean(
+                [r["top5_overlap_mean"] for r in per_prompt]
+            ),
+            "avg_nll_delta": _finite_mean(
+                [r.get("avg_nll_delta", 0.0) for r in per_prompt]
+            ),
+            "kl_divergence_mean": _finite_mean(
+                [r["kl_divergence_mean"] for r in per_prompt]
+            ),
+            "token_positions_evaluated": per_prompt[0].get(
+                "token_positions_evaluated", 0
+            ),
+            "latency_ms": _finite_mean(
+                [r["latency_ms"] for r in per_prompt]
+            ),
+            "route_used": per_prompt[0].get("route_used", ""),
+            "per_prompt": per_prompt,
+            "prompts_evaluated": len(per_prompt),
+        }
+        agg["status"] = _determine_status(agg)
+        config_results.append(agg)
         print(
-            f"    cosine={result['logit_cosine_mean']:.6f} "
-            f"top1={result['top1_match_rate']:.3f} "
-            f"top5={result['top5_overlap_mean']:.3f} "
-            f"nll_delta={nll_delta:.6f} "
-            f"kl={result['kl_divergence_mean']:.6f} "
-            f"status={result['status']}"
+            f"  {agg['name']}: cosine={agg['logit_cosine_mean']:.6f} "
+            f"top1={agg['top1_match_rate']:.3f} "
+            f"nll_delta={agg['avg_nll_delta']:.6f} "
+            f"kl={agg['kl_divergence_mean']:.6f} "
+            f"status={agg['status']} (over {agg['prompts_evaluated']} prompts)"
         )
 
     payload: dict[str, Any] = {
-        "release": "main25",
+        "release": "main26",
         "validation_class": "real_non_random_model_validation",
         "model": model_id,
         "hardware": _get_hardware_info(),
         "tokens_tested": tokens,
+        "prompts_count": len(prompt_texts),
         "configs": config_results,
         "sparse_enabled": False,
         "notes": [
             "Real non-random model validation executed.",
             "Sparse decode is disabled by default.",
+            f"Multi-prompt validation: {len(prompt_texts)} prompts aggregated.",
         ],
     }
 
@@ -438,6 +652,7 @@ def _run_long_context_validation(
     device: torch.device,
     out_path: Path,
     trust_remote_code: bool = False,
+    n_decode_positions: int = 64,
 ) -> dict[str, Any]:
     # Use float32 on MPS to avoid fp16 overflow at longer sequence lengths
     dtype = torch.float32
@@ -453,6 +668,7 @@ def _run_long_context_validation(
     model.to(device)
     model.eval()
 
+    n_decode_buf = n_decode_positions + 1
     prompt_text = "The quick brown fox jumps over the lazy dog. " * 500
     all_input_ids = tokenizer(prompt_text, return_tensors="pt")["input_ids"]
 
@@ -460,10 +676,10 @@ def _run_long_context_validation(
     for ctx_tokens in contexts:
         print(f"Long-context validation: {ctx_tokens} tokens ...")
         input_ids = all_input_ids[:, :ctx_tokens].to(device)
-        if input_ids.shape[1] < 2:
+        if input_ids.shape[1] < n_decode_buf + 2:
             continue
-        context_ids = input_ids[:, :-6]
-        decode_tokens = input_ids[:, -6:]
+        context_ids = input_ids[:, :-n_decode_buf]
+        decode_tokens = input_ids[:, -n_decode_buf:]
 
         with torch.no_grad():
             baseline_ctx = model(input_ids=context_ids, use_cache=True)
@@ -472,7 +688,7 @@ def _run_long_context_validation(
         )
         baseline_past = _from_legacy_cache(baseline_legacy, baseline_cache_cls)
         baseline_logits, baseline_nll = _decode_nll_multi(
-            model, baseline_past, decode_tokens, n_positions=5
+            model, baseline_past, decode_tokens, n_positions=n_decode_positions
         )
 
         config_results: list[dict[str, Any]] = []
@@ -488,6 +704,7 @@ def _run_long_context_validation(
                     baseline_logits=baseline_logits,
                     baseline_nll=baseline_nll,
                     device=device,
+                    n_decode_positions=n_decode_positions,
                 )
                 result["status"] = _determine_status(
                     result, baseline_nll=baseline_nll
@@ -495,7 +712,10 @@ def _run_long_context_validation(
                 result["oom"] = False
             except Exception as e:
                 msg = str(e).lower()
-                if "out of memory" in msg or "no memory" in msg or "mps allocator" in msg:
+                oom_indicators = [
+                    "out of memory", "no memory", "mps allocator"
+                ]
+                if any(ind in msg for ind in oom_indicators):
                     result = {"name": config["name"], "oom": True, "status": "oom"}
                 else:
                     raise
@@ -506,36 +726,72 @@ def _run_long_context_validation(
             "configs": config_results,
         })
 
-    # Determine best configs from results
-    def _best_quality(ctxs):
+    # Determine best configs from results — all-context-passing logic
+    def _passes_all_contexts(config_name: str, ctxs: list[dict]) -> bool:
+        """Return True only if config passes in EVERY tested context."""
+        for ctx in ctxs:
+            matched = False
+            for c in ctx["configs"]:
+                if c.get("name") == config_name:
+                    matched = True
+                    if c.get("status") != "pass":
+                        return False
+            if not matched:
+                return False
+        return True
+
+    def _collect_config_names(ctxs: list[dict]) -> list[str]:
+        names: list[str] = []
+        for ctx in ctxs:
+            for c in ctx["configs"]:
+                n = c.get("name", "")
+                if n and n not in names:
+                    names.append(n)
+        return names
+
+    def _best_quality(ctxs: list[dict]) -> str:
+        # Best mean cosine among configs passing ALL contexts
         best = ""
         best_cos = -1.0
-        for ctx in ctxs:
-            for c in ctx["configs"]:
-                if c.get("oom"):
-                    continue
-                cos = c.get("logit_cosine_mean", -1.0)
-                if cos > best_cos:
-                    best_cos = cos
-                    best = c["name"]
+        for name in _collect_config_names(ctxs):
+            if not _passes_all_contexts(name, ctxs):
+                continue
+            cos_vals = []
+            for ctx in ctxs:
+                for c in ctx["configs"]:
+                    if c.get("name") == name and not c.get("oom"):
+                        cos_vals.append(c.get("logit_cosine_mean", -1.0))
+            if cos_vals:
+                avg = sum(cos_vals) / len(cos_vals)
+                if avg > best_cos:
+                    best_cos = avg
+                    best = name
         return best
 
-    def _best_memory(ctxs):
-        # Prefer highest compression (lowest bits) among passing configs
+    def _best_memory(ctxs: list[dict]) -> str:
+        # Prefer highest compression (lowest bits) among configs passing ALL contexts
         best = ""
         best_score = float("inf")
-        for ctx in ctxs:
-            for c in ctx["configs"]:
-                if c.get("oom") or c.get("status") != "pass":
-                    continue
-                score = c.get("k_bits", 16) + c.get("v_bits", 16)
-                if score < best_score:
-                    best_score = score
-                    best = c["name"]
+        for name in _collect_config_names(ctxs):
+            if not _passes_all_contexts(name, ctxs):
+                continue
+            # Get score from first occurrence (same config has same k_bits/v_bits)
+            score = None
+            for ctx in ctxs:
+                for c in ctx["configs"]:
+                    if c.get("name") == name:
+                        score = c.get("k_bits", 16) + c.get("v_bits", 16)
+                        break
+                if score is not None:
+                    break
+            if score is not None and score < best_score:
+                best_score = score
+                best = name
         return best
 
-    def _recommended(ctxs):
+    def _recommended(ctxs: list[dict]) -> str:
         # Preference order; k4_v4_gs64 rejected (fails alpha thresholds)
+        # A config can only be recommended if it passes ALL tested contexts.
         for prefer in (
             "k8_v5_gs64",
             "k8_v5_gs32",
@@ -543,23 +799,24 @@ def _run_long_context_validation(
             "k8_v4_gs32",
             "k8_v3_gs64",
         ):
-            for ctx in ctxs:
-                for c in ctx["configs"]:
-                    if (
-                        c.get("name") == prefer
-                        and c.get("status") == "pass"
-                    ):
-                        return prefer
+            if _passes_all_contexts(prefer, ctxs):
+                return prefer
         return "baseline_fp16"
 
+    rejected = [
+        name for name in _collect_config_names(context_entries)
+        if name != "baseline_fp16" and not _passes_all_contexts(name, context_entries)
+    ]
+
     payload: dict[str, Any] = {
-        "release": "main25",
+        "release": "main26",
         "model": model_id,
         "contexts": context_entries,
         "summary": {
             "best_quality_config": _best_quality(context_entries),
-            "best_memory_config": _best_memory(context_entries),
+            "best_memory_config_passing_all_contexts": _best_memory(context_entries),
             "recommended_default": _recommended(context_entries),
+            "rejected_configs": rejected,
             "production_ready": False,
         },
     }
@@ -592,10 +849,13 @@ def _run_per_layer_sensitivity(
     prompt_text = "The quick brown fox jumps over the lazy dog. " * 200
     inputs = tokenizer(prompt_text, return_tensors="pt")
     input_ids = inputs["input_ids"][:, :tokens].to(device)
-    if input_ids.shape[1] < 2:
-        raise ValueError("Need at least 2 tokens")
-    context_ids = input_ids[:, :-6]
-    decode_tokens = input_ids[:, -6:]
+    if input_ids.shape[1] < 67:
+        raise ValueError(
+            "Need at least 67 tokens for per-layer sensitivity "
+            "(context + 65 decode tokens)"
+        )
+    context_ids = input_ids[:, :-65]
+    decode_tokens = input_ids[:, -65:]
 
     with torch.no_grad():
         baseline_ctx = model(input_ids=context_ids, use_cache=True)
@@ -604,7 +864,7 @@ def _run_per_layer_sensitivity(
     )
     baseline_past = _from_legacy_cache(baseline_legacy, baseline_cache_cls)
     baseline_logits, baseline_nll = _decode_nll_multi(
-        model, baseline_past, decode_tokens, n_positions=5
+        model, baseline_past, decode_tokens, n_positions=64
     )
 
     num_layers = len(baseline_legacy)
@@ -629,6 +889,7 @@ def _run_per_layer_sensitivity(
                 baseline_nll=baseline_nll,
                 device=device,
                 compress_layers={layer_idx},
+                n_decode_positions=64,
             )
             layer_results.append({
                 "layer": layer_idx,
@@ -644,12 +905,51 @@ def _run_per_layer_sensitivity(
             "layers": layer_results,
         })
 
+    # Build summary across all tested configs
+    def _worst_n_by(key: str, layer_rows: list[dict], n: int = 4) -> list[int]:
+        finite = [
+            r for r in layer_rows
+            if isinstance(r.get(key), float) and math.isfinite(r[key])
+        ]
+        if key in ("cosine", "top1_match", "top5_overlap"):
+            finite.sort(key=lambda r: r[key])
+        else:
+            finite.sort(key=lambda r: abs(r[key]), reverse=True)
+        return [r["layer"] for r in finite[:n]]
+
+    def _unique_sorted(layers: list[int]) -> list[int]:
+        return sorted(set(layers))
+
+    all_worst_cosine: list[int] = []
+    all_worst_kl: list[int] = []
+    all_worst_nll: list[int] = []
+    for res in all_results:
+        rows = res["layers"]
+        all_worst_cosine.extend(_worst_n_by("cosine", rows, 4))
+        all_worst_kl.extend(_worst_n_by("kl", rows, 4))
+        all_worst_nll.extend(_worst_n_by("nll_delta", rows, 4))
+
+    worst_cosine = _unique_sorted(all_worst_cosine)[:4]
+    worst_kl = _unique_sorted(all_worst_kl)[:4]
+    worst_nll = _unique_sorted(all_worst_nll)[:4]
+    recommended_protected = _unique_sorted(
+        worst_cosine + worst_kl + worst_nll
+    )[:4]
+
+    sensitivity_summary = {
+        "worst_layers_by_cosine": worst_cosine,
+        "worst_layers_by_kl": worst_kl,
+        "worst_layers_by_nll_delta": worst_nll,
+        "recommended_protected_layers": recommended_protected,
+    }
+
     payload: dict[str, Any] = {
-        "release": "main25",
+        "release": "main26",
         "analysis": "per_layer_sensitivity",
         "model": model_id,
         "tokens_tested": tokens,
         "configs": all_results,
+        "summary": sensitivity_summary,
     }
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
@@ -657,15 +957,24 @@ def _run_per_layer_sensitivity(
     return payload
 
 
-def _run_early_layer_protection(
+def _run_targeted_layer_protection(
     model_id: str,
     tokens: int,
     configs: list[dict[str, Any]],
     device: torch.device,
     out_path: Path,
     trust_remote_code: bool = False,
+    sensitivity_path: Path | None = None,
 ) -> dict[str, Any]:
-    """Test keeping first N layers at fp16 while compressing the rest."""
+    """Test targeted layer protection sets derived from sensitivity analysis.
+
+    Scenarios tested:
+      - protect_first_4: keep layers 0-3 at fp16
+      - protect_16: keep layer 16 at fp16
+      - protect_16_20: keep layers 16, 20 at fp16
+      - protect_16_20_21_23: keep layers 16, 20, 21, 23 at fp16
+      - protect_worst_4: keep top-4 worst layers from sensitivity (if available)
+    """
     dtype = torch.float16 if device.type == "mps" else torch.float32
     tokenizer = AutoTokenizer.from_pretrained(
         model_id, trust_remote_code=trust_remote_code
@@ -679,10 +988,13 @@ def _run_early_layer_protection(
     prompt_text = "The quick brown fox jumps over the lazy dog. " * 200
     inputs = tokenizer(prompt_text, return_tensors="pt")
     input_ids = inputs["input_ids"][:, :tokens].to(device)
-    if input_ids.shape[1] < 2:
-        raise ValueError("Need at least 2 tokens")
-    context_ids = input_ids[:, :-6]
-    decode_tokens = input_ids[:, -6:]
+    if input_ids.shape[1] < 67:
+        raise ValueError(
+            "Need at least 67 tokens for targeted layer protection "
+            "(context + 65 decode tokens)"
+        )
+    context_ids = input_ids[:, :-65]
+    decode_tokens = input_ids[:, -65:]
 
     with torch.no_grad():
         baseline_ctx = model(input_ids=context_ids, use_cache=True)
@@ -691,23 +1003,51 @@ def _run_early_layer_protection(
     )
     baseline_past = _from_legacy_cache(baseline_legacy, baseline_cache_cls)
     baseline_logits, baseline_nll = _decode_nll_multi(
-        model, baseline_past, decode_tokens, n_positions=5
+        model, baseline_past, decode_tokens, n_positions=64
     )
 
     num_layers = len(baseline_legacy)
-    protected_counts = [2, 4, 6, 8]
     test_configs = [c for c in configs if c["name"] != "baseline_fp16"]
     if not test_configs:
         test_configs = [configs[0]]
 
+    # Load worst-layer recommendations from sensitivity analysis if available
+    worst_4_from_sensitivity: list[int] = [16, 20, 21, 23]  # safe default
+    if sensitivity_path is not None and sensitivity_path.exists():
+        try:
+            sens = json.loads(sensitivity_path.read_text(encoding="utf-8"))
+            rec = sens.get("summary", {}).get("recommended_protected_layers", [])
+            if rec:
+                worst_4_from_sensitivity = rec[:4]
+        except Exception:
+            pass
+
+    # Build named protection scenarios
+    all_scenario_layers = []
+    for layer in worst_4_from_sensitivity:
+        if layer < num_layers:
+            all_scenario_layers.append(layer)
+
+    scenarios: list[tuple[str, list[int]]] = [
+        ("protect_first_4", list(range(min(4, num_layers)))),
+        ("protect_16", [16] if 16 < num_layers else []),
+        ("protect_16_20", [idx for idx in [16, 20] if idx < num_layers]),
+        (
+            "protect_16_20_21_23",
+            [idx for idx in [16, 20, 21, 23] if idx < num_layers],
+        ),
+        ("protect_worst_4", all_scenario_layers),
+    ]
+
     all_results: list[dict[str, Any]] = []
     for config in test_configs:
-        print(f"Early-layer protection: {config['name']} ...")
+        print(f"Targeted layer protection: {config['name']} ...")
         protection_results: list[dict[str, Any]] = []
-        for protected in protected_counts:
-            if protected >= num_layers:
+        for scenario_name, protect_layers in scenarios:
+            if not protect_layers:
                 continue
-            compress_set = set(range(protected, num_layers))
+            protect_set = set(protect_layers)
+            compress_set = set(range(num_layers)) - protect_set
             result = _evaluate_config(
                 config,
                 model=model,
@@ -719,9 +1059,11 @@ def _run_early_layer_protection(
                 baseline_nll=baseline_nll,
                 device=device,
                 compress_layers=compress_set,
+                n_decode_positions=64,
             )
             protection_results.append({
-                "protected_layers": protected,
+                "scenario": scenario_name,
+                "protected_layers": protect_layers,
                 "cosine": result["logit_cosine_mean"],
                 "top1_match": result["top1_match_rate"],
                 "top5_overlap": result["top5_overlap_mean"],
@@ -736,8 +1078,8 @@ def _run_early_layer_protection(
         })
 
     payload: dict[str, Any] = {
-        "release": "main25",
-        "analysis": "early_layer_protection",
+        "release": "main26",
+        "analysis": "targeted_layer_protection",
         "model": model_id,
         "tokens_tested": tokens,
         "configs": all_results,
@@ -750,7 +1092,6 @@ def _run_early_layer_protection(
 
 def _get_hardware_info() -> dict[str, Any]:
     import platform
-    import subprocess
 
     mlx_version = "unknown"
     try:
@@ -760,6 +1101,7 @@ def _get_hardware_info() -> dict[str, Any]:
 
     chip = "unknown"
     try:
+        import subprocess
         result = subprocess.run(
             ["sysctl", "-n", "machdep.cpu.brand_string"],
             capture_output=True, text=True, check=False,
@@ -799,6 +1141,12 @@ def main() -> None:
         help="Number of tokens to test",
     )
     parser.add_argument(
+        "--positions",
+        type=int,
+        default=64,
+        help="Number of decode positions to evaluate (causal NLL scoring)",
+    )
+    parser.add_argument(
         "--configs",
         default="baseline_fp16,k8_v3_gs64,k8_v4_gs64,k8_v5_gs64,"
         "k6_v6_gs64,k8_v4_gs32,k8_v5_gs32,k4_v4_gs64",
@@ -807,16 +1155,17 @@ def main() -> None:
     parser.add_argument(
         "--contexts",
         default="",
-        help="Comma-separated token counts for long-context validation (e.g., 512,1024,2048)",
+        help="Comma-separated token counts for long-context validation "
+        "(e.g., 512,1024,2048)",
     )
     parser.add_argument(
         "--out",
-        default="artifacts/proof/main25/real_model_validation.json",
+        default="artifacts/proof/main26/real_model_validation.json",
         help="Output JSON path for real-model validation",
     )
     parser.add_argument(
         "--long-context-out",
-        default="artifacts/proof/main25/long_context_validation.json",
+        default="artifacts/proof/main26/long_context_validation.json",
         help="Output JSON path for long-context validation",
     )
     parser.add_argument(
@@ -831,7 +1180,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--per-layer-out",
-        default="artifacts/proof/main25/per_layer_sensitivity.json",
+        default="artifacts/proof/main26/per_layer_sensitivity.json",
         help="Output path for per-layer sensitivity",
     )
     parser.add_argument(
@@ -841,7 +1190,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--early-layer-out",
-        default="artifacts/proof/main25/early_layer_protection.json",
+        default="artifacts/proof/main26/early_layer_protection.json",
         help="Output path for early-layer protection",
     )
     args = parser.parse_args()
@@ -853,7 +1202,10 @@ def main() -> None:
     configs = [_parse_config(name) for name in config_names]
 
     # Real-model validation
-    print(f"Running real-model validation: model={args.model}, tokens={args.tokens}")
+    print(
+        f"Running real-model validation: model={args.model}, "
+        f"tokens={args.tokens}, positions={args.positions}"
+    )
     payload = _run_real_model_validation(
         model_id=args.model,
         tokens=args.tokens,
@@ -861,6 +1213,7 @@ def main() -> None:
         device=device,
         out_path=Path(args.out),
         trust_remote_code=args.trust_remote_code,
+        n_decode_positions=args.positions,
     )
     exit_code = 0
     if any(c.get("status") == "fail" for c in payload.get("configs", [])):
@@ -868,7 +1221,9 @@ def main() -> None:
 
     # Long-context validation
     if args.contexts:
-        context_tokens = [int(c.strip()) for c in args.contexts.split(",") if c.strip()]
+        context_tokens = [
+            int(c.strip()) for c in args.contexts.split(",") if c.strip()
+        ]
         _run_long_context_validation(
             model_id=args.model,
             contexts=context_tokens,
@@ -876,6 +1231,7 @@ def main() -> None:
             device=device,
             out_path=Path(args.long_context_out),
             trust_remote_code=args.trust_remote_code,
+            n_decode_positions=args.positions,
         )
 
     # Per-layer sensitivity analysis
@@ -889,15 +1245,16 @@ def main() -> None:
             trust_remote_code=args.trust_remote_code,
         )
 
-    # Early-layer higher-precision test
+    # Targeted layer protection test
     if args.early_layer_protection:
-        _run_early_layer_protection(
+        _run_targeted_layer_protection(
             model_id=args.model,
             tokens=args.tokens,
             configs=configs,
             device=device,
             out_path=Path(args.early_layer_out),
             trust_remote_code=args.trust_remote_code,
+            sensitivity_path=Path(args.per_layer_out),
         )
 
     if exit_code != 0:
