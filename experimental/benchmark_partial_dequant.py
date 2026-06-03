@@ -13,9 +13,11 @@ import math
 from pathlib import Path
 from typing import Any
 
-import mlx.core as mx
+import pytest
 
-from rfsn_v10.partial_dequant import PartialDequantConfig, PartialDequantManager
+mx = pytest.importorskip("mlx.core")
+
+from experimental.partial_dequant import PartialDequantConfig, PartialDequantManager
 from rfsn_v10.bitpack import BitPackedQuantizer
 
 

@@ -1,6 +1,6 @@
 # main12 Proof Summary
 
-Release: Main 21 — Clean Block-Aware KV Reconstruction Release
+Release: Main 22 — Proof-Consistent Clean Block-Aware KV Reconstruction Release
 Generated: 2026-06-02T07:26:04.849859+00:00
 
 ## KV Cache Status
@@ -21,12 +21,24 @@ Generated: 2026-06-02T07:26:04.849859+00:00
 - Recommendation: dense default, sparse opt-in only
 
 ## Kernel Benchmark Status
-- Full-route benchmark: included (sequential_reference vs metal_multikernel_dequant_wht_sign vs metal_fused_dequant_wht_sign)
-- Ablation benchmark: included (metal_multikernel_dequant, metal_multikernel_dequant_wht, metal_multikernel_dequant_sign)
-- Fused kernel: pass (cosine 1.000, max_abs_diff 0.0 vs sequential reference)
-- K validation: pass (cosine >= 0.999, max_abs_diff <= 1e-3)
-- V validation: pass (cosine >= 0.999, max_abs_diff <= 1e-3)
+Generated from kernel_benchmark.json
+
+### Cross-Mode Equivalence (vs. Python-only gold with matching quant config)
+- All 6 modes pass gold validation across 4 shapes
+- Full-route modes: metal_multikernel_dequant_wht_sign, metal_fused_dequant_wht_sign
+- Ablation modes: metal_multikernel_dequant, metal_multikernel_dequant_wht, metal_multikernel_dequant_sign
+- Best speedup: ~30x (metal_multikernel_dequant vs sequential_reference)
+- Typical full-route speedup: ~12-21x
 - Fallback observed: no
+
+### Internal Self-Consistency (Metal retrieve vs. Python retrieve, same config)
+- All 6 modes pass internal validation across 4 shapes
+- Key cosine: 1.000000, Value cosine: 1.000000 for all full-route entries
+- No internal inconsistencies detected
+
+### Fused Kernel Standalone
+- See fused_kernel_benchmark.json for standalone fused-kernel proof
+- Cosine vs. reference: ~1.000000, max_abs_diff: 0.0
 
 ## MLX Test Status
 - Apple Silicon run: yes

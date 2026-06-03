@@ -1,6 +1,6 @@
-# RFSN v10 Main 21 — Clean Block-Aware KV Reconstruction Release
+# RFSN v10 Main 22 — Proof-Consistent Clean Block-Aware KV Reconstruction Release
 
-## Status: RFSN v10 Main 21 — Clean Block-Aware KV Reconstruction Release
+## Status: RFSN v10 Main 22 — Proof-Consistent Clean Block-Aware KV Reconstruction Release
 
 Implemented:
 - low-bit KV cache compression

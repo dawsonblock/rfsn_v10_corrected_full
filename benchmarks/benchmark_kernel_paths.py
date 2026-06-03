@@ -36,85 +36,82 @@ def cosine_similarity(a: mx.array, b: mx.array) -> float:
     return (dot / mx.maximum(norm, mx.array(1e-8))).item()
 
 
-def _make_manager(cache_dir: Path, mode: str) -> RFSNTurboQuantKVManager:
+def _manager_kwargs_for_mode(mode: str) -> dict:
+    """Return kwargs for RFSNTurboQuantKVManager for a given mode."""
+    common = {
+        "k_bits": 8,
+        "v_bits": 3,
+    }
     if mode == "sequential_reference":
-        return RFSNTurboQuantKVManager(
-            cache_dir=str(cache_dir),
-            k_bits=8,
-            v_bits=3,
-            use_wht=True,
-            use_incoherent_signs=True,
-            prefer_metal_kernels=False,
-        )
+        return {
+            **common,
+            "use_wht": True,
+            "use_incoherent_signs": True,
+            "prefer_metal_kernels": False,
+        }
     if mode == "metal_multikernel_dequant_sign":
-        return RFSNTurboQuantKVManager(
-            cache_dir=str(cache_dir),
-            k_bits=8,
-            v_bits=3,
-            use_wht=False,
-            use_incoherent_signs=True,
-            prefer_metal_kernels=True,
-            prefer_fused_kernel=False,
-            strict_metal=False,
-        )
+        return {
+            **common,
+            "use_wht": False,
+            "use_incoherent_signs": True,
+            "prefer_metal_kernels": True,
+            "prefer_fused_kernel": False,
+            "strict_metal": False,
+        }
     if mode == "metal_multikernel_dequant":
-        return RFSNTurboQuantKVManager(
-            cache_dir=str(cache_dir),
-            k_bits=8,
-            v_bits=3,
-            use_wht=False,
-            use_incoherent_signs=False,
-            prefer_metal_kernels=True,
-            prefer_fused_kernel=False,
-            strict_metal=False,
-        )
+        return {
+            **common,
+            "use_wht": False,
+            "use_incoherent_signs": False,
+            "prefer_metal_kernels": True,
+            "prefer_fused_kernel": False,
+            "strict_metal": False,
+        }
     if mode == "metal_multikernel_dequant_wht":
-        return RFSNTurboQuantKVManager(
-            cache_dir=str(cache_dir),
-            k_bits=8,
-            v_bits=3,
-            use_wht=True,
-            use_incoherent_signs=False,
-            prefer_metal_kernels=True,
-            prefer_fused_kernel=False,
-            strict_metal=False,
-        )
+        return {
+            **common,
+            "use_wht": True,
+            "use_incoherent_signs": False,
+            "prefer_metal_kernels": True,
+            "prefer_fused_kernel": False,
+            "strict_metal": False,
+        }
     if mode == "metal_multikernel_dequant_wht_sign":
-        return RFSNTurboQuantKVManager(
-            cache_dir=str(cache_dir),
-            k_bits=8,
-            v_bits=3,
-            use_wht=True,
-            use_incoherent_signs=True,
-            prefer_metal_kernels=True,
-            prefer_fused_kernel=False,
-            strict_metal=False,
-        )
+        return {
+            **common,
+            "use_wht": True,
+            "use_incoherent_signs": True,
+            "prefer_metal_kernels": True,
+            "prefer_fused_kernel": False,
+            "strict_metal": False,
+        }
     if mode == "metal_fused_dequant_wht_sign":
-        return RFSNTurboQuantKVManager(
-            cache_dir=str(cache_dir),
-            k_bits=8,
-            v_bits=3,
-            use_wht=True,
-            use_incoherent_signs=True,
-            prefer_metal_kernels=True,
-            prefer_fused_kernel=True,
-            strict_metal=False,
-        )
+        return {
+            **common,
+            "use_wht": True,
+            "use_incoherent_signs": True,
+            "prefer_metal_kernels": True,
+            "prefer_fused_kernel": True,
+            "strict_metal": False,
+        }
     raise ValueError(f"Unsupported mode: {mode}")
 
 
-def _median_retrieve_latency_ms(manager: RFSNTurboQuantKVManager, key: str, iterations: int) -> float:
-    latencies = []
-    for _ in range(iterations):
-        t0 = time.perf_counter()
-        rec = manager.retrieve(key, out_dtype=mx.float32)
-        if rec is None:
-            raise RuntimeError("Expected cache hit during retrieval benchmark")
-        mx.eval(rec[0], rec[1])
-        dt = (time.perf_counter() - t0) * 1000.0
-        latencies.append(dt)
-    return float(statistics.median(latencies))
+def _make_manager(cache_dir: Path, mode: str) -> RFSNTurboQuantKVManager:
+    return RFSNTurboQuantKVManager(
+        cache_dir=str(cache_dir),
+        **_manager_kwargs_for_mode(mode),
+    )
+
+
+def _make_internal_reference_manager(
+    cache_dir: Path, mode: str
+) -> RFSNTurboQuantKVManager:
+    """Create a Python-only (non-Metal) manager with the same quant settings."""
+    kwargs = _manager_kwargs_for_mode(mode)
+    kwargs["prefer_metal_kernels"] = False
+    kwargs["prefer_fused_kernel"] = False
+    return RFSNTurboQuantKVManager(cache_dir=str(cache_dir), **kwargs)
 
 
 def _latency_stats(latencies: list[float]) -> tuple[float, float, float]:
@@ -128,17 +125,53 @@ def _latency_stats(latencies: list[float]) -> tuple[float, float, float]:
     return mean, p50, p95
 
 
-def _bench_mode(shape: tuple[int, int, int, int], mode: str, iterations: int, base_dir: Path) -> dict:
+def _get_gold_reference(
+    shape: tuple[int, int, int, int],
+    mode: str,
+    base_dir: Path,
+) -> tuple[mx.array, mx.array, mx.array, mx.array]:
+    """Store with Python-only manager matching mode's config and return gold."""
     mx.random.seed(42)
     keys = mx.random.normal(shape)
     values = mx.random.normal(shape)
 
-    key = f"mode={mode}|shape={shape}"
+    gold_dir = base_dir / "gold" / mode / (
+        "x".join(str(v) for v in shape)
+    )
+    gold_dir.mkdir(parents=True, exist_ok=True)
+    # Use same quant settings as mode, but force Python path (no Metal)
+    kwargs = _manager_kwargs_for_mode(mode)
+    kwargs["prefer_metal_kernels"] = False
+    kwargs["prefer_fused_kernel"] = False
+    mgr = RFSNTurboQuantKVManager(cache_dir=str(gold_dir), **kwargs)
+    # Same key as metal/internal so sign seed is identical
+    key = f"bench|mode={mode}|shape={shape}"
+    mgr.store(key, keys, values, token_count=shape[2])
+
+    gold_k, gold_v = mgr.retrieve(key, out_dtype=mx.float32)
+    if gold_k is None or gold_v is None:
+        raise RuntimeError("Gold reference retrieval failed")
+    mx.eval(gold_k, gold_v)
+    return gold_k, gold_v, keys, values
+
+
+def _bench_mode(
+    shape: tuple[int, int, int, int],
+    mode: str,
+    iterations: int,
+    base_dir: Path,
+    gold_k: mx.array,
+    gold_v: mx.array,
+    raw_keys: mx.array,
+    raw_values: mx.array,
+) -> dict:
+    # Same key as gold so sign seed is identical
+    key = f"bench|mode={mode}|shape={shape}"
     mode_dir = base_dir / mode / ("x".join(str(v) for v in shape))
     mode_dir.mkdir(parents=True, exist_ok=True)
 
     manager = _make_manager(mode_dir, mode)
-    manager.store(key, keys, values, token_count=shape[2])
+    manager.store(key, raw_keys, raw_values, token_count=shape[2])
 
     latencies = []
     for _ in range(iterations):
@@ -153,35 +186,28 @@ def _bench_mode(shape: tuple[int, int, int, int], mode: str, iterations: int, ba
     k_out, v_out = manager.retrieve(key, out_dtype=mx.float32)
     mx.eval(k_out, v_out)
 
-    cache = manager.active_caches[key]
-    ref_k = manager._reconstruct_packed_dequant_wht(
-        packed=cache.k_packed,
-        scales=cache.k_scales,
-        n_values=cache.k_n_values,
-        shape=cache.shape,
-        bits=cache.k_bits,
-        seed=cache.seed,
-        use_wht=cache.use_wht,
-        use_incoherent_signs=cache.use_incoherent_signs,
-        out_dtype=mx.float32,
-    )
-    ref_v = manager._reconstruct_packed_dequant_wht(
-        packed=cache.v_packed,
-        scales=cache.v_scales,
-        n_values=cache.v_n_values,
-        shape=cache.shape,
-        bits=cache.v_bits,
-        seed=cache.seed,
-        use_wht=cache.use_wht,
-        use_incoherent_signs=cache.use_incoherent_signs,
-        out_dtype=mx.float32,
-    )
-    mx.eval(ref_k, ref_v)
+    # Cross-mode equivalence: compare against sequential_reference gold
+    k_diff_gold = mx.max(mx.abs(k_out - gold_k)).item()
+    k_cosine_gold = cosine_similarity(k_out, gold_k)
+    v_diff_gold = mx.max(mx.abs(v_out - gold_v)).item()
+    v_cosine_gold = cosine_similarity(v_out, gold_v)
 
-    k_diff = mx.max(mx.abs(k_out - ref_k)).item()
-    k_cosine = cosine_similarity(k_out, ref_k)
-    v_diff = mx.max(mx.abs(v_out - ref_v)).item()
-    v_cosine = cosine_similarity(v_out, ref_v)
+    # Internal self-consistency: compare Metal retrieve vs Python retrieve
+    # for the same stored data with the same quant settings
+    internal_dir = mode_dir / "internal_ref"
+    internal_dir.mkdir(parents=True, exist_ok=True)
+    internal_mgr = _make_internal_reference_manager(internal_dir, mode)
+    # Same key so sign seed is identical
+    internal_mgr.store(key, raw_keys, raw_values, token_count=shape[2])
+    int_k, int_v = internal_mgr.retrieve(key, out_dtype=mx.float32)
+    if int_k is None or int_v is None:
+        raise RuntimeError("Internal reference retrieval failed")
+    mx.eval(int_k, int_v)
+
+    k_diff_int = mx.max(mx.abs(k_out - int_k)).item()
+    k_cosine_int = cosine_similarity(k_out, int_k)
+    v_diff_int = mx.max(mx.abs(v_out - int_v)).item()
+    v_cosine_int = cosine_similarity(v_out, int_v)
 
     return {
         "shape": [int(v) for v in shape],
@@ -192,16 +218,25 @@ def _bench_mode(shape: tuple[int, int, int, int], mode: str, iterations: int, ba
         "latency_ms_p50": latency_p50,
         "latency_ms_p95": latency_p95,
         "kv_reconstruction_kernel": manager.last_reconstruction_kernel,
-        "fallback_used": manager.last_reconstruction_kernel == "metal_failed_fallback_reference",
-        "key_cosine_vs_reference": float(k_cosine),
-        "key_max_abs_diff_vs_reference": float(k_diff),
-        "value_cosine_vs_reference": float(v_cosine),
-        "value_max_abs_diff_vs_reference": float(v_diff),
+        "fallback_used": (
+            manager.last_reconstruction_kernel
+            == "metal_failed_fallback_reference"
+        ),
+        "key_cosine_vs_gold": float(k_cosine_gold),
+        "key_max_abs_diff_vs_gold": float(k_diff_gold),
+        "value_cosine_vs_gold": float(v_cosine_gold),
+        "value_max_abs_diff_vs_gold": float(v_diff_gold),
+        "key_cosine_vs_internal": float(k_cosine_int),
+        "key_max_abs_diff_vs_internal": float(k_diff_int),
+        "value_cosine_vs_internal": float(v_cosine_int),
+        "value_max_abs_diff_vs_internal": float(v_diff_int),
     }
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Benchmark kernel reconstruction paths")
+    parser = argparse.ArgumentParser(
+        description="Benchmark kernel reconstruction paths"
+    )
     parser.add_argument(
         "--out",
         default="artifacts/proof/main12/kernel_benchmark.json",
@@ -222,42 +257,77 @@ def main() -> None:
         "metal_fused_dequant_wht_sign",
     ]
 
+    tmp_dir = out_path.parent / "kernel_bench_tmp"
+
+    # Precompute gold references for each (shape, mode) pair
+    # so each metal mode compares against gold with matching quant config
+    gold_refs: dict[
+        str, tuple[mx.array, mx.array, mx.array, mx.array]
+    ] = {}
+    for shape in SHAPES:
+        for mode in modes:
+            ref_key = f"{mode}|{shape}"
+            gold_refs[ref_key] = _get_gold_reference(shape, mode, tmp_dir)
+
     runs: list[dict] = []
     reference_latencies: dict[str, float] = {}
 
     for shape in SHAPES:
+        shape_key = str(shape)
         for mode in modes:
+            ref_key = f"{mode}|{shape}"
+            gold_k, gold_v, raw_keys, raw_values = gold_refs[ref_key]
             row = _bench_mode(
-                shape, mode, args.iterations,
-                out_path.parent / "kernel_bench_tmp",
+                shape,
+                mode,
+                args.iterations,
+                tmp_dir,
+                gold_k,
+                gold_v,
+                raw_keys,
+                raw_values,
             )
             runs.append(row)
             if mode == "sequential_reference":
-                reference_latencies[str(tuple(shape))] = row["latency_ms_p50"]
+                reference_latencies[shape_key] = row["latency_ms_p50"]
 
     for row in runs:
         shape_key = str(tuple(row["shape"]))
-        ref_latency = reference_latencies.get(shape_key, row["latency_ms_p50"])
+        ref_latency = reference_latencies.get(
+            shape_key, row["latency_ms_p50"]
+        )
         computed_speedup = (
             float(ref_latency) / float(row["latency_ms_p50"])
             if float(row["latency_ms_p50"]) > 0
             else 0.0
         )
 
-        # Validate K and V separately
-        key_valid = (
-            float(row["key_cosine_vs_reference"]) >= COSINE_THRESHOLD
-            and float(row["key_max_abs_diff_vs_reference"])
+        # Gold validation
+        gold_key_valid = (
+            float(row["key_cosine_vs_gold"]) >= COSINE_THRESHOLD
+            and float(row["key_max_abs_diff_vs_gold"])
             <= MAX_ABS_DIFF_THRESHOLD
         )
-        value_valid = (
-            float(row["value_cosine_vs_reference"]) >= COSINE_THRESHOLD
-            and float(row["value_max_abs_diff_vs_reference"])
+        gold_value_valid = (
+            float(row["value_cosine_vs_gold"]) >= COSINE_THRESHOLD
+            and float(row["value_max_abs_diff_vs_gold"])
             <= MAX_ABS_DIFF_THRESHOLD
         )
 
-        row["key_valid"] = key_valid
-        row["value_valid"] = value_valid
+        # Internal validation
+        internal_key_valid = (
+            float(row["key_cosine_vs_internal"]) >= COSINE_THRESHOLD
+            and float(row["key_max_abs_diff_vs_internal"])
+            <= MAX_ABS_DIFF_THRESHOLD
+        )
+        internal_value_valid = (
+            float(row["value_cosine_vs_internal"]) >= COSINE_THRESHOLD
+            and float(row["value_max_abs_diff_vs_internal"])
+            <= MAX_ABS_DIFF_THRESHOLD
+        )
+
+        row["gold_valid"] = gold_key_valid and gold_value_valid
+        row["internal_valid"] = internal_key_valid and internal_value_valid
 
         # Add route classification
         full_routes = {
@@ -271,9 +341,15 @@ def main() -> None:
             row["route_class"] = "ablation"
 
         if row["mode"].startswith("metal_"):
-            invalid = bool(row["fallback_used"]) or not key_valid or not value_valid
+            invalid = (
+                bool(row["fallback_used"])
+                or not row["gold_valid"]
+                or not row["internal_valid"]
+            )
             row["status"] = "invalid" if invalid else "valid"
-            row["speedup_vs_reference"] = None if invalid else float(computed_speedup)
+            row["speedup_vs_reference"] = (
+                None if invalid else float(computed_speedup)
+            )
         else:
             row["status"] = "valid"
             row["speedup_vs_reference"] = float(computed_speedup)
@@ -284,7 +360,7 @@ def main() -> None:
             "equivalence_pass_modes": [
                 row["mode"]
                 for row in runs
-                if row["key_valid"] and row["value_valid"]
+                if row["gold_valid"] and row["internal_valid"]
             ],
             "speedup_modes": [
                 row["mode"]
@@ -292,13 +368,26 @@ def main() -> None:
                 if (
                     row["mode"].startswith("metal_")
                     and row["status"] == "valid"
+                    and row["speedup_vs_reference"] is not None
                     and row["speedup_vs_reference"] > 1.0
                 )
+            ],
+            "gold_only_pass_modes": [
+                row["mode"]
+                for row in runs
+                if row["gold_valid"] and not row["internal_valid"]
+            ],
+            "internal_only_pass_modes": [
+                row["mode"]
+                for row in runs
+                if row["internal_valid"] and not row["gold_valid"]
             ],
         },
     }
 
-    out_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    out_path.write_text(
+        json.dumps(payload, indent=2) + "\n", encoding="utf-8"
+    )
     print(f"Wrote kernel benchmark to {out_path}")
 
 

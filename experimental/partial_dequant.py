@@ -12,7 +12,7 @@ import math
 from dataclasses import dataclass
 from typing import Optional
 
-from .compat import mx
+from rfsn_v10.compat import mx
 
 
 @dataclass

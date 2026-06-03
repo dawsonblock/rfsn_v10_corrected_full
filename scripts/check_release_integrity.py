@@ -111,11 +111,11 @@ def check() -> list[str]:
         errors.append("README.md missing or unreadable")
 
     # Verify release version markers
-    expected_release = "Main 21"
+    expected_release = "Main 22"
     try:
         readme = (root / "README.md").read_text(encoding="utf-8")
         if expected_release not in readme:
-            errors.append("README does not identify Main 21")
+            errors.append("README does not identify Main 22")
     except (FileNotFoundError, IOError):
         errors.append("README.md missing for version check")
 
@@ -125,7 +125,7 @@ def check() -> list[str]:
         )
         proof = proof_path.read_text(encoding="utf-8")
         if expected_release not in proof:
-            errors.append("proof_summary.md does not identify Main 21")
+            errors.append("proof_summary.md does not identify Main 22")
     except (FileNotFoundError, IOError):
         pass  # Already reported if artifact dir missing
 
