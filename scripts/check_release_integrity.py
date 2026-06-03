@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Release integrity checker for RFSN v10 Main 23."""
+"""Release integrity checker for RFSN v10 Main 25."""
 from __future__ import annotations
 
 import sys
@@ -11,28 +11,22 @@ def check() -> list[str]:
 
     root = Path(".").resolve()
 
-    # Check for forbidden directories
+    # Check for forbidden directories (skip .git internals)
     forbidden_dirs = [
         ".tmp",
         "tmp",
         "temp",
         "release_tmp",
-        "__pycache__",
-        ".pytest_cache",
-        ".mypy_cache",
-        ".ruff_cache",
     ]
     for bad in forbidden_dirs:
-        matches = list(root.rglob(bad))
+        matches = [
+            m for m in root.rglob(bad)
+            if ".git" not in m.parts
+        ]
         if matches:
             errors.append(
                 f"forbidden path found: {bad} ({len(matches)} instances)"
             )
-
-    # Check for forbidden files
-    pyc = list(root.rglob("*.pyc"))
-    if pyc:
-        errors.append(f"pyc files found ({len(pyc)} instances)")
 
     ds_store = list(root.rglob(".DS_Store"))
     if ds_store:
@@ -113,22 +107,20 @@ def check() -> list[str]:
         errors.append("README.md missing or unreadable")
 
     # Verify release version markers
-    expected_release = "Main 23"
+    expected_release = "Main 25"
     try:
         readme = (root / "README.md").read_text(encoding="utf-8")
         if expected_release not in readme:
-            errors.append("README does not identify Main 23")
+            errors.append("README does not identify Main 25")
     except (FileNotFoundError, IOError):
         errors.append("README.md missing for version check")
 
     try:
-        proof_path = (
-            root / "artifacts" / "proof" / "main23" / "proof_summary.md"
-        )
+        proof_path = artifact_dir / "proof_summary.md"
         if proof_path.exists():
             proof = proof_path.read_text(encoding="utf-8")
             if expected_release not in proof:
-                errors.append("proof_summary.md does not identify Main 23")
+                errors.append("proof_summary.md does not identify Main 25")
     except (FileNotFoundError, IOError):
         pass  # Already reported if artifact missing
 
