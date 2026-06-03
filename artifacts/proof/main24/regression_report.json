@@ -29,10 +29,24 @@
       2048
     ]
   },
+  "per_layer_sensitivity": {
+    "layers_analyzed": 24,
+    "configs_tested": [
+      "k8_v3_gs64"
+    ]
+  },
+  "early_layer_protection": {
+    "scenarios_tested": 4,
+    "configs_tested": [
+      "k8_v3_gs64"
+    ]
+  },
   "quality_improvements": [
     "NLL metric is more stable than single-token PPL delta.",
-    "Multiple new configs pass alpha thresholds (k8_v4, k8_v5, k8_v4_gs32, k8_v5_gs32)."
+    "Multiple new configs pass alpha thresholds (k8_v4, k8_v5, k8_v4_gs32, k8_v5_gs32).",
+    "Per-layer sensitivity identifies which layers are most quantization-sensitive.",
+    "Early-layer protection tests show quality tradeoff of preserving first N layers."
   ],
   "regressions": [],
-  "generated_at": "2026-06-03T08:49:24.090999+00:00"
+  "generated_at": "2026-06-03T08:56:31.834925+00:00"
 }

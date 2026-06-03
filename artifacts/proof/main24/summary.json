@@ -1,14 +1,16 @@
 {
   "profile": "main24",
   "release": "main24",
-  "release_purpose": "Quality Tuning + Validation Repair",
-  "generated_at": "2026-06-03T08:49:24.090676+00:00",
+  "release_purpose": "Quality Tuning + Validation Repair + Layer Analysis",
+  "generated_at": "2026-06-03T08:56:31.834057+00:00",
   "files": [
     "kernel_benchmark.json",
     "fused_kernel_benchmark.json",
     "optimization_benchmark.json",
     "real_model_validation.json",
     "long_context_validation.json",
+    "per_layer_sensitivity.json",
+    "early_layer_protection.json",
     "proof_summary.md",
     "summary.json",
     "regression_report.json"
@@ -37,6 +39,14 @@
       "k8_v5_gs32"
     ]
   },
+  "per_layer_sensitivity": {
+    "status": "run",
+    "layers_analyzed": 24
+  },
+  "early_layer_protection": {
+    "status": "run",
+    "scenarios_tested": 4
+  },
   "sparse_decode": {
     "enabled_by_default": false,
     "status": "disabled"
@@ -44,6 +54,8 @@
   "notes": [
     "Replaced single-token PPL with NLL delta metric.",
     "Added k8_v4, k8_v5, k6_v6, k8_v4_gs32, k8_v5_gs32 configs.",
-    "Long-context validation includes 512/1024/2048 tokens."
+    "Long-context validation includes 512/1024/2048 tokens.",
+    "Added per-layer sensitivity analysis.",
+    "Added early-layer higher-precision protection test."
   ]
 }

@@ -1,7 +1,7 @@
 # Proof Summary — Main 24
 
-**Release**: Main 24 — Quality Tuning + Validation Repair
-**Generated**: 2026-06-03T08:49:24.091129+00:00
+**Release**: Main 24 — Quality Tuning + Validation Repair + Layer Analysis
+**Generated**: 2026-06-03T08:56:31.837946+00:00
 
 ## Real-Model Validation
 
@@ -27,6 +27,15 @@
 ## Long-Context Validation
 
 Tested at 512, 1024, and 2048 tokens.
+
+## Per-Layer Sensitivity
+
+Analyzed 24 layers individually.
+Identifies which layers are most sensitive to KV compression.
+
+## Early-Layer Protection
+
+Tested keeping first 2, 4, 6, 8 layers at fp16 while compressing deeper layers.
 
 ## Sparse Decode
 

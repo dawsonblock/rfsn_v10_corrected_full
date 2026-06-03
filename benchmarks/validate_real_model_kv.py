@@ -100,8 +100,13 @@ def _compress_decompress_past(
     past_key_values,
     config: dict[str, Any],
     device: torch.device,
+    compress_layers: set[int] | None = None,
 ) -> tuple[tuple[torch.Tensor, torch.Tensor], ...]:
-    """Compress and decompress past KV values using RFSN manager."""
+    """Compress and decompress past KV values using RFSN manager.
+
+    If compress_layers is provided, only those layer indices are compressed;
+    all others are returned unchanged (fp16 baseline).
+    """
     if config["name"] == "baseline_fp16":
         return past_key_values
 
@@ -118,6 +123,10 @@ def _compress_decompress_past(
 
     rebuilt: list[tuple[torch.Tensor, torch.Tensor]] = []
     for layer_idx, (k_t, v_t) in enumerate(past_key_values):
+        if compress_layers is not None and layer_idx not in compress_layers:
+            rebuilt.append((k_t.clone(), v_t.clone()))
+            continue
+
         k_np = k_t.detach().to("cpu", dtype=torch.float32).numpy()
         v_np = v_t.detach().to("cpu", dtype=torch.float32).numpy()
 
@@ -180,9 +189,12 @@ def _evaluate_config(
     baseline_logits: torch.Tensor,
     baseline_nll: float,
     device: torch.device,
+    compress_layers: set[int] | None = None,
 ) -> dict[str, Any]:
     if config["name"] != "baseline_fp16":
-        past_legacy = _compress_decompress_past(past_legacy, config, device)
+        past_legacy = _compress_decompress_past(
+            past_legacy, config, device, compress_layers=compress_layers
+        )
 
     past = _from_legacy_cache(past_legacy, cache_cls)
 
@@ -468,6 +480,184 @@ def _run_long_context_validation(
     return payload
 
 
+def _run_per_layer_sensitivity(
+    model_id: str,
+    tokens: int,
+    configs: list[dict[str, Any]],
+    device: torch.device,
+    out_path: Path,
+    trust_remote_code: bool = False,
+) -> dict[str, Any]:
+    """Compress each layer individually to identify sensitivity."""
+    dtype = torch.float16 if device.type == "mps" else torch.float32
+    tokenizer = AutoTokenizer.from_pretrained(
+        model_id, trust_remote_code=trust_remote_code
+    )
+    model = AutoModelForCausalLM.from_pretrained(
+        model_id, torch_dtype=dtype, trust_remote_code=trust_remote_code
+    )
+    model.to(device)
+    model.eval()
+
+    prompt_text = "The quick brown fox jumps over the lazy dog. " * 200
+    inputs = tokenizer(prompt_text, return_tensors="pt")
+    input_ids = inputs["input_ids"][:, :tokens].to(device)
+    if input_ids.shape[1] < 2:
+        raise ValueError("Need at least 2 tokens")
+    context_ids = input_ids[:, :-1]
+    decode_token = input_ids[:, -1:]
+
+    with torch.no_grad():
+        baseline_ctx = model(input_ids=context_ids, use_cache=True)
+    baseline_legacy, baseline_cache_cls = _to_legacy_cache(
+        baseline_ctx.past_key_values
+    )
+    baseline_past = _from_legacy_cache(baseline_legacy, baseline_cache_cls)
+    baseline_logits, baseline_nll = _decode_nll(
+        model, baseline_past, decode_token
+    )
+
+    num_layers = len(baseline_legacy)
+    # Use the first non-baseline config for sensitivity testing
+    test_configs = [c for c in configs if c["name"] != "baseline_fp16"]
+    if not test_configs:
+        test_configs = [configs[0]]
+
+    all_results: list[dict[str, Any]] = []
+    for config in test_configs:
+        print(f"Per-layer sensitivity: {config['name']} ...")
+        layer_results: list[dict[str, Any]] = []
+        for layer_idx in range(num_layers):
+            result = _evaluate_config(
+                config,
+                model=model,
+                tokenizer=tokenizer,
+                past_legacy=_clone_legacy_cache(baseline_legacy),
+                cache_cls=baseline_cache_cls,
+                decode_token=decode_token,
+                baseline_logits=baseline_logits,
+                baseline_nll=baseline_nll,
+                device=device,
+                compress_layers={layer_idx},
+            )
+            layer_results.append({
+                "layer": layer_idx,
+                "cosine": result["logit_cosine_mean"],
+                "top1_match": result["top1_match_rate"],
+                "top5_overlap": result["top5_overlap_mean"],
+                "nll_delta": result.get("avg_nll_delta", 0.0),
+                "kl": result["kl_divergence_mean"],
+            })
+        all_results.append({
+            "config_name": config["name"],
+            "num_layers": num_layers,
+            "layers": layer_results,
+        })
+
+    payload: dict[str, Any] = {
+        "release": "main24",
+        "analysis": "per_layer_sensitivity",
+        "model": model_id,
+        "tokens_tested": tokens,
+        "configs": all_results,
+    }
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    print(f"Wrote per-layer sensitivity to {out_path}")
+    return payload
+
+
+def _run_early_layer_protection(
+    model_id: str,
+    tokens: int,
+    configs: list[dict[str, Any]],
+    device: torch.device,
+    out_path: Path,
+    trust_remote_code: bool = False,
+) -> dict[str, Any]:
+    """Test keeping first N layers at fp16 while compressing the rest."""
+    dtype = torch.float16 if device.type == "mps" else torch.float32
+    tokenizer = AutoTokenizer.from_pretrained(
+        model_id, trust_remote_code=trust_remote_code
+    )
+    model = AutoModelForCausalLM.from_pretrained(
+        model_id, torch_dtype=dtype, trust_remote_code=trust_remote_code
+    )
+    model.to(device)
+    model.eval()
+
+    prompt_text = "The quick brown fox jumps over the lazy dog. " * 200
+    inputs = tokenizer(prompt_text, return_tensors="pt")
+    input_ids = inputs["input_ids"][:, :tokens].to(device)
+    if input_ids.shape[1] < 2:
+        raise ValueError("Need at least 2 tokens")
+    context_ids = input_ids[:, :-1]
+    decode_token = input_ids[:, -1:]
+
+    with torch.no_grad():
+        baseline_ctx = model(input_ids=context_ids, use_cache=True)
+    baseline_legacy, baseline_cache_cls = _to_legacy_cache(
+        baseline_ctx.past_key_values
+    )
+    baseline_past = _from_legacy_cache(baseline_legacy, baseline_cache_cls)
+    baseline_logits, baseline_nll = _decode_nll(
+        model, baseline_past, decode_token
+    )
+
+    num_layers = len(baseline_legacy)
+    protected_counts = [2, 4, 6, 8]
+    test_configs = [c for c in configs if c["name"] != "baseline_fp16"]
+    if not test_configs:
+        test_configs = [configs[0]]
+
+    all_results: list[dict[str, Any]] = []
+    for config in test_configs:
+        print(f"Early-layer protection: {config['name']} ...")
+        protection_results: list[dict[str, Any]] = []
+        for protected in protected_counts:
+            if protected >= num_layers:
+                continue
+            compress_set = set(range(protected, num_layers))
+            result = _evaluate_config(
+                config,
+                model=model,
+                tokenizer=tokenizer,
+                past_legacy=_clone_legacy_cache(baseline_legacy),
+                cache_cls=baseline_cache_cls,
+                decode_token=decode_token,
+                baseline_logits=baseline_logits,
+                baseline_nll=baseline_nll,
+                device=device,
+                compress_layers=compress_set,
+            )
+            protection_results.append({
+                "protected_layers": protected,
+                "cosine": result["logit_cosine_mean"],
+                "top1_match": result["top1_match_rate"],
+                "top5_overlap": result["top5_overlap_mean"],
+                "nll_delta": result.get("avg_nll_delta", 0.0),
+                "kl": result["kl_divergence_mean"],
+                "status": _determine_status(result, baseline_nll=baseline_nll),
+            })
+        all_results.append({
+            "config_name": config["name"],
+            "num_layers": num_layers,
+            "scenarios": protection_results,
+        })
+
+    payload: dict[str, Any] = {
+        "release": "main24",
+        "analysis": "early_layer_protection",
+        "model": model_id,
+        "tokens_tested": tokens,
+        "configs": all_results,
+    }
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    print(f"Wrote early-layer protection to {out_path}")
+    return payload
+
+
 def _get_hardware_info() -> dict[str, Any]:
     import platform
     import subprocess
@@ -544,6 +734,26 @@ def main() -> None:
         action="store_true",
         help="Trust remote code when loading the model from HuggingFace",
     )
+    parser.add_argument(
+        "--per-layer-sensitivity",
+        action="store_true",
+        help="Run per-layer sensitivity analysis",
+    )
+    parser.add_argument(
+        "--per-layer-out",
+        default="artifacts/proof/main24/per_layer_sensitivity.json",
+        help="Output path for per-layer sensitivity",
+    )
+    parser.add_argument(
+        "--early-layer-protection",
+        action="store_true",
+        help="Run early-layer higher-precision test",
+    )
+    parser.add_argument(
+        "--early-layer-out",
+        default="artifacts/proof/main24/early_layer_protection.json",
+        help="Output path for early-layer protection",
+    )
     args = parser.parse_args()
 
     device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
@@ -578,8 +788,33 @@ def main() -> None:
             trust_remote_code=args.trust_remote_code,
         )
 
+    # Per-layer sensitivity analysis
+    if args.per_layer_sensitivity:
+        _run_per_layer_sensitivity(
+            model_id=args.model,
+            tokens=args.tokens,
+            configs=configs,
+            device=device,
+            out_path=Path(args.per_layer_out),
+            trust_remote_code=args.trust_remote_code,
+        )
+
+    # Early-layer higher-precision test
+    if args.early_layer_protection:
+        _run_early_layer_protection(
+            model_id=args.model,
+            tokens=args.tokens,
+            configs=configs,
+            device=device,
+            out_path=Path(args.early_layer_out),
+            trust_remote_code=args.trust_remote_code,
+        )
+
     if exit_code != 0:
-        print("FAIL: one or more configs did not meet quality thresholds.", file=sys.stderr)
+        print(
+            "FAIL: one or more configs did not meet quality thresholds.",
+            file=sys.stderr,
+        )
         sys.exit(exit_code)
 
 
