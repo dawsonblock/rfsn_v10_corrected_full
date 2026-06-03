@@ -1119,8 +1119,10 @@ class RFSNTurboQuantKVManager:
             idx_mx = mx.array(token_indices, dtype=mx.uint32)
             return k_full[:, :, idx_mx, :], v_full[:, :, idx_mx, :]
 
-        k_blocks = []
-        v_blocks = []
+        k_blocks: list[mx.array] = []
+        v_blocks: list[mx.array] = []
+        t_global_blocks: list[mx.array] = []
+
         for blk in sorted(set(block_indices)):
             start = blk * cache.block_size
             end = min(start + cache.block_size, t)
@@ -1158,25 +1160,18 @@ class RFSNTurboQuantKVManager:
             k_blocks.append(k_block)
             v_blocks.append(v_block)
 
+            if cache.use_incoherent_signs:
+                t_global_blocks.append(
+                    mx.arange(start, end, dtype=mx.uint32)
+                )
+
         k_result = mx.concatenate(k_blocks, axis=2)
         v_result = mx.concatenate(v_blocks, axis=2)
 
         if cache.use_incoherent_signs:
-            # Apply signs once after concatenation.  Build global flat
-            # indices that match the row-major layout of the concatenated
-            # result by mapping each local token position to its original
-            # global token position.
-            t_global_blocks = []
-            for blk in sorted(set(block_indices)):
-                start = blk * cache.block_size
-                end = min(start + cache.block_size, t)
-                t_global_blocks.append(
-                    mx.arange(start, end, dtype=mx.uint32)
-                )
             t_global = mx.concatenate(t_global_blocks).reshape(
                 1, 1, -1, 1
             )
-
             b_idx = mx.arange(_b, dtype=mx.uint32).reshape(_b, 1, 1, 1)
             h_idx = mx.arange(_h, dtype=mx.uint32).reshape(1, _h, 1, 1)
             d_idx = mx.arange(_d, dtype=mx.uint32).reshape(1, 1, 1, _d)
