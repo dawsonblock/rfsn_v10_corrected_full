@@ -1,6 +1,6 @@
 # MLX Test Summary
 
-Release: Main 18
+Release: Main 21
 Date: 2026-06-02
 
 Hardware:

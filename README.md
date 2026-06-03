@@ -1,6 +1,6 @@
-# RFSN v10 Main 18 — Fused-Kernel Coherence + Proof Repair
+# RFSN v10 Main 21 — Clean Block-Aware KV Reconstruction Release
 
-## Status: RFSN v10 Main 18 — Fused-Kernel Coherence + Proof Repair
+## Status: RFSN v10 Main 21 — Clean Block-Aware KV Reconstruction Release
 
 Implemented:
 - low-bit KV cache compression
@@ -71,6 +71,7 @@ RFSN v10 is an alpha quantized KV-cache + decode-time sparse-attention runtime f
 Kernel status:
 - Implemented: Metal sign kernel, Metal packed-dequant kernel, Metal WHT64 kernel, multi-kernel Metal reconstruction route, fused packed-dequant-WHT-sign Metal kernel source path
 - Proof validation: fused route proven by fused_kernel_benchmark.json (cosine 1.000, max_abs_diff 0.0)
+- Block-aware retrieval: selected-block reconstruction (`retrieve_blocks()`) uses per-block multi-kernel reconstruction with global-index sign correction. It does not always use the fused full-route kernel.
 
 ## Requirements
 - Apple Silicon Mac (ARM64)
@@ -238,10 +239,10 @@ python3 scripts/profile_memory.py
 ⚠ Sparse quality remains warning-scoped; sparse decode defaults to disabled
 ⚠ Production hardening and end-to-end real-model validation remain in progress
 ❌ Disk persistence (planned for future)
-❌ Partial dequantization (optional optimization)
+❌ True arbitrary partial dequantization (selected-block reconstruction exists via retrieve_blocks(); arbitrary token-level partial dequant remains experimental)
 
 ## Next Steps
 1. Run benchmarks to get performance numbers on your hardware
 2. Validate with a real LLM (e.g., Llama 3 8B via mlx-lm)
 3. Consider adding disk persistence for long-running workloads
-4. Explore partial dequantization for further latency improvements
+4. Explore arbitrary token-level partial dequantization (experimental; selected-block reconstruction already exists)

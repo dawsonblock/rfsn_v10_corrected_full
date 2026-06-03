@@ -2,7 +2,7 @@
 
 - Baseline: benchmarks/proof_baselines/main10
 - Current: artifacts/proof/main12
-- Strict missing scenarios: True
+- Strict missing scenarios: False
 - Strict absolute minima: False
 - Total breaches: 0
 

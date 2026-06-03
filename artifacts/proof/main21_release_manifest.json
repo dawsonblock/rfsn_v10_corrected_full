@@ -1,0 +1,20 @@
+{
+  "release": "main21",
+  "title": "Clean Block-Aware KV Reconstruction Release",
+  "purpose": "Clean packaging, retrieve_blocks validation, stale doc correction, and optimization proof integration",
+  "build_date": "2026-06-02",
+  "fixed_from_main20": [
+    "removed nested zip",
+    "fixed non-MLX pytest collection",
+    "updated docs from Main18 to Main21",
+    "validated retrieve_blocks inputs",
+    "integrated optimization benchmark summary"
+  ],
+  "not_claimed": [
+    "production readiness",
+    "sparse decode safety",
+    "real non-random LLM validation",
+    "polar quantization",
+    "true arbitrary partial dequantization"
+  ]
+}

@@ -53,10 +53,12 @@ def _run_metal_kernel(
 
 def wht64_metal(
     x: mx.array,
-    out_dtype: mx.Dtype = mx.float32,
+    out_dtype=None,
 ) -> mx.array:
     """Apply normalized WHT over contiguous 64-value blocks with Metal."""
     ensure_mlx_available()
+    if out_dtype is None:
+        out_dtype = mx.float32
     if not hasattr(mx.fast, "metal_kernel"):
         raise KernelRouteError("metal_kernel_api_unavailable")
     if x.size == 0:
@@ -225,10 +227,12 @@ def packed_dequant_metal(
     n_values: int,
     bits: int,
     group_size: int = 64,
-    out_dtype: mx.Dtype = mx.float32,
+    out_dtype=None,
 ) -> mx.array:
     """Dequantize packed symmetric codes using a custom metal kernel."""
     ensure_mlx_available()
+    if out_dtype is None:
+        out_dtype = mx.float32
     if not hasattr(mx.fast, "metal_kernel"):
         raise KernelRouteError("metal_kernel_api_unavailable")
     if bits < 2 or bits > 8:
@@ -320,7 +324,7 @@ def packed_dequant_wht_sign_metal(
     bits: int,
     group_size: int = 64,
     seed: int = 0,
-    out_dtype: mx.Dtype = mx.float32,
+    out_dtype=None,
 ) -> mx.array:
     """Fused packed-dequant + WHT + sign operations in a single Metal kernel.
 
@@ -343,6 +347,8 @@ def packed_dequant_wht_sign_metal(
         Dequantized, WHT-transformed, and sign-applied values
     """
     ensure_mlx_available()
+    if out_dtype is None:
+        out_dtype = mx.float32
     if not hasattr(mx.fast, "metal_kernel"):
         raise KernelRouteError("metal_kernel_api_unavailable")
     if bits < 2 or bits > 8:

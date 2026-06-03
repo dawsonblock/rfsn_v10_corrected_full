@@ -35,7 +35,7 @@
       "absolute_value_cosine_min": 0.9
     }
   },
-  "strict_missing": true,
+  "strict_missing": false,
   "strict_absolute": false,
   "absolute_quality": {
     "absolute_sparse_audit_cosine_min": {

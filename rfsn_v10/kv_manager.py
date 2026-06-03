@@ -462,7 +462,7 @@ class RFSNTurboQuantKVManager:
         seed: int,
         use_wht: Optional[bool] = None,
         use_incoherent_signs: Optional[bool] = None,
-        out_dtype: mx.Dtype = mx.float32,
+        out_dtype=None,
         use_incoherent: Optional[bool] = None,
     ) -> mx.array:
         """Packed-dequant-WHT reconstruction: unpack → dequant →
@@ -472,6 +472,8 @@ class RFSNTurboQuantKVManager:
             ValueError: If any validation fails (out_dtype, shape product,
                 packed buffer size, scale count).
         """
+        if out_dtype is None:
+            out_dtype = mx.float32
         # Validate out_dtype
         if out_dtype not in (mx.float32, mx.float16):
             raise ValueError(
@@ -993,7 +995,7 @@ class RFSNTurboQuantKVManager:
     def retrieve(
         self,
         skill_pattern: str,
-        out_dtype: mx.Dtype = mx.float32,
+        out_dtype=None,
     ) -> Optional[tuple[mx.array, mx.array]]:
         """Retrieve and dequantize KV cache.
 
@@ -1002,6 +1004,8 @@ class RFSNTurboQuantKVManager:
         Raises:
             ValueError: If format version or metadata mismatches are detected.
         """
+        if out_dtype is None:
+            out_dtype = mx.float32
         if skill_pattern not in self.active_caches:
             return None
 
@@ -1070,18 +1074,22 @@ class RFSNTurboQuantKVManager:
         skill_pattern: str,
         block_indices: list[int],
         block_size: int = 64,
-        out_dtype: mx.Dtype = mx.float32,
+        out_dtype=None,
     ) -> Optional[tuple[mx.array, mx.array]]:
-        """Retrieve and dequantize only selected token blocks.
+        """Retrieve selected token blocks from a compressed KV cache.
 
-        This reconstructs the full cache entry internally, then slices
-        along the token dimension to return only the requested blocks.
-        The reconstruction cost is the same as a full retrieve; the
-        savings are in memory bandwidth and downstream compute.
+        For block-aware cache entries, non-contiguous block selections
+        reconstruct only the selected block payloads using stored packed/scales
+        offsets, then apply global-index sign correction.
+        For contiguous-prefix or legacy cache entries, this may fall back to
+        full retrieve then slice.
+
+        This is selected-block reconstruction, not arbitrary token-level partial
+        dequantization.
 
         Args:
             skill_pattern: Cache key to retrieve.
-            block_indices: Sorted list of 0-based block indices to keep.
+            block_indices: List of 0-based block indices to keep.
             block_size: Tokens per block (must match attention block_size).
             out_dtype: Output dtype (float32 or float16).
 
@@ -1091,25 +1099,39 @@ class RFSNTurboQuantKVManager:
             Returns None if the cache key is not found.
 
         Raises:
-            ValueError: If block_indices is empty or out of range.
+            ValueError: If block_indices is empty, out of range, or negative.
+            ValueError: If block_size is not positive.
         """
+        if out_dtype is None:
+            out_dtype = mx.float32
         if skill_pattern not in self.active_caches:
             return None
 
         cache = self.active_caches[skill_pattern]
         cache.last_used = time.monotonic()
 
+        if block_size <= 0:
+            raise ValueError(
+                f"block_size must be positive, got {block_size}"
+            )
+
         if not block_indices:
             raise ValueError("block_indices must not be empty")
 
+        if any(int(i) < 0 for i in block_indices):
+            raise ValueError("block indices must be non-negative")
+
+        block_indices = sorted(set(int(i) for i in block_indices))
+
         _b, _h, t, _d = cache.shape
         max_blocks = max(1, (t + block_size - 1) // block_size)
-        if max(block_indices) >= max_blocks:
+        if block_indices[-1] >= max_blocks:
             raise ValueError(
-                f"block index {max(block_indices)} >= max_blocks {max_blocks}"
+                f"block index out of range: max valid is {max_blocks - 1}, "
+                f"got {block_indices[-1]}"
             )
 
-        sorted_blocks = sorted(set(block_indices))
+        sorted_blocks = block_indices
 
         # Fast path: contiguous blocks starting from 0 can reuse the
         # cached full reconstruction from retrieve() and just slice.

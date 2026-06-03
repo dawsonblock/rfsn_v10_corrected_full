@@ -1,6 +1,6 @@
 # main12 Proof Summary
 
-Release: Main 18 — Fused-Kernel Coherence + Proof Repair
+Release: Main 21 — Clean Block-Aware KV Reconstruction Release
 Generated: 2026-06-02T07:26:04.849859+00:00
 
 ## KV Cache Status
@@ -63,6 +63,19 @@ Generated: 2026-06-02T07:26:04.849859+00:00
 - WARNING_UNSAFE_FOR_LLM_DEPLOYMENT
 - Sparse deployment threshold met: no
 - Recommended default: dense (sparse decode remains experimental and should default to disabled)
+
+## Optimization Sweep
+- Configurations tested: 8
+- Shapes tested: 4
+- Total rows: 32
+- Best quality config: 4bit_4_4_gs64 (worst cosine ~0.99424)
+- Baseline config: baseline_8_3_gs64 (worst cosine ~0.96998)
+- Rejected configs: 2-bit variants (worst cosine ~0.70094 to ~0.78041)
+- Optimization sweep is included as tabular JSON only.
+
+Recommended default remains 8-bit K / 3-bit V / group_size 64 for compression-oriented testing.
+4-bit K / 4-bit V / group_size 64 is the quality-oriented candidate.
+2-bit configurations are rejected for current use.
 
 ## Next Checks
 - Compare these artifacts against previous runs for trend regressions.
