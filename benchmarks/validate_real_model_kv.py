@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Main 23 real-model KV validation runner.
+"""Main 25 real-model KV validation runner.
 
 Runs a HuggingFace causal LM (auto-downloaded) in baseline and compressed modes.
 Compresses KV past tensors via RFSN TurboQuant, then decodes and compares logits.
@@ -60,21 +60,34 @@ def _parse_config(name: str) -> dict[str, Any]:
     return {"name": name, "k_bits": k_bits, "v_bits": v_bits, "group_size": group_size}
 
 
+def _has_nan_or_inf(t: torch.Tensor) -> bool:
+    tf = t.float()
+    return bool(torch.isnan(tf).any() or torch.isinf(tf).any())
+
+
 def _cosine(a: torch.Tensor, b: torch.Tensor) -> float:
     a_f = a.reshape(-1).float()
     b_f = b.reshape(-1).float()
+    if _has_nan_or_inf(a_f) or _has_nan_or_inf(b_f):
+        return float("nan")
     return float(F.cosine_similarity(a_f, b_f, dim=0).item())
 
 
 def _kl_div(p_logits: torch.Tensor, q_logits: torch.Tensor) -> float:
-    p = F.softmax(p_logits.float(), dim=-1)
-    q = F.softmax(q_logits.float(), dim=-1)
+    p_f = p_logits.float()
+    q_f = q_logits.float()
+    if _has_nan_or_inf(p_f) or _has_nan_or_inf(q_f):
+        return float("nan")
+    p = F.softmax(p_f, dim=-1)
+    q = F.softmax(q_f, dim=-1)
     eps = 1e-10
     kl = torch.sum(p * torch.log((p + eps) / (q + eps)))
     return float(kl.item())
 
 
 def _topk_overlap(a: torch.Tensor, b: torch.Tensor, k: int) -> float:
+    if _has_nan_or_inf(a) or _has_nan_or_inf(b):
+        return float("nan")
     ai = set(torch.topk(a, k=k, dim=-1).indices[0].tolist())
     bi = set(torch.topk(b, k=k, dim=-1).indices[0].tolist())
     if not ai:
@@ -85,15 +98,50 @@ def _topk_overlap(a: torch.Tensor, b: torch.Tensor, k: int) -> float:
 def _decode_nll(
     model, past, decode_token: torch.Tensor,
 ) -> tuple[torch.Tensor, float]:
-    """Decode a single token and return (logits, nll)."""
+    """Decode one token and return (logits_fp32, nll)."""
     with torch.no_grad():
         out = model(
             input_ids=decode_token, past_key_values=past, use_cache=True
         )
-    logits = out.logits[:, -1, :]
+    logits = out.logits[:, -1, :].float()
+    if _has_nan_or_inf(logits):
+        return logits, float("nan")
     target = decode_token[:, 0]
-    nll = float(F.cross_entropy(logits.float(), target).item())
+    nll = float(F.cross_entropy(logits, target).item())
     return logits, nll
+
+
+def _decode_nll_multi(
+    model,
+    past,
+    decode_tokens: torch.Tensor,
+    n_positions: int = 5,
+) -> tuple[torch.Tensor, float]:
+    """Auto-regressive multi-position decode; return (first_logits, avg_nll)."""
+    n = min(n_positions, decode_tokens.shape[1])
+    first_logits: torch.Tensor | None = None
+    nlls: list[float] = []
+    current_past = past
+    for i in range(n):
+        tok = decode_tokens[:, i : i + 1]
+        with torch.no_grad():
+            out = model(
+                input_ids=tok,
+                past_key_values=current_past,
+                use_cache=True,
+            )
+        logits = out.logits[:, -1, :].float()
+        current_past = out.past_key_values
+        if first_logits is None:
+            first_logits = logits
+        if _has_nan_or_inf(logits):
+            return logits, float("nan")
+        nll = float(F.cross_entropy(logits, tok[:, 0]).item())
+        nlls.append(nll)
+    if first_logits is None or not nlls:
+        dummy = torch.zeros(1, 1)
+        return dummy, float("nan")
+    return first_logits, float(sum(nlls) / len(nlls))
 
 
 def _compress_decompress_past(
@@ -185,11 +233,12 @@ def _evaluate_config(
     tokenizer,
     past_legacy,
     cache_cls,
-    decode_token: torch.Tensor,
+    decode_tokens: torch.Tensor,
     baseline_logits: torch.Tensor,
     baseline_nll: float,
     device: torch.device,
     compress_layers: set[int] | None = None,
+    n_decode_positions: int = 5,
 ) -> dict[str, Any]:
     if config["name"] != "baseline_fp16":
         past_legacy = _compress_decompress_past(
@@ -199,18 +248,26 @@ def _evaluate_config(
     past = _from_legacy_cache(past_legacy, cache_cls)
 
     t0 = time.perf_counter()
-    logits, nll = _decode_nll(model, past, decode_token)
+    logits, nll = _decode_nll_multi(
+        model, past, decode_tokens, n_positions=n_decode_positions
+    )
     dt = (time.perf_counter() - t0) * 1000.0
 
+    nan_logits = _has_nan_or_inf(logits)
     cosine = _cosine(logits, baseline_logits)
-    max_abs_diff = float(
-        torch.max(torch.abs(logits - baseline_logits)).item()
-    )
-    top1_match = float(
-        torch.argmax(logits, dim=-1).item()
-        == torch.argmax(baseline_logits, dim=-1).item()
-    )
-    top5 = _topk_overlap(logits, baseline_logits, k=5)
+    if nan_logits or _has_nan_or_inf(baseline_logits):
+        max_abs_diff = float("nan")
+        top1_match = float("nan")
+        top5 = float("nan")
+    else:
+        max_abs_diff = float(
+            torch.max(torch.abs(logits - baseline_logits)).item()
+        )
+        top1_match = float(
+            torch.argmax(logits, dim=-1).item()
+            == torch.argmax(baseline_logits, dim=-1).item()
+        )
+        top5 = _topk_overlap(logits, baseline_logits, k=5)
     kl = _kl_div(baseline_logits, logits)
 
     return {
@@ -224,7 +281,7 @@ def _evaluate_config(
         "top1_match_rate": top1_match,
         "top5_overlap_mean": top5,
         "avg_nll_delta": nll - baseline_nll,
-        "token_positions_evaluated": 1,
+        "token_positions_evaluated": n_decode_positions,
         "kl_divergence_mean": kl,
         "latency_ms": dt,
         "route_used": "retrieve"
@@ -233,10 +290,36 @@ def _evaluate_config(
     }
 
 
+def _is_nan_result(result: dict[str, Any]) -> bool:
+    """Return True if any primary metric is NaN or Inf."""
+    for key in (
+        "logit_cosine_mean",
+        "logit_cosine_min",
+        "avg_nll_delta",
+        "kl_divergence_mean",
+        "top1_match_rate",
+        "top5_overlap_mean",
+    ):
+        v = result.get(key)
+        if v is None:
+            continue
+        try:
+            if math.isnan(v) or math.isinf(v):
+                return True
+        except TypeError:
+            pass
+    return False
+
+
 def _determine_status(result: dict[str, Any], *, baseline_nll: float = 0.0) -> str:
     """Apply alpha pass thresholds honestly."""
     if result["name"] == "baseline_fp16":
+        if _is_nan_result(result):
+            return "nan_fail"
         return "reference"
+
+    if _is_nan_result(result):
+        return "nan_fail"
 
     nll_delta = abs(result.get("avg_nll_delta", 0.0))
 
@@ -289,8 +372,8 @@ def _run_real_model_validation(
         raise ValueError("Need at least 2 tokens")
 
     input_ids = input_ids.to(device)
-    context_ids = input_ids[:, :-1]
-    decode_token = input_ids[:, -1:]
+    context_ids = input_ids[:, :-6]
+    decode_tokens = input_ids[:, -6:]
 
     with torch.no_grad():
         baseline_ctx = model(input_ids=context_ids, use_cache=True)
@@ -298,8 +381,8 @@ def _run_real_model_validation(
         baseline_ctx.past_key_values
     )
     baseline_past = _from_legacy_cache(baseline_legacy, baseline_cache_cls)
-    baseline_logits, baseline_nll = _decode_nll(
-        model, baseline_past, decode_token
+    baseline_logits, baseline_nll = _decode_nll_multi(
+        model, baseline_past, decode_tokens, n_positions=5
     )
 
     config_results: list[dict[str, Any]] = []
@@ -311,7 +394,7 @@ def _run_real_model_validation(
             tokenizer=tokenizer,
             past_legacy=_clone_legacy_cache(baseline_legacy),
             cache_cls=baseline_cache_cls,
-            decode_token=decode_token,
+            decode_tokens=decode_tokens,
             baseline_logits=baseline_logits,
             baseline_nll=baseline_nll,
             device=device,
@@ -329,7 +412,7 @@ def _run_real_model_validation(
         )
 
     payload: dict[str, Any] = {
-        "release": "main24",
+        "release": "main25",
         "validation_class": "real_non_random_model_validation",
         "model": model_id,
         "hardware": _get_hardware_info(),
@@ -356,7 +439,8 @@ def _run_long_context_validation(
     out_path: Path,
     trust_remote_code: bool = False,
 ) -> dict[str, Any]:
-    dtype = torch.float16 if device.type == "mps" else torch.float32
+    # Use float32 on MPS to avoid fp16 overflow at longer sequence lengths
+    dtype = torch.float32
 
     tokenizer = AutoTokenizer.from_pretrained(
         model_id, trust_remote_code=trust_remote_code
@@ -378,8 +462,8 @@ def _run_long_context_validation(
         input_ids = all_input_ids[:, :ctx_tokens].to(device)
         if input_ids.shape[1] < 2:
             continue
-        context_ids = input_ids[:, :-1]
-        decode_token = input_ids[:, -1:]
+        context_ids = input_ids[:, :-6]
+        decode_tokens = input_ids[:, -6:]
 
         with torch.no_grad():
             baseline_ctx = model(input_ids=context_ids, use_cache=True)
@@ -387,8 +471,8 @@ def _run_long_context_validation(
             baseline_ctx.past_key_values
         )
         baseline_past = _from_legacy_cache(baseline_legacy, baseline_cache_cls)
-        baseline_logits, baseline_nll = _decode_nll(
-            model, baseline_past, decode_token
+        baseline_logits, baseline_nll = _decode_nll_multi(
+            model, baseline_past, decode_tokens, n_positions=5
         )
 
         config_results: list[dict[str, Any]] = []
@@ -400,7 +484,7 @@ def _run_long_context_validation(
                     tokenizer=tokenizer,
                     past_legacy=_clone_legacy_cache(baseline_legacy),
                     cache_cls=baseline_cache_cls,
-                    decode_token=decode_token,
+                    decode_tokens=decode_tokens,
                     baseline_logits=baseline_logits,
                     baseline_nll=baseline_nll,
                     device=device,
@@ -451,19 +535,25 @@ def _run_long_context_validation(
         return best
 
     def _recommended(ctxs):
-        # Default to k8_v3 if it passes, else k4_v4, else baseline
-        for ctx in ctxs:
-            for c in ctx["configs"]:
-                if c.get("name") == "k8_v3_gs64" and c.get("status") == "pass":
-                    return "k8_v3_gs64"
-        for ctx in ctxs:
-            for c in ctx["configs"]:
-                if c.get("name") == "k4_v4_gs64" and c.get("status") == "pass":
-                    return "k4_v4_gs64"
+        # Preference order; k4_v4_gs64 rejected (fails alpha thresholds)
+        for prefer in (
+            "k8_v5_gs64",
+            "k8_v5_gs32",
+            "k8_v4_gs64",
+            "k8_v4_gs32",
+            "k8_v3_gs64",
+        ):
+            for ctx in ctxs:
+                for c in ctx["configs"]:
+                    if (
+                        c.get("name") == prefer
+                        and c.get("status") == "pass"
+                    ):
+                        return prefer
         return "baseline_fp16"
 
     payload: dict[str, Any] = {
-        "release": "main24",
+        "release": "main25",
         "model": model_id,
         "contexts": context_entries,
         "summary": {
@@ -504,8 +594,8 @@ def _run_per_layer_sensitivity(
     input_ids = inputs["input_ids"][:, :tokens].to(device)
     if input_ids.shape[1] < 2:
         raise ValueError("Need at least 2 tokens")
-    context_ids = input_ids[:, :-1]
-    decode_token = input_ids[:, -1:]
+    context_ids = input_ids[:, :-6]
+    decode_tokens = input_ids[:, -6:]
 
     with torch.no_grad():
         baseline_ctx = model(input_ids=context_ids, use_cache=True)
@@ -513,8 +603,8 @@ def _run_per_layer_sensitivity(
         baseline_ctx.past_key_values
     )
     baseline_past = _from_legacy_cache(baseline_legacy, baseline_cache_cls)
-    baseline_logits, baseline_nll = _decode_nll(
-        model, baseline_past, decode_token
+    baseline_logits, baseline_nll = _decode_nll_multi(
+        model, baseline_past, decode_tokens, n_positions=5
     )
 
     num_layers = len(baseline_legacy)
@@ -534,7 +624,7 @@ def _run_per_layer_sensitivity(
                 tokenizer=tokenizer,
                 past_legacy=_clone_legacy_cache(baseline_legacy),
                 cache_cls=baseline_cache_cls,
-                decode_token=decode_token,
+                decode_tokens=decode_tokens,
                 baseline_logits=baseline_logits,
                 baseline_nll=baseline_nll,
                 device=device,
@@ -555,7 +645,7 @@ def _run_per_layer_sensitivity(
         })
 
     payload: dict[str, Any] = {
-        "release": "main24",
+        "release": "main25",
         "analysis": "per_layer_sensitivity",
         "model": model_id,
         "tokens_tested": tokens,
@@ -591,8 +681,8 @@ def _run_early_layer_protection(
     input_ids = inputs["input_ids"][:, :tokens].to(device)
     if input_ids.shape[1] < 2:
         raise ValueError("Need at least 2 tokens")
-    context_ids = input_ids[:, :-1]
-    decode_token = input_ids[:, -1:]
+    context_ids = input_ids[:, :-6]
+    decode_tokens = input_ids[:, -6:]
 
     with torch.no_grad():
         baseline_ctx = model(input_ids=context_ids, use_cache=True)
@@ -600,8 +690,8 @@ def _run_early_layer_protection(
         baseline_ctx.past_key_values
     )
     baseline_past = _from_legacy_cache(baseline_legacy, baseline_cache_cls)
-    baseline_logits, baseline_nll = _decode_nll(
-        model, baseline_past, decode_token
+    baseline_logits, baseline_nll = _decode_nll_multi(
+        model, baseline_past, decode_tokens, n_positions=5
     )
 
     num_layers = len(baseline_legacy)
@@ -624,7 +714,7 @@ def _run_early_layer_protection(
                 tokenizer=tokenizer,
                 past_legacy=_clone_legacy_cache(baseline_legacy),
                 cache_cls=baseline_cache_cls,
-                decode_token=decode_token,
+                decode_tokens=decode_tokens,
                 baseline_logits=baseline_logits,
                 baseline_nll=baseline_nll,
                 device=device,
@@ -646,7 +736,7 @@ def _run_early_layer_protection(
         })
 
     payload: dict[str, Any] = {
-        "release": "main24",
+        "release": "main25",
         "analysis": "early_layer_protection",
         "model": model_id,
         "tokens_tested": tokens,
@@ -721,12 +811,12 @@ def main() -> None:
     )
     parser.add_argument(
         "--out",
-        default="artifacts/proof/main24/real_model_validation.json",
+        default="artifacts/proof/main25/real_model_validation.json",
         help="Output JSON path for real-model validation",
     )
     parser.add_argument(
         "--long-context-out",
-        default="artifacts/proof/main24/long_context_validation.json",
+        default="artifacts/proof/main25/long_context_validation.json",
         help="Output JSON path for long-context validation",
     )
     parser.add_argument(
@@ -741,7 +831,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--per-layer-out",
-        default="artifacts/proof/main24/per_layer_sensitivity.json",
+        default="artifacts/proof/main25/per_layer_sensitivity.json",
         help="Output path for per-layer sensitivity",
     )
     parser.add_argument(
@@ -751,7 +841,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--early-layer-out",
-        default="artifacts/proof/main24/early_layer_protection.json",
+        default="artifacts/proof/main25/early_layer_protection.json",
         help="Output path for early-layer protection",
     )
     args = parser.parse_args()

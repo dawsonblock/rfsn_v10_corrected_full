@@ -236,19 +236,20 @@ python3 scripts/profile_memory.py
 
 ## Proof Artifacts
 
-All Main 24 proof artifacts are in `artifacts/proof/main24/`.
+All Main 25 proof artifacts are in `artifacts/proof/main25/`.
 
 Note: The `artifacts/proof/main12` path is historical. Main 22 artifacts have been copied to `artifacts/proof/history/main22/` for reference.
 
 ## Recommended Configs
 
-- **Compression-oriented default**: 8-bit K / 3-bit V / group_size 64
-- **Quality-oriented candidate**: 4-bit K / 4-bit V / group_size 64
-- **Rejected**: 2-bit configs (quality too low for alpha thresholds)
+- **Compression-oriented**: `k8_v3_gs64` (8-bit K / 3-bit V / group_size 64)
+- **Balanced**: `k8_v4_gs64` (8-bit K / 4-bit V / group_size 64)
+- **Quality-oriented**: `k8_v5_gs64` or `k8_v5_gs32`
+- **Rejected**: `k4_v4_gs64`, `k6_v6_gs64` (fail alpha thresholds)
 
 ## Real-Model Validation
 
-Main 24 includes real non-random model validation on `Qwen/Qwen2.5-0.5B-Instruct`. Results are alpha-level: quality metrics are reported honestly with pass/fail thresholds. If thresholds are not met, the config is marked as failed.
+Main 25 includes real non-random model validation on `Qwen/Qwen2.5-0.5B-Instruct`. Results are alpha-level: quality metrics are reported honestly with pass/fail thresholds. NaN metrics are marked `nan_fail`. If thresholds are not met, the config is marked `fail`.
 
 ## Sparse Decode Status
 

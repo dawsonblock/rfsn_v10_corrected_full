@@ -46,10 +46,10 @@ def check() -> list[str]:
                 f"nested archive(s) found: {[str(m) for m in matches[:10]]}"
             )
 
-    # Verify required proof artifacts exist in main24
-    artifact_dir = root / "artifacts" / "proof" / "main24"
+    # Verify required proof artifacts exist in main25
+    artifact_dir = root / "artifacts" / "proof" / "main25"
     if not artifact_dir.exists():
-        errors.append("artifacts/proof/main24 missing")
+        errors.append("artifacts/proof/main25 missing")
     else:
         required_artifacts = [
             "kernel_benchmark.json",
