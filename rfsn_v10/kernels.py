@@ -163,6 +163,62 @@ def apply_hash_signs_metal(x: mx.array, seed: int) -> mx.array:
     return out.reshape(x.shape)
 
 
+def apply_hash_signs_with_indices_metal(
+    x: mx.array,
+    indices: mx.array,
+    seed: int,
+) -> mx.array:
+    """Apply deterministic +/-1 signs with custom global indices via Metal."""
+    ensure_mlx_available()
+    if not hasattr(mx.fast, "metal_kernel"):
+        raise KernelRouteError("metal_kernel_api_unavailable")
+
+    source = """
+        uint gid = thread_position_in_grid.x;
+        uint n = n_buf[0];
+        uint seed_val = seed_buf[0];
+
+        if (gid >= n) { return; }
+
+        uint state = uint(indices[gid]) ^ seed_val;
+        state += 0x9E3779B9u;
+        state ^= state >> 16;
+        state *= 0x85ebca6bu;
+        state ^= state >> 13;
+        state *= 0xc2b2ae35u;
+        state ^= state >> 16;
+
+        T sign = (state & 1u) ? T(-1.0f) : T(1.0f);
+        out[gid] = x[gid] * sign;
+    """
+
+    kernel = mx.fast.metal_kernel(
+        name="rfsn_hash_sign_indices",
+        input_names=["x", "indices", "seed_buf", "n_buf"],
+        output_names=["out"],
+        source=source,
+    )
+
+    flat = mx.array(x.reshape(-1))
+    idx_flat = mx.array(indices.reshape(-1).astype(mx.uint32))
+    n = int(flat.size)
+    if int(idx_flat.size) != n:
+        raise KernelRouteError(
+            f"indices size {idx_flat.size} does not match x size {n}"
+        )
+    seed_buf = mx.array([seed & 0xFFFFFFFF], dtype=mx.uint32)
+    n_buf = mx.array([n], dtype=mx.uint32)
+
+    out = _run_metal_kernel(
+        kernel=kernel,
+        inputs=[flat, idx_flat, seed_buf, n_buf],
+        output_shape=(n,),
+        output_dtype=flat.dtype,
+        n_threads=n,
+    )
+    return out.reshape(x.shape)
+
+
 def packed_dequant_metal(
     packed: mx.array,
     scales: mx.array,

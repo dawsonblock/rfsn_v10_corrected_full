@@ -22,6 +22,7 @@ from .bitpack import BitPackedQuantizer
 from .kernels import (
     KernelRouteError,
     apply_hash_signs_metal,
+    apply_hash_signs_with_indices_metal,
     maybe_supports_metal_kernels,
     packed_dequant_metal,
     packed_dequant_wht_sign_metal,
@@ -183,15 +184,17 @@ class RFSNTurboQuantKVManager:
         Includes caching to avoid regenerating sign masks for identical
         shape/seed/dtype combinations.
         """
-        if (
-            indices is None
-            and self.prefer_metal_kernels
-            and maybe_supports_metal_kernels()
-        ):
-            try:
-                return apply_hash_signs_metal(x, seed)
-            except Exception:
-                pass
+        if self.prefer_metal_kernels and maybe_supports_metal_kernels():
+            if indices is None:
+                try:
+                    return apply_hash_signs_metal(x, seed)
+                except Exception:
+                    pass
+            else:
+                try:
+                    return apply_hash_signs_with_indices_metal(x, indices, seed)
+                except Exception:
+                    pass
 
         shape = x.shape
         n = x.size
