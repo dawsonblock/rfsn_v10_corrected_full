@@ -1106,13 +1106,29 @@ class RFSNTurboQuantKVManager:
                 f"block index {max(block_indices)} >= max_blocks {max_blocks}"
             )
 
+        sorted_blocks = sorted(set(block_indices))
+
+        # Fast path: contiguous blocks starting from 0 can reuse the
+        # cached full reconstruction from retrieve() and just slice.
+        if (
+            cache.num_blocks > 0
+            and sorted_blocks == list(range(len(sorted_blocks)))
+        ):
+            k_full, v_full = self.retrieve(
+                skill_pattern, out_dtype=out_dtype,
+            )
+            if k_full is None:
+                return None
+            end_t = min(len(sorted_blocks) * cache.block_size, t)
+            return k_full[:, :, :end_t, :], v_full[:, :, :end_t, :]
+
         if cache.num_blocks == 0:
             # Legacy cache: full reconstruct then slice
             k_full, v_full = self.retrieve(skill_pattern, out_dtype=out_dtype)
             if k_full is None:
                 return None
             token_indices: list[int] = []
-            for blk in sorted(set(block_indices)):
+            for blk in sorted_blocks:
                 start = blk * block_size
                 end = min(start + block_size, t)
                 token_indices.extend(range(start, end))
