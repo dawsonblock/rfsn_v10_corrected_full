@@ -146,7 +146,7 @@ def main():
     parser.add_argument("--iterations", type=int, default=10)
     parser.add_argument(
         "--output", type=str,
-        default="artifacts/proof/main23/optimization_benchmark.json",
+        default="artifacts/proof/main24/optimization_benchmark.json",
     )
     args = parser.parse_args()
 

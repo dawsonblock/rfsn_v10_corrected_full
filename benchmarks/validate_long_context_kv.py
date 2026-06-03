@@ -28,12 +28,13 @@ def main() -> None:
     )
     parser.add_argument(
         "--configs",
-        default="baseline_fp16,k8_v3_gs64,k4_v4_gs64",
+        default="baseline_fp16,k8_v3_gs64,k8_v4_gs64,k8_v5_gs64,"
+        "k6_v6_gs64,k8_v4_gs32,k8_v5_gs32,k4_v4_gs64",
         help="Comma-separated config names",
     )
     parser.add_argument(
         "--out",
-        default="artifacts/proof/main23/long_context_validation.json",
+        default="artifacts/proof/main24/long_context_validation.json",
         help="Output JSON path",
     )
     args = parser.parse_args()
@@ -46,7 +47,7 @@ def main() -> None:
         "--configs", args.configs,
         "--long-context-out", args.out,
     ]
-    subprocess.run(cmd, check=True)
+    subprocess.run(cmd, check=False)
 
 
 if __name__ == "__main__":

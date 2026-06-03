@@ -38,18 +38,18 @@ def check() -> list[str]:
     if ds_store:
         errors.append(f".DS_Store files found ({len(ds_store)} instances)")
 
-    # Check for nested archives (skip the main release zip)
+    # Check for nested archives — reject all zip/tar/7z files anywhere
     for pattern in ["*.zip", "*.tar", "*.tar.gz", "*.7z"]:
         matches = list(root.rglob(pattern))
-        # Exclude release archives at the repository root
-        matches = [m for m in matches if m.parent != root]
         if matches:
-            errors.append(f"nested archive(s) found: {[str(m) for m in matches[:10]]}")
+            errors.append(
+                f"nested archive(s) found: {[str(m) for m in matches[:10]]}"
+            )
 
-    # Verify required proof artifacts exist in main23
-    artifact_dir = root / "artifacts" / "proof" / "main23"
+    # Verify required proof artifacts exist in main24
+    artifact_dir = root / "artifacts" / "proof" / "main24"
     if not artifact_dir.exists():
-        errors.append("artifacts/proof/main23 missing")
+        errors.append("artifacts/proof/main24 missing")
     else:
         required_artifacts = [
             "kernel_benchmark.json",

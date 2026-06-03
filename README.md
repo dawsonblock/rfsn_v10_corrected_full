@@ -1,6 +1,6 @@
-# RFSN v10 Main 23 — Real-Model Validation + Proof Hardening Release
+# RFSN v10 Main 24 — Real-Model Validation + Proof Hardening Release
 
-## Status: RFSN v10 Main 23 — Real-Model Validation + Proof Hardening Release
+## Status: RFSN v10 Main 24 — Real-Model Validation + Proof Hardening Release
 
 Implemented:
 - low-bit KV cache compression
@@ -236,7 +236,7 @@ python3 scripts/profile_memory.py
 
 ## Proof Artifacts
 
-All Main 23 proof artifacts are in `artifacts/proof/main23/`.
+All Main 24 proof artifacts are in `artifacts/proof/main24/`.
 
 Note: The `artifacts/proof/main12` path is historical. Main 22 artifacts have been copied to `artifacts/proof/history/main22/` for reference.
 
@@ -248,7 +248,7 @@ Note: The `artifacts/proof/main12` path is historical. Main 22 artifacts have be
 
 ## Real-Model Validation
 
-Main 23 includes real non-random model validation on `Qwen/Qwen2.5-0.5B-Instruct`. Results are alpha-level: quality metrics are reported honestly with pass/fail thresholds. If thresholds are not met, the config is marked as failed.
+Main 24 includes real non-random model validation on `Qwen/Qwen2.5-0.5B-Instruct`. Results are alpha-level: quality metrics are reported honestly with pass/fail thresholds. If thresholds are not met, the config is marked as failed.
 
 ## Sparse Decode Status
 

@@ -397,7 +397,7 @@ def _plot_long_context(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Generate benchmark plot artifacts")
-    parser.add_argument("--input-dir", default="artifacts/proof/main23")
+    parser.add_argument("--input-dir", default="artifacts/proof/main24")
     parser.add_argument("--output-dir", default="results/plots")
     args = parser.parse_args()
 

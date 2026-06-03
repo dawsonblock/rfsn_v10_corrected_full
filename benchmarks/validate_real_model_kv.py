@@ -82,10 +82,18 @@ def _topk_overlap(a: torch.Tensor, b: torch.Tensor, k: int) -> float:
     return float(len(ai & bi) / len(ai))
 
 
-def _perplexity_for_target(logits: torch.Tensor, target_id: int) -> float:
-    target = torch.tensor([target_id], device=logits.device, dtype=torch.long)
-    loss = F.cross_entropy(logits.float(), target)
-    return float(torch.exp(loss).item())
+def _decode_nll(
+    model, past, decode_token: torch.Tensor,
+) -> tuple[torch.Tensor, float]:
+    """Decode a single token and return (logits, nll)."""
+    with torch.no_grad():
+        out = model(
+            input_ids=decode_token, past_key_values=past, use_cache=True
+        )
+    logits = out.logits[:, -1, :]
+    target = decode_token[:, 0]
+    nll = float(F.cross_entropy(logits.float(), target).item())
+    return logits, nll
 
 
 def _compress_decompress_past(
@@ -154,6 +162,13 @@ def _from_legacy_cache(legacy_cache, cache_cls):
     return legacy_cache
 
 
+def _clone_legacy_cache(legacy_cache):
+    """Deep-clone tensors in a legacy-format cache to avoid in-place mutation."""
+    if legacy_cache is None:
+        return None
+    return tuple((k.clone(), v.clone()) for k, v in legacy_cache)
+
+
 def _evaluate_config(
     config: dict[str, Any],
     *,
@@ -163,7 +178,7 @@ def _evaluate_config(
     cache_cls,
     decode_token: torch.Tensor,
     baseline_logits: torch.Tensor,
-    baseline_ppl: float,
+    baseline_nll: float,
     device: torch.device,
 ) -> dict[str, Any]:
     if config["name"] != "baseline_fp16":
@@ -172,18 +187,16 @@ def _evaluate_config(
     past = _from_legacy_cache(past_legacy, cache_cls)
 
     t0 = time.perf_counter()
-    with torch.no_grad():
-        out = model(input_ids=decode_token, past_key_values=past, use_cache=True)
+    logits, nll = _decode_nll(model, past, decode_token)
     dt = (time.perf_counter() - t0) * 1000.0
-    logits = out.logits[:, -1, :]
-
-    target_id = int(decode_token[0, 0].item())
-    ppl = _perplexity_for_target(logits, target_id)
 
     cosine = _cosine(logits, baseline_logits)
-    max_abs_diff = float(torch.max(torch.abs(logits - baseline_logits)).item())
+    max_abs_diff = float(
+        torch.max(torch.abs(logits - baseline_logits)).item()
+    )
     top1_match = float(
-        torch.argmax(logits, dim=-1).item() == torch.argmax(baseline_logits, dim=-1).item()
+        torch.argmax(logits, dim=-1).item()
+        == torch.argmax(baseline_logits, dim=-1).item()
     )
     top5 = _topk_overlap(logits, baseline_logits, k=5)
     kl = _kl_div(baseline_logits, logits)
@@ -198,19 +211,22 @@ def _evaluate_config(
         "logit_max_abs_diff": max_abs_diff,
         "top1_match_rate": top1_match,
         "top5_overlap_mean": top5,
-        "perplexity_delta": float(ppl - baseline_ppl),
+        "avg_nll_delta": nll - baseline_nll,
+        "token_positions_evaluated": 1,
         "kl_divergence_mean": kl,
         "latency_ms": dt,
-        "route_used": "retrieve" if config["name"] != "baseline_fp16" else "baseline_fp16",
+        "route_used": "retrieve"
+        if config["name"] != "baseline_fp16"
+        else "baseline_fp16",
     }
 
 
-def _determine_status(result: dict[str, Any], *, baseline_ppl: float = 1.0) -> str:
+def _determine_status(result: dict[str, Any], *, baseline_nll: float = 0.0) -> str:
     """Apply alpha pass thresholds honestly."""
     if result["name"] == "baseline_fp16":
         return "reference"
 
-    ppl_delta_rel = abs(result["perplexity_delta"]) / max(abs(baseline_ppl), 1e-8)
+    nll_delta = abs(result.get("avg_nll_delta", 0.0))
 
     if result["logit_cosine_mean"] < COSINE_MEAN_THRESHOLD:
         return "fail"
@@ -220,7 +236,7 @@ def _determine_status(result: dict[str, Any], *, baseline_ppl: float = 1.0) -> s
         return "fail"
     if result["top5_overlap_mean"] < TOP5_OVERLAP_THRESHOLD:
         return "fail"
-    if ppl_delta_rel > PPL_DELTA_REL_THRESHOLD:
+    if nll_delta > 0.5:
         return "fail"
     if result["kl_divergence_mean"] > KL_DIV_THRESHOLD:
         return "fail"
@@ -266,13 +282,13 @@ def _run_real_model_validation(
 
     with torch.no_grad():
         baseline_ctx = model(input_ids=context_ids, use_cache=True)
-        baseline_out = model(
-            input_ids=decode_token, past_key_values=baseline_ctx.past_key_values, use_cache=True
-        )
-    baseline_logits = baseline_out.logits[:, -1, :]
-    baseline_target = int(decode_token[0, 0].item())
-    baseline_ppl = _perplexity_for_target(baseline_logits, baseline_target)
-    baseline_legacy, baseline_cache_cls = _to_legacy_cache(baseline_ctx.past_key_values)
+    baseline_legacy, baseline_cache_cls = _to_legacy_cache(
+        baseline_ctx.past_key_values
+    )
+    baseline_past = _from_legacy_cache(baseline_legacy, baseline_cache_cls)
+    baseline_logits, baseline_nll = _decode_nll(
+        model, baseline_past, decode_token
+    )
 
     config_results: list[dict[str, Any]] = []
     for config in configs:
@@ -281,28 +297,27 @@ def _run_real_model_validation(
             config,
             model=model,
             tokenizer=tokenizer,
-            past_legacy=baseline_legacy,
+            past_legacy=_clone_legacy_cache(baseline_legacy),
             cache_cls=baseline_cache_cls,
             decode_token=decode_token,
             baseline_logits=baseline_logits,
-            baseline_ppl=baseline_ppl,
+            baseline_nll=baseline_nll,
             device=device,
         )
-        result["status"] = _determine_status(result, baseline_ppl=baseline_ppl)
+        result["status"] = _determine_status(result, baseline_nll=baseline_nll)
         config_results.append(result)
-        ppl_rel = abs(result["perplexity_delta"]) / max(abs(baseline_ppl), 1e-8)
+        nll_delta = result.get("avg_nll_delta", 0.0)
         print(
             f"    cosine={result['logit_cosine_mean']:.6f} "
             f"top1={result['top1_match_rate']:.3f} "
             f"top5={result['top5_overlap_mean']:.3f} "
-            f"ppl_delta={result['perplexity_delta']:.6f} "
-            f"ppl_rel={ppl_rel:.4f} "
+            f"nll_delta={nll_delta:.6f} "
             f"kl={result['kl_divergence_mean']:.6f} "
             f"status={result['status']}"
         )
 
     payload: dict[str, Any] = {
-        "release": "main23",
+        "release": "main24",
         "validation_class": "real_non_random_model_validation",
         "model": model_id,
         "hardware": _get_hardware_info(),
@@ -356,15 +371,13 @@ def _run_long_context_validation(
 
         with torch.no_grad():
             baseline_ctx = model(input_ids=context_ids, use_cache=True)
-            baseline_out = model(
-                input_ids=decode_token,
-                past_key_values=baseline_ctx.past_key_values,
-                use_cache=True,
-            )
-        baseline_logits = baseline_out.logits[:, -1, :]
-        baseline_target = int(decode_token[0, 0].item())
-        baseline_ppl = _perplexity_for_target(baseline_logits, baseline_target)
-        baseline_legacy, baseline_cache_cls = _to_legacy_cache(baseline_ctx.past_key_values)
+        baseline_legacy, baseline_cache_cls = _to_legacy_cache(
+            baseline_ctx.past_key_values
+        )
+        baseline_past = _from_legacy_cache(baseline_legacy, baseline_cache_cls)
+        baseline_logits, baseline_nll = _decode_nll(
+            model, baseline_past, decode_token
+        )
 
         config_results: list[dict[str, Any]] = []
         for config in configs:
@@ -373,14 +386,16 @@ def _run_long_context_validation(
                     config,
                     model=model,
                     tokenizer=tokenizer,
-                    past_legacy=baseline_legacy,
+                    past_legacy=_clone_legacy_cache(baseline_legacy),
                     cache_cls=baseline_cache_cls,
                     decode_token=decode_token,
                     baseline_logits=baseline_logits,
-                    baseline_ppl=baseline_ppl,
+                    baseline_nll=baseline_nll,
                     device=device,
                 )
-                result["status"] = _determine_status(result, baseline_ppl=baseline_ppl)
+                result["status"] = _determine_status(
+                    result, baseline_nll=baseline_nll
+                )
                 result["oom"] = False
             except Exception as e:
                 msg = str(e).lower()
@@ -436,7 +451,7 @@ def _run_long_context_validation(
         return "baseline_fp16"
 
     payload: dict[str, Any] = {
-        "release": "main23",
+        "release": "main24",
         "model": model_id,
         "contexts": context_entries,
         "summary": {
@@ -459,8 +474,7 @@ def _get_hardware_info() -> dict[str, Any]:
 
     mlx_version = "unknown"
     try:
-        import mlx
-        mlx_version = mlx.__version__
+        mlx_version = mx.__version__
     except Exception:
         pass
 
@@ -506,7 +520,8 @@ def main() -> None:
     )
     parser.add_argument(
         "--configs",
-        default="baseline_fp16,k8_v3_gs64,k4_v4_gs64",
+        default="baseline_fp16,k8_v3_gs64,k8_v4_gs64,k8_v5_gs64,"
+        "k6_v6_gs64,k8_v4_gs32,k8_v5_gs32,k4_v4_gs64",
         help="Comma-separated config names to test",
     )
     parser.add_argument(
@@ -516,12 +531,12 @@ def main() -> None:
     )
     parser.add_argument(
         "--out",
-        default="artifacts/proof/main23/real_model_validation.json",
+        default="artifacts/proof/main24/real_model_validation.json",
         help="Output JSON path for real-model validation",
     )
     parser.add_argument(
         "--long-context-out",
-        default="artifacts/proof/main23/long_context_validation.json",
+        default="artifacts/proof/main24/long_context_validation.json",
         help="Output JSON path for long-context validation",
     )
     parser.add_argument(

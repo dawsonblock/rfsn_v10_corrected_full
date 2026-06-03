@@ -1,0 +1,49 @@
+{
+  "profile": "main24",
+  "release": "main24",
+  "release_purpose": "Quality Tuning + Validation Repair",
+  "generated_at": "2026-06-03T08:49:24.090676+00:00",
+  "files": [
+    "kernel_benchmark.json",
+    "fused_kernel_benchmark.json",
+    "optimization_benchmark.json",
+    "real_model_validation.json",
+    "long_context_validation.json",
+    "proof_summary.md",
+    "summary.json",
+    "regression_report.json"
+  ],
+  "kernel_benchmark": {
+    "status": "run",
+    "invalid_full_equivalent": 0
+  },
+  "fused_kernel": {
+    "status": "run",
+    "all_valid": true,
+    "min_cosine": 0.9999998807907104
+  },
+  "real_model_validation": {
+    "status": "run",
+    "model": "Qwen/Qwen2.5-0.5B-Instruct",
+    "tokens_tested": 512,
+    "configs_passed": 5,
+    "configs_failed": 2,
+    "best_config": "k8_v5_gs64",
+    "all_passing_configs": [
+      "k8_v3_gs64",
+      "k8_v4_gs64",
+      "k8_v5_gs64",
+      "k8_v4_gs32",
+      "k8_v5_gs32"
+    ]
+  },
+  "sparse_decode": {
+    "enabled_by_default": false,
+    "status": "disabled"
+  },
+  "notes": [
+    "Replaced single-token PPL with NLL delta metric.",
+    "Added k8_v4, k8_v5, k6_v6, k8_v4_gs32, k8_v5_gs32 configs.",
+    "Long-context validation includes 512/1024/2048 tokens."
+  ]
+}
