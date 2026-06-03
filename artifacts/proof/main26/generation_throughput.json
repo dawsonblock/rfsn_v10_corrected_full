@@ -1,0 +1,75 @@
+{
+  "release": "main26",
+  "analysis": "generation_throughput",
+  "model": "Qwen/Qwen2.5-0.5B-Instruct",
+  "hardware": {
+    "platform": "macOS-26.2-arm64-arm-64bit",
+    "python": "3.12.0",
+    "torch": "2.10.0",
+    "device": "mps",
+    "memory_bytes": 17179869184
+  },
+  "context_tokens": 512,
+  "decode_steps": 64,
+  "warmup_repeats": 2,
+  "timed_repeats": 5,
+  "configs": [
+    {
+      "name": "baseline_fp16",
+      "k_bits": 16,
+      "v_bits": 16,
+      "group_size": 64,
+      "repeats": 5,
+      "ttft_ms_mean": 15.309800003888085,
+      "tokens_per_sec_mean": 71.52478862641095,
+      "p50_token_ms_mean": 13.099916702776682,
+      "p90_token_ms_mean": 16.520888317900244,
+      "p99_token_ms_mean": 26.958354739996132,
+      "peak_mem_delta_mb": 0.0
+    },
+    {
+      "name": "k8_v4_gs64",
+      "k_bits": 8,
+      "v_bits": 4,
+      "group_size": 64,
+      "repeats": 5,
+      "ttft_ms_mean": 14.171383396023884,
+      "tokens_per_sec_mean": 68.10374263519238,
+      "p50_token_ms_mean": 13.301000000501517,
+      "p90_token_ms_mean": 16.29680068115704,
+      "p99_token_ms_mean": 47.413333111355236,
+      "peak_mem_delta_mb": 0.0
+    },
+    {
+      "name": "k8_v5_gs64",
+      "k_bits": 8,
+      "v_bits": 5,
+      "group_size": 64,
+      "repeats": 5,
+      "ttft_ms_mean": 16.133333402103744,
+      "tokens_per_sec_mean": 74.7285464958994,
+      "p50_token_ms_mean": 12.881420798657928,
+      "p90_token_ms_mean": 15.809770041378215,
+      "p99_token_ms_mean": 21.029271635634352,
+      "peak_mem_delta_mb": 0.0
+    },
+    {
+      "name": "k8_v5_gs32",
+      "k_bits": 8,
+      "v_bits": 5,
+      "group_size": 32,
+      "repeats": 5,
+      "ttft_ms_mean": 19.33886680053547,
+      "tokens_per_sec_mean": 73.32536702877891,
+      "p50_token_ms_mean": 13.19295020221034,
+      "p90_token_ms_mean": 16.222588117525447,
+      "p99_token_ms_mean": 20.21044975481345,
+      "peak_mem_delta_mb": 0.0
+    }
+  ],
+  "notes": [
+    "Throughput measured as decode tokens/sec (excludes TTFT).",
+    "Peak memory delta estimated via RSS; MPS unified memory is shared.",
+    "Not a production benchmark; indicative only."
+  ]
+}

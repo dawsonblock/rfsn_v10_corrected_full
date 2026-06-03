@@ -106,8 +106,14 @@ def _compress_past(past_legacy: list, config: dict, device: torch.device) -> lis
         k_np = k.float().cpu().numpy()
         v_np = v.float().cpu().numpy()
         mgr = RFSNTurboQuantKVManager(k_bits=k_bits, v_bits=v_bits, group_size=group_size)
-        mgr.store(mx.array(k_np), mx.array(v_np))
-        rk, rv = mgr.retrieve()
+        token_count = k.shape[2]  # [B, H, T, D]
+        mgr.store(
+            skill_pattern="throughput",
+            keys=mx.array(k_np),
+            values=mx.array(v_np),
+            token_count=token_count,
+        )
+        rk, rv = mgr.retrieve(skill_pattern="throughput")
         k_out = torch.from_numpy(np.array(rk)).to(device=device, dtype=k.dtype)
         v_out = torch.from_numpy(np.array(rv)).to(device=device, dtype=v.dtype)
         compressed.append((k_out, v_out))
