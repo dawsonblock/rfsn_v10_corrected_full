@@ -71,19 +71,56 @@ def benchmark_config(shape, cfg, iterations=10):
 
         # Warmup
         out = mgr.retrieve("key")
-        mx.eval(out)
+        mx.eval(*out)
 
         times = []
         for _ in range(iterations):
             t0 = time.perf_counter()
             out = mgr.retrieve("key")
-            mx.eval(out)
+            mx.eval(*out)
             t1 = time.perf_counter()
             times.append((t1 - t0) * 1000)
 
         k_rec, v_rec = out
         k_cos = cosine_similarity(k_rec, ref)
         v_cos = cosine_similarity(v_rec, ref)
+
+        # Partial reconstruction benchmarks
+        cache = mgr.active_caches["key"]
+        num_blocks = cache.num_blocks
+        if num_blocks > 0:
+            half_blocks = list(range(0, num_blocks // 2))
+            half_times = []
+            for _ in range(iterations):
+                t0 = time.perf_counter()
+                out_partial = mgr.retrieve_blocks(
+                    "key", half_blocks, block_size=cfg.get("block_size", 64),
+                )
+                mx.eval(*out_partial)
+                t1 = time.perf_counter()
+                half_times.append((t1 - t0) * 1000)
+
+            sparse_blocks = list(range(0, num_blocks, 2))
+            sparse_times = []
+            for _ in range(iterations):
+                t0 = time.perf_counter()
+                out_sparse = mgr.retrieve_blocks(
+                    "key", sparse_blocks, block_size=cfg.get("block_size", 64),
+                )
+                mx.eval(*out_sparse)
+                t1 = time.perf_counter()
+                sparse_times.append((t1 - t0) * 1000)
+
+            half_p50 = statistics.median(half_times)
+            sparse_p50 = statistics.median(sparse_times)
+            full_p50 = statistics.median(times)
+            half_speedup = full_p50 / half_p50 if half_p50 > 0 else 0.0
+            sparse_speedup = full_p50 / sparse_p50 if sparse_p50 > 0 else 0.0
+        else:
+            half_p50 = 0.0
+            sparse_p50 = 0.0
+            half_speedup = 0.0
+            sparse_speedup = 0.0
 
         return {
             "shape": shape,
@@ -97,6 +134,10 @@ def benchmark_config(shape, cfg, iterations=10):
             "k_cosine_vs_ref": k_cos,
             "v_cosine_vs_ref": v_cos,
             "min_cosine": min(k_cos, v_cos),
+            "half_blocks_ms": half_p50,
+            "sparse_blocks_ms": sparse_p50,
+            "half_speedup": half_speedup,
+            "sparse_speedup": sparse_speedup,
         }
 
 
@@ -114,9 +155,9 @@ def main():
 
     print("=== Optimization Sweep ===")
     hdr = f"{'Config':<25} {'Shape':<25} {'Mean(ms)':<10}"
-    hdr += f" {'P50(ms)':<10} {'MinCos':<10}"
+    hdr += f" {'P50(ms)':<10} {'MinCos':<10} {'HalfSpd':<8} {'SparseSpd':<9}"
     print(hdr)
-    print("-" * 80)
+    print("-" * 95)
 
     for shape in SHAPES:
         for cfg in CONFIGS:
@@ -130,7 +171,9 @@ def main():
                     f"{str(shape):<25} "
                     f"{result['mean_ms']:<10.2f} "
                     f"{result['p50_ms']:<10.2f} "
-                    f"{result['min_cosine']:<10.6f}"
+                    f"{result['min_cosine']:<10.6f} "
+                    f"{result['half_speedup']:<8.2f} "
+                    f"{result['sparse_speedup']:<9.2f}"
                 )
             except (ValueError, RuntimeError, TypeError) as e:
                 print(f"{cfg['name']:<25} {str(shape):<25} FAILED: {e}")
