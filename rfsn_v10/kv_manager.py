@@ -1155,19 +1155,45 @@ class RFSNTurboQuantKVManager:
                 use_incoherent_signs=False,
                 out_dtype=out_dtype,
             )
-            if cache.use_incoherent_signs:
-                k_block = self._apply_signs_to_block(
-                    k_block, cache.seed, blk, cache.block_size, cache.shape,
-                )
-                v_block = self._apply_signs_to_block(
-                    v_block, cache.seed, blk, cache.block_size, cache.shape,
-                )
             k_blocks.append(k_block)
             v_blocks.append(v_block)
-        return (
-            mx.concatenate(k_blocks, axis=2),
-            mx.concatenate(v_blocks, axis=2),
-        )
+
+        k_result = mx.concatenate(k_blocks, axis=2)
+        v_result = mx.concatenate(v_blocks, axis=2)
+
+        if cache.use_incoherent_signs:
+            # Apply signs once after concatenation.  Build global flat
+            # indices that match the row-major layout of the concatenated
+            # result by mapping each local token position to its original
+            # global token position.
+            t_global_blocks = []
+            for blk in sorted(set(block_indices)):
+                start = blk * cache.block_size
+                end = min(start + cache.block_size, t)
+                t_global_blocks.append(
+                    mx.arange(start, end, dtype=mx.uint32)
+                )
+            t_global = mx.concatenate(t_global_blocks).reshape(
+                1, 1, -1, 1
+            )
+
+            b_idx = mx.arange(_b, dtype=mx.uint32).reshape(_b, 1, 1, 1)
+            h_idx = mx.arange(_h, dtype=mx.uint32).reshape(1, _h, 1, 1)
+            d_idx = mx.arange(_d, dtype=mx.uint32).reshape(1, 1, 1, _d)
+            global_idx = (
+                b_idx * _h * t * _d
+                + h_idx * t * _d
+                + t_global * _d
+                + d_idx
+            )
+            k_result = self._apply_signs_on_the_fly(
+                k_result, cache.seed, indices=global_idx
+            )
+            v_result = self._apply_signs_on_the_fly(
+                v_result, cache.seed, indices=global_idx
+            )
+
+        return k_result, v_result
 
     # ------------------------------------------------------------------
     # Pin cache (budget enforcement)
