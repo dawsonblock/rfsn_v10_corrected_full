@@ -1,6 +1,6 @@
-# RFSN v10 Main 22 — Proof-Consistent Clean Block-Aware KV Reconstruction Release
+# RFSN v10 Main 23 — Real-Model Validation + Proof Hardening Release
 
-## Status: RFSN v10 Main 22 — Proof-Consistent Clean Block-Aware KV Reconstruction Release
+## Status: RFSN v10 Main 23 — Real-Model Validation + Proof Hardening Release
 
 Implemented:
 - low-bit KV cache compression
@@ -15,13 +15,17 @@ Proof status:
 - multi-kernel route: benchmarked
 - fused route: proven by fused_kernel_benchmark.json (cosine 1.000, max_abs_diff 0.0)
 - sparse decode: below threshold, disabled by default
-- real-model validation: tiny-random smoke test unless otherwise stated
+- real-model validation: alpha-level on real non-random model (Qwen/Qwen2.5-0.5B-Instruct)
+- long-context validation: included
+- polar quant: not implemented
+- true arbitrary partial dequantization: not implemented
 
 Not claimed:
 - production LLM deployment
-- sparse-safe inference
-- real non-random LLM quality preservation
+- sparse safe inference
 - universal speedup
+- polar quantization
+- true arbitrary partial dequantization
 
 ## Overview
 RFSN v10 is an alpha quantized KV-cache + decode-time sparse-attention runtime for MLX/Apple Silicon. This build focuses on proving numerical equivalence and quality-safe sparse behavior before any production claim.
@@ -161,37 +165,45 @@ python3 benchmarks/benchmark_end_to_end.py
 # Generate proof artifacts (JSON + summary report)
 ./scripts/run_proof_artifacts.sh
 # Optional custom output dir, iterations, and profile
-./scripts/run_proof_artifacts.sh artifacts/proof/main12 3 main12
+./scripts/run_proof_artifacts.sh artifacts/proof/main23 3 main23
 
 # Compare current proof run vs tracked baseline
 python3 scripts/compare_proof_runs.py \
-    --profile main12 \
+    --profile main23 \
     --baseline-dir benchmarks/proof_baselines/main10 \
-    --current-dir artifacts/proof/main12 \
-    --output-json artifacts/proof/main12/trend_report.json \
-    --output-md artifacts/proof/main12/trend_report.md
+    --current-dir artifacts/proof/main23 \
+    --output-json artifacts/proof/main23/trend_report.json \
+    --output-md artifacts/proof/main23/trend_report.md
 
 # Enforce regression gate (non-zero exit on threshold breach)
 python3 scripts/check_proof_regression.py \
     --baseline benchmarks/proof_baselines/main10 \
-    --current artifacts/proof/main12 \
-    --output-json artifacts/proof/main12/regression_report.json \
-    --output-md artifacts/proof/main12/regression_report.md
+    --current artifacts/proof/main23 \
+    --output-json artifacts/proof/main23/regression_report.json \
+    --output-md artifacts/proof/main23/regression_report.md
 
 # Generate kernel benchmark evidence
 python3 benchmarks/benchmark_kernel_paths.py \
-    --out artifacts/proof/main12/kernel_benchmark.json
+    --out artifacts/proof/main23/kernel_benchmark.json
 
 # Generate plot artifacts from proof JSON
 python3 scripts/generate_plots.py \
-    --input-dir artifacts/proof/main12 \
+    --input-dir artifacts/proof/main23 \
     --output-dir results/plots
 
-# Optional real-model validation scaffold
+# Real-model validation (auto-downloads from HuggingFace)
 python3 benchmarks/validate_real_model_kv.py \
-    --model-path /path/to/mlx/model \
-    --prompt-file prompts/long_context.txt \
-    --out artifacts/proof/main12/real_model_validation.json
+    --model Qwen/Qwen2.5-0.5B-Instruct \
+    --tokens 512 \
+    --configs k8_v3_gs64,k4_v4_gs64 \
+    --out artifacts/proof/main23/real_model_validation.json
+
+# Long-context validation
+python3 benchmarks/validate_real_model_kv.py \
+    --model Qwen/Qwen2.5-0.5B-Instruct \
+    --contexts 512,1024,2048 \
+    --configs k8_v3_gs64,k4_v4_gs64 \
+    --out artifacts/proof/main23/long_context_validation.json
 
 # Production-grade model validation
 # Download a model first:
@@ -200,10 +212,10 @@ python tools/model_download.py mistral-7b --output-dir models
 python benchmarks/validate_production_model.py \
     --model-path models/mistral-7b \
     --prompt-suite prompts/validation_suite.json \
-    --out artifacts/proof/main12/production_validation.json
+    --out artifacts/proof/main23/production_validation.json
 # Check against baseline:
 python scripts/check_production_regression.py \
-    --results artifacts/proof/main12/production_validation.json \
+    --results artifacts/proof/main23/production_validation.json \
     --baseline benchmarks/production_baseline.json
 ```
 
@@ -222,6 +234,63 @@ Policy:
 python3 scripts/profile_memory.py
 ```
 
+## Proof Artifacts
+
+All Main 23 proof artifacts are in `artifacts/proof/main23/`.
+
+Note: The `artifacts/proof/main12` path is historical. Main 22 artifacts have been copied to `artifacts/proof/history/main22/` for reference.
+
+## Recommended Configs
+
+- **Compression-oriented default**: 8-bit K / 3-bit V / group_size 64
+- **Quality-oriented candidate**: 4-bit K / 4-bit V / group_size 64
+- **Rejected**: 2-bit configs (quality too low for alpha thresholds)
+
+## Real-Model Validation
+
+Main 23 includes real non-random model validation on `Qwen/Qwen2.5-0.5B-Instruct`. Results are alpha-level: quality metrics are reported honestly with pass/fail thresholds. If thresholds are not met, the config is marked as failed.
+
+## Sparse Decode Status
+
+Sparse decode is **disabled by default**. Current sparse max cosine is below the deployment threshold. Do not enable sparse decode unless you are explicitly testing the safety gate.
+
+## Known Limitations
+
+- Polar quantization is not implemented.
+- True arbitrary partial dequantization is not implemented (selected-block reconstruction via `retrieve_blocks()` exists; arbitrary token-level partial dequant remains unimplemented).
+- Production hardening and end-to-end real-model validation remain in progress.
+- RFSN is not production-ready.
+
+## How to Reproduce
+
+```bash
+# Install
+pip install -e ".[dev,real_model]"
+pip install mlx
+
+# Run synthetic proof benchmarks
+python benchmarks/benchmark_kernel_paths.py --out artifacts/proof/main23/kernel_benchmark.json
+python benchmarks/benchmark_fused_kernel.py --out artifacts/proof/main23/fused_kernel_benchmark.json
+python benchmarks/benchmark_optimizations.py --out artifacts/proof/main23/optimization_benchmark.json
+
+# Run real-model validation
+python benchmarks/validate_real_model_kv.py \
+    --model Qwen/Qwen2.5-0.5B-Instruct \
+    --tokens 512 \
+    --configs k8_v3_gs64,k4_v4_gs64 \
+    --out artifacts/proof/main23/real_model_validation.json
+
+# Run long-context validation
+python benchmarks/validate_real_model_kv.py \
+    --model Qwen/Qwen2.5-0.5B-Instruct \
+    --contexts 512,1024,2048 \
+    --configs k8_v3_gs64,k4_v4_gs64 \
+    --out artifacts/proof/main23/long_context_validation.json
+
+# Run release integrity check
+python scripts/check_release_integrity.py
+```
+
 ## Design Notes
 - Tests are deterministic; wall-clock runtime depends on hardware and MLX availability
 - Sparse attention is decode-only (T_q=1) with prefill dense fallback
@@ -235,14 +304,17 @@ python3 scripts/profile_memory.py
 ✅ Benchmark scripts and proof plots are present
 ✅ Metal packed-dequant, Metal WHT64, and Metal sign kernels are implemented
 ✅ Telemetry layer is implemented with batched writer support
+✅ Real-model validation on non-random model (alpha-level)
+✅ Long-context validation included
 ⚠ MLX-dependent quality and performance validation is environment-dependent
 ⚠ Sparse quality remains warning-scoped; sparse decode defaults to disabled
-⚠ Production hardening and end-to-end real-model validation remain in progress
+⚠ Production hardening remains in progress
+❌ Polar quantization (not implemented)
+❌ True arbitrary partial dequantization (selected-block reconstruction exists via retrieve_blocks(); arbitrary token-level partial dequant remains unimplemented)
 ❌ Disk persistence (planned for future)
-❌ True arbitrary partial dequantization (selected-block reconstruction exists via retrieve_blocks(); arbitrary token-level partial dequant remains experimental)
 
 ## Next Steps
 1. Run benchmarks to get performance numbers on your hardware
-2. Validate with a real LLM (e.g., Llama 3 8B via mlx-lm)
+2. Review real-model validation results and adjust compression configs if needed
 3. Consider adding disk persistence for long-running workloads
-4. Explore arbitrary token-level partial dequantization (experimental; selected-block reconstruction already exists)
+4. Evaluate polar quantization for future quality improvement

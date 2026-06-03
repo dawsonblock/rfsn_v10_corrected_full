@@ -239,7 +239,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--out",
-        default="artifacts/proof/main12/kernel_benchmark.json",
+        default="artifacts/proof/main23/kernel_benchmark.json",
         help="Output JSON path",
     )
     parser.add_argument("--iterations", type=int, default=5)

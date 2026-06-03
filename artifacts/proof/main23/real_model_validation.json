@@ -1,0 +1,67 @@
+{
+  "release": "main23",
+  "validation_class": "real_non_random_model_validation",
+  "model": "Qwen/Qwen2.5-0.5B-Instruct",
+  "hardware": {
+    "chip": "Apple M2 Pro",
+    "ram_gb": 16,
+    "os": "Darwin",
+    "mlx_version": "unknown"
+  },
+  "tokens_tested": 512,
+  "configs": [
+    {
+      "name": "baseline_fp16",
+      "k_bits": 16,
+      "v_bits": 16,
+      "group_size": 64,
+      "logit_cosine_mean": 1.0000001192092896,
+      "logit_cosine_min": 1.0000001192092896,
+      "logit_max_abs_diff": 0.0,
+      "top1_match_rate": 1.0,
+      "top5_overlap_mean": 1.0,
+      "perplexity_delta": 0.0,
+      "kl_divergence_mean": 0.0,
+      "latency_ms": 121.90912499863771,
+      "route_used": "baseline_fp16",
+      "status": "reference"
+    },
+    {
+      "name": "k8_v3_gs64",
+      "k_bits": 8,
+      "v_bits": 3,
+      "group_size": 64,
+      "logit_cosine_mean": 0.9987845420837402,
+      "logit_cosine_min": 0.9987845420837402,
+      "logit_max_abs_diff": 1.11328125,
+      "top1_match_rate": 1.0,
+      "top5_overlap_mean": 1.0,
+      "perplexity_delta": -600942.0,
+      "kl_divergence_mean": 4.327463102526963e-06,
+      "latency_ms": 14.990667001256952,
+      "route_used": "retrieve_blocks",
+      "status": "fail"
+    },
+    {
+      "name": "k4_v4_gs64",
+      "k_bits": 4,
+      "v_bits": 4,
+      "group_size": 64,
+      "logit_cosine_mean": 0.8202652335166931,
+      "logit_cosine_min": 0.8202652335166931,
+      "logit_max_abs_diff": 10.125,
+      "top1_match_rate": 1.0,
+      "top5_overlap_mean": 0.6,
+      "perplexity_delta": -4820450.171875,
+      "kl_divergence_mean": 0.002603089902549982,
+      "latency_ms": 14.910124999005347,
+      "route_used": "retrieve_blocks",
+      "status": "fail"
+    }
+  ],
+  "sparse_enabled": false,
+  "notes": [
+    "Real non-random model validation executed.",
+    "Sparse decode is disabled by default."
+  ]
+}

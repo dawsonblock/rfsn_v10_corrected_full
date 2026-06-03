@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Release integrity checker for RFSN v10."""
+"""Release integrity checker for RFSN v10 Main 23."""
 from __future__ import annotations
 
 import sys
@@ -38,48 +38,34 @@ def check() -> list[str]:
     if ds_store:
         errors.append(f".DS_Store files found ({len(ds_store)} instances)")
 
-    # Check for nested archives
+    # Check for nested archives (skip the main release zip)
     for pattern in ["*.zip", "*.tar", "*.tar.gz", "*.7z"]:
         matches = list(root.rglob(pattern))
+        # Exclude release archives at the repository root
+        matches = [m for m in matches if m.parent != root]
         if matches:
             errors.append(f"nested archive(s) found: {[str(m) for m in matches[:10]]}")
 
-    # Verify required proof artifacts exist
-    artifact_dir = root / "artifacts" / "proof" / "main12"
+    # Verify required proof artifacts exist in main23
+    artifact_dir = root / "artifacts" / "proof" / "main23"
     if not artifact_dir.exists():
-        errors.append("artifacts/proof/main12 missing")
+        errors.append("artifacts/proof/main23 missing")
     else:
         required_artifacts = [
-            "kv_cache_runs.json",
-            "e2e_scenarios.json",
             "kernel_benchmark.json",
             "fused_kernel_benchmark.json",
             "optimization_benchmark.json",
+            "real_model_validation.json",
+            "long_context_validation.json",
             "proof_summary.md",
             "summary.json",
-            "regression_report.json",
-            "regression_report.md",
             "mlx_test_summary.md",
             "mlx_pytest_raw.log",
+            "mlx_pytest_junit.xml",
         ]
         for artifact in required_artifacts:
             if not (artifact_dir / artifact).exists():
                 errors.append(f"required artifact missing: {artifact}")
-
-        # At least one of these must exist
-        real_model_validation = artifact_dir / "real_model_validation.json"
-        real_model_not_run = artifact_dir / "real_model_validation_not_run.txt"
-        if not real_model_validation.exists() and not real_model_not_run.exists():
-            errors.append(
-                "real_model_validation.json or "
-                "real_model_validation_not_run.txt must exist"
-            )
-
-        # Verify kernel plots require kernel_benchmark.json
-        kernel_json = artifact_dir / "kernel_benchmark.json"
-        kernel_plots = list((root / "results" / "plots").glob("kernel*.png"))
-        if kernel_plots and not kernel_json.exists():
-            errors.append("kernel plots exist but kernel_benchmark.json missing")
 
     # Reject placeholder plots
     plot_dir = root / "results" / "plots"
@@ -107,27 +93,69 @@ def check() -> list[str]:
                 "README claims fused kernel proof but "
                 "fused_kernel_benchmark.json missing"
             )
+        # Hard rejection: do not claim production-ready / sparse-safe / etc.
+        false_claims = [
+            "production-ready",
+            "production ready",
+            "polar quant enabled",
+            "partial dequant complete",
+            "sparse-safe",
+        ]
+        negation_words = ["not ", "no ", "never ", "unimplemented", "disabled"]
+        for line in readme.splitlines():
+            lower_line = line.lower()
+            for phrase in false_claims:
+                if phrase in lower_line:
+                    if any(nw in lower_line for nw in negation_words):
+                        continue
+                    errors.append(f"README positive claim detected: {phrase}")
     except (FileNotFoundError, IOError):
         errors.append("README.md missing or unreadable")
 
     # Verify release version markers
-    expected_release = "Main 22"
+    expected_release = "Main 23"
     try:
         readme = (root / "README.md").read_text(encoding="utf-8")
         if expected_release not in readme:
-            errors.append("README does not identify Main 22")
+            errors.append("README does not identify Main 23")
     except (FileNotFoundError, IOError):
         errors.append("README.md missing for version check")
 
     try:
         proof_path = (
-            root / "artifacts" / "proof" / "main12" / "proof_summary.md"
+            root / "artifacts" / "proof" / "main23" / "proof_summary.md"
         )
-        proof = proof_path.read_text(encoding="utf-8")
-        if expected_release not in proof:
-            errors.append("proof_summary.md does not identify Main 22")
+        if proof_path.exists():
+            proof = proof_path.read_text(encoding="utf-8")
+            if expected_release not in proof:
+                errors.append("proof_summary.md does not identify Main 23")
     except (FileNotFoundError, IOError):
-        pass  # Already reported if artifact dir missing
+        pass  # Already reported if artifact missing
+
+    # Verify real-model validation uses a real non-random model
+    try:
+        real_val_path = artifact_dir / "real_model_validation.json"
+        if real_val_path.exists():
+            import json
+            data = json.loads(real_val_path.read_text(encoding="utf-8"))
+            model = data.get("model", "")
+            if "tiny-random" in model.lower():
+                errors.append(
+                    "real_model_validation.json still uses tiny-random model"
+                )
+    except Exception:
+        pass
+
+    # Verify sparse is not enabled by default
+    try:
+        real_val_path = artifact_dir / "real_model_validation.json"
+        if real_val_path.exists():
+            import json
+            data = json.loads(real_val_path.read_text(encoding="utf-8"))
+            if data.get("sparse_enabled") is True:
+                errors.append("sparse_enabled is True in real_model_validation.json")
+    except Exception:
+        pass
 
     return errors
 

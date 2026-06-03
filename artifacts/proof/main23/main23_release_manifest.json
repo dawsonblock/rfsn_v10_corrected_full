@@ -1,0 +1,25 @@
+{
+  "release": "main23",
+  "title": "RFSN v10 Main 23 \u2014 Real-Model Validation + Proof Hardening Release",
+  "generated_at": "2026-06-03T01:49:41.220275",
+  "artifacts": [
+    "kernel_benchmark.json",
+    "fused_kernel_benchmark.json",
+    "optimization_benchmark.json",
+    "real_model_validation.json",
+    "long_context_validation.json",
+    "proof_summary.md",
+    "summary.json",
+    "mlx_test_summary.md",
+    "mlx_pytest_raw.log",
+    "mlx_pytest_junit.xml"
+  ],
+  "checks": {
+    "compileall": "pass",
+    "test_syntax": "pass",
+    "test_agent_core_integration": "pass",
+    "pytest": "pass",
+    "release_integrity": "pass",
+    "zip_integrity": "pass"
+  }
+}
