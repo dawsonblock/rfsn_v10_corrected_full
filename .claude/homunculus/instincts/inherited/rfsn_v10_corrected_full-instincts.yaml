@@ -1,0 +1,345 @@
+# Instincts generated from https://github.com/dawsonblock/rfsn_v10_corrected_full
+# Generated: 2026-06-04T04:35:36.737Z
+# Version: 2.0
+# NOTE: This file supplements (does not replace) any existing curated instincts.
+# High-confidence manually curated instincts should be preserved alongside these.
+
+---
+id: rfsn_v10_corrected_full-commit-length
+trigger: "when writing a commit message"
+confidence: 0.6
+domain: git
+source: repo-analysis
+source_repo: https://github.com/dawsonblock/rfsn_v10_corrected_full
+---
+
+# Rfsn_v10_corrected_full Commit Length
+
+## Action
+
+Write moderate-length commit messages (~66 characters)
+
+## Evidence
+
+- Average commit message length: 66 chars
+- Based on 3 commits
+
+---
+id: rfsn_v10_corrected_full-naming-files
+trigger: "when creating a new file"
+confidence: 0.8
+domain: code-style
+source: repo-analysis
+source_repo: https://github.com/dawsonblock/rfsn_v10_corrected_full
+---
+
+# Rfsn_v10_corrected_full Naming Files
+
+## Action
+
+Use snake_case naming convention
+
+## Evidence
+
+- Analyzed file naming patterns in repository
+- Dominant pattern: snake_case
+
+---
+id: rfsn_v10_corrected_full-import-relative
+trigger: "when importing modules"
+confidence: 0.75
+domain: code-style
+source: repo-analysis
+source_repo: https://github.com/dawsonblock/rfsn_v10_corrected_full
+---
+
+# Rfsn_v10_corrected_full Import Relative
+
+## Action
+
+Use relative imports for project files
+
+## Evidence
+
+- Import analysis shows relative import pattern
+- Example: import { x } from '../lib/x'
+
+---
+id: rfsn_v10_corrected_full-export-style
+trigger: "when exporting from a module"
+confidence: 0.7
+domain: code-style
+source: repo-analysis
+source_repo: https://github.com/dawsonblock/rfsn_v10_corrected_full
+---
+
+# Rfsn_v10_corrected_full Export Style
+
+## Action
+
+Prefer named exports
+
+## Evidence
+
+- Export pattern analysis
+- Dominant style: named
+
+---
+id: rfsn_v10_corrected_full-test-separate
+trigger: "when writing tests"
+confidence: 0.8
+domain: testing
+source: repo-analysis
+source_repo: https://github.com/dawsonblock/rfsn_v10_corrected_full
+---
+
+# Rfsn_v10_corrected_full Test Separate
+
+## Action
+
+Place tests in the tests/ or __tests__/ directory, mirroring src structure
+
+## Evidence
+
+- Separate test directory pattern detected
+- Tests live in dedicated test folders
+
+---
+id: rfsn_v10_corrected_full-workflow-release-artifact-generation-and-proof-consistency
+trigger: "when doing release artifact generation and proof consistency"
+confidence: 0.55
+domain: workflow
+source: repo-analysis
+source_repo: https://github.com/dawsonblock/rfsn_v10_corrected_full
+---
+
+# Rfsn_v10_corrected_full Workflow Release Artifact Generation And Proof Consistency
+
+## Action
+
+Follow the release-artifact-generation-and-proof-consistency workflow:
+1. Rebrand or create new artifact directories/files for the new Main version (e.g., artifacts/proof/mainXX/...)
+2. Regenerate or update benchmark JSON files (e.g., kernel_benchmark.json, fused_kernel_benchmark.json, generation_smoke.json, generation_throughput.json)
+3. Update or auto-generate proof_summary.md and summary.json from JSON artifacts
+4. Update README.md to reflect new status and results
+5. Update or harden integrity and consistency checking scripts (e.g., check_release_integrity.py, check_proof_summary_consistency.py, generate_proof_summary.py)
+6. Ensure all integrity checks pass and package the release
+
+## Evidence
+
+- Workflow detected from commit patterns
+- Frequency: ~1x per month
+- Files: artifacts/proof/main*/fused_kernel_benchmark.json, artifacts/proof/main*/kernel_benchmark.json, artifacts/proof/main*/generation_smoke.json
+
+---
+id: rfsn_v10_corrected_full-instinct-file-naming
+trigger: "When creating or renaming source files"
+confidence: 0.9
+domain: code-style
+source: repo-analysis
+source_repo: dawsonblock/rfsn_v10_corrected_full
+---
+
+# Rfsn_v10_corrected_full Instinct File Naming
+
+## Action
+
+Use snake_case for file names
+
+## Evidence
+
+- Pattern in namingConventions.files: snake_case
+
+---
+id: rfsn_v10_corrected_full-instinct-function-naming
+trigger: "When defining a new function"
+confidence: 0.9
+domain: code-style
+source: repo-analysis
+source_repo: dawsonblock/rfsn_v10_corrected_full
+---
+
+# Rfsn_v10_corrected_full Instinct Function Naming
+
+## Action
+
+Use camelCase for function names
+
+## Evidence
+
+- Pattern in namingConventions.functions: camelCase
+
+---
+id: rfsn_v10_corrected_full-instinct-class-naming
+trigger: "When defining a new class"
+confidence: 0.9
+domain: code-style
+source: repo-analysis
+source_repo: dawsonblock/rfsn_v10_corrected_full
+---
+
+# Rfsn_v10_corrected_full Instinct Class Naming
+
+## Action
+
+Use PascalCase for class names
+
+## Evidence
+
+- Pattern in namingConventions.classes: PascalCase
+
+---
+id: rfsn_v10_corrected_full-instinct-constant-naming
+trigger: "When defining a constant"
+confidence: 0.9
+domain: code-style
+source: repo-analysis
+source_repo: dawsonblock/rfsn_v10_corrected_full
+---
+
+# Rfsn_v10_corrected_full Instinct Constant Naming
+
+## Action
+
+Use SCREAMING_SNAKE_CASE for constant names
+
+## Evidence
+
+- Pattern in namingConventions.constants: SCREAMING_SNAKE_CASE
+
+---
+id: rfsn_v10_corrected_full-instinct-import-style
+trigger: "When importing modules within the package"
+confidence: 0.8
+domain: code-style
+source: repo-analysis
+source_repo: dawsonblock/rfsn_v10_corrected_full
+---
+
+# Rfsn_v10_corrected_full Instinct Import Style
+
+## Action
+
+Use relative imports
+
+## Evidence
+
+- Pattern in importStyle: relative
+
+---
+id: rfsn_v10_corrected_full-instinct-export-style
+trigger: "When exporting functions or classes"
+confidence: 0.8
+domain: code-style
+source: repo-analysis
+source_repo: dawsonblock/rfsn_v10_corrected_full
+---
+
+# Rfsn_v10_corrected_full Instinct Export Style
+
+## Action
+
+Use named exports
+
+## Evidence
+
+- Pattern in exportStyle: named
+
+---
+id: rfsn_v10_corrected_full-instinct-test-location
+trigger: "When adding or updating tests"
+confidence: 0.9
+domain: testing
+source: repo-analysis
+source_repo: dawsonblock/rfsn_v10_corrected_full
+---
+
+# Rfsn_v10_corrected_full Instinct Test Location
+
+## Action
+
+Place tests in the separate 'tests' directory
+
+## Evidence
+
+- Pattern in architecture.folderStructure.testLocation: separate
+- Presence of 'tests' folder
+
+---
+id: rfsn_v10_corrected_full-instinct-test-artifacts
+trigger: "When writing tests for benchmarks or proofs"
+confidence: 0.8
+domain: testing
+source: repo-analysis
+source_repo: dawsonblock/rfsn_v10_corrected_full
+---
+
+# Rfsn_v10_corrected_full Instinct Test Artifacts
+
+## Action
+
+Reference or generate artifacts in the 'artifacts' directory
+
+## Evidence
+
+- Pattern: artifacts/proof/main*/ files used in workflows and tests
+
+---
+id: rfsn_v10_corrected_full-instinct-commit-format-freeform
+trigger: "When writing a commit message"
+confidence: 0.85
+domain: git
+source: repo-analysis
+source_repo: dawsonblock/rfsn_v10_corrected_full
+---
+
+# Rfsn_v10_corrected_full Instinct Commit Format Freeform
+
+## Action
+
+Use a freeform, descriptive message (no strict prefix), typically referencing the main change or experiment
+
+## Evidence
+
+- Pattern in commits.type: freeform
+- Examples: 'Main 28: Proof Consistency + Long-Context + Throughput Honesty'
+
+---
+id: rfsn_v10_corrected_full-instinct-commit-length
+trigger: "When composing a commit message"
+confidence: 0.7
+domain: git
+source: repo-analysis
+source_repo: dawsonblock/rfsn_v10_corrected_full
+---
+
+# Rfsn_v10_corrected_full Instinct Commit Length
+
+## Action
+
+Aim for concise but informative messages (average length ~66 characters)
+
+## Evidence
+
+- Pattern in commits.averageLength: 66
+
+---
+id: rfsn_v10_corrected_full-instinct-release-artifact-workflow
+trigger: "When preparing a new release or updating benchmarks/proofs for a new 'Main' version"
+confidence: 0.95
+domain: workflow
+source: repo-analysis
+source_repo: dawsonblock/rfsn_v10_corrected_full
+---
+
+# Rfsn_v10_corrected_full Instinct Release Artifact Workflow
+
+## Action
+
+Follow the release-artifact-generation-and-proof-consistency workflow: rebrand artifact directories, regenerate benchmarks, update proof summaries, update README, check integrity, and package release
+
+## Evidence
+
+- release-artifact-generation-and-proof-consistency workflow definition
+- Example commit sequence and files
+
