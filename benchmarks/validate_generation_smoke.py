@@ -120,7 +120,8 @@ def _compress_past(past_legacy: list, config: dict, device: torch.device) -> lis
     group_size = config["group_size"]
 
     compressed = []
-    for k, v in past_legacy:
+    layer_map = config.get("layer_map", {})
+    for layer_idx, (k, v) in enumerate(past_legacy):
         k_np = k.float().cpu().numpy()
         v_np = v.float().cpu().numpy()
         mgr = RFSNTurboQuantKVManager(
@@ -128,11 +129,13 @@ def _compress_past(past_legacy: list, config: dict, device: torch.device) -> lis
             cache_dir=str(Path.home() / ".rfsn_cache"),
         )
         token_count = k.shape[2]  # [B, H, T, D]
+        kb, vb = layer_map.get(layer_idx, (k_bits, v_bits))
         mgr.store(
             skill_pattern="smoke_test",
             keys=mx.array(k_np),
             values=mx.array(v_np),
             token_count=token_count,
+            k_bits=kb, v_bits=vb,
         )
         rk, rv = mgr.retrieve(skill_pattern="smoke_test")
         k_out = torch.from_numpy(np.array(rk)).to(device=device, dtype=k.dtype)
@@ -191,6 +194,8 @@ def _greedy_decode(
 
 _CONFIG_REGISTRY: dict[str, dict[str, Any]] = {
     "baseline_fp16": {"name": "baseline_fp16", "k_bits": 16, "v_bits": 16, "group_size": 64},
+    "mixed_L0-1k8v4_restk6v4_gs64": {"name": "mixed_L0-1k8v4_restk6v4_gs64", "k_bits": 6, "v_bits": 4, "group_size": 64, "layer_map": {0: (8, 4), 1: (8, 4)}},
+    "mixed_L0k8v4_restk6v4_gs64": {"name": "mixed_L0k8v4_restk6v4_gs64", "k_bits": 6, "v_bits": 4, "group_size": 64, "layer_map": {0: (8, 4)}},
     "k8_v3_gs64": {"name": "k8_v3_gs64", "k_bits": 8, "v_bits": 3, "group_size": 64},
     "k8_v4_gs64": {"name": "k8_v4_gs64", "k_bits": 8, "v_bits": 4, "group_size": 64},
     "k8_v5_gs64": {"name": "k8_v5_gs64", "k_bits": 8, "v_bits": 5, "group_size": 64},
@@ -396,7 +401,8 @@ def main() -> None:
     parser.add_argument(
         "--configs",
         default=(
-            "baseline_fp16,k8_v3_gs64,k8_v4_gs64,k8_v5_gs64,"
+            "baseline_fp16,mixed_L0-1k8v4_restk6v4_gs64,"
+            "k8_v4_gs64,k8_v5_gs64,k8_v3_gs64,"
             "k6_v6_gs64,k8_v4_gs32,k8_v5_gs32,k4_v4_gs64"
         ),
         help="Comma-separated config names",

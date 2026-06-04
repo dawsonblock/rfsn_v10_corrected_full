@@ -39,11 +39,31 @@ TOP5_OVERLAP_THRESHOLD = 0.95
 PPL_DELTA_REL_THRESHOLD = 0.10
 KL_DIV_THRESHOLD = 0.02
 
+# Mixed-precision config registry: per-layer bit overrides on top of default
+_MIXED_CONFIG_REGISTRY: dict[str, dict[str, Any]] = {
+    "mixed_L0-1k8v4_restk6v4_gs64": {
+        "name": "mixed_L0-1k8v4_restk6v4_gs64",
+        "k_bits": 6,
+        "v_bits": 4,
+        "group_size": 64,
+        "layer_map": {0: (8, 4), 1: (8, 4)},
+    },
+    "mixed_L0k8v4_restk6v4_gs64": {
+        "name": "mixed_L0k8v4_restk6v4_gs64",
+        "k_bits": 6,
+        "v_bits": 4,
+        "group_size": 64,
+        "layer_map": {0: (8, 4)},
+    },
+}
+
 
 def _parse_config(name: str) -> dict[str, Any]:
     """Parse config name like 'k8_v3_gs64' -> bits and group_size."""
     if name == "baseline_fp16":
         return {"name": name, "k_bits": 16, "v_bits": 16, "group_size": 64}
+    if name in _MIXED_CONFIG_REGISTRY:
+        return _MIXED_CONFIG_REGISTRY[name].copy()
     # Expected format: k{bits}_v{bits}_gs{group_size}
     parts = name.split("_")
     if len(parts) != 3:
@@ -226,7 +246,8 @@ def _compress_decompress_past(
         v_mx = mx.array(v_np)
 
         key = f"layer_{layer_idx}"
-        mgr.store(key, k_mx, v_mx, token_count=seq)
+        kb, vb = config.get("layer_map", {}).get(layer_idx, (config["k_bits"], config["v_bits"]))
+        mgr.store(key, k_mx, v_mx, token_count=seq, k_bits=kb, v_bits=vb)
         rec = mgr.retrieve(key, out_dtype=mx.float32)
         if rec is None:
             raise RuntimeError("Unexpected cache miss during validation")
@@ -569,14 +590,17 @@ def _run_real_model_validation(
     for config in configs:
         per_prompt = prompt_results_by_config[config["name"]]
         if not per_prompt:
-            config_results.append({
+            skipped: dict[str, Any] = {
                 "name": config["name"],
                 "k_bits": config["k_bits"],
                 "v_bits": config["v_bits"],
                 "group_size": config["group_size"],
                 "status": "skipped",
                 "per_prompt": [],
-            })
+            }
+            if "layer_map" in config:
+                skipped["layer_map"] = {str(k): v for k, v in config["layer_map"].items()}
+            config_results.append(skipped)
             continue
 
         agg: dict[str, Any] = {
@@ -618,6 +642,8 @@ def _run_real_model_validation(
             "per_prompt": per_prompt,
             "prompts_evaluated": len(per_prompt),
         }
+        if "layer_map" in config:
+            agg["layer_map"] = {str(k): v for k, v in config["layer_map"].items()}
         agg["status"] = _determine_status(agg)
         config_results.append(agg)
         print(
@@ -785,7 +811,17 @@ def _run_long_context_validation(
             for ctx in ctxs:
                 for c in ctx["configs"]:
                     if c.get("name") == name:
-                        score = c.get("k_bits", 16) + c.get("v_bits", 16)
+                        layer_map = c.get("layer_map")
+                        if layer_map and c["name"] in _MIXED_CONFIG_REGISTRY:
+                            n_layers = 24
+                            kb, vb = c["k_bits"], c["v_bits"]
+                            total = (kb + vb) * n_layers
+                            for layer_idx, (okb, ovb) in layer_map.items():
+                                total -= (kb + vb)
+                                total += (okb + ovb)
+                            score = total / n_layers
+                        else:
+                            score = c.get("k_bits", 16) + c.get("v_bits", 16)
                         break
                 if score is not None:
                     break
@@ -795,18 +831,42 @@ def _run_long_context_validation(
         return best
 
     def _recommended(ctxs: list[dict]) -> str:
-        # Preference order; k4_v4_gs64 rejected (fails alpha thresholds)
-        # A config can only be recommended if it passes ALL tested contexts.
         for prefer in (
-            "k8_v5_gs64",
-            "k8_v5_gs32",
+            "mixed_L0-1k8v4_restk6v4_gs64",
             "k8_v4_gs64",
             "k8_v4_gs32",
+            "k8_v5_gs64",
+            "k8_v5_gs32",
             "k8_v3_gs64",
         ):
             if _passes_all_contexts(prefer, ctxs):
                 return prefer
         return "baseline_fp16"
+
+    def _compression_estimate(ctxs: list[dict]) -> dict[str, float]:
+        out: dict[str, float] = {}
+        n = 64 * 64
+        def _b(nv, bits): return ((nv + (32 // bits) - 1) // (32 // bits)) * 4
+        sc = ((n + 64 - 1) // 64) * 4
+        def _comp(k, v): return (n * 2 * 2) / (_b(n, k) + _b(n, v) + sc * 2)
+        for ctx in ctxs:
+            for c in ctx["configs"]:
+                name = c["name"]
+                if name in out:
+                    continue
+                layer_map = c.get("layer_map")
+                if layer_map and name in _MIXED_CONFIG_REGISTRY:
+                    total = 0.0
+                    kb, vb = c["k_bits"], c["v_bits"]
+                    for _ in range(24):
+                        total += _comp(kb, vb)
+                    for layer_idx, (okb, ovb) in layer_map.items():
+                        total -= _comp(kb, vb)
+                        total += _comp(okb, ovb)
+                    out[name] = total / 24
+                else:
+                    out[name] = _comp(c["k_bits"], c["v_bits"])
+        return out
 
     rejected = [
         name for name in _collect_config_names(context_entries)
@@ -821,6 +881,7 @@ def _run_long_context_validation(
             "best_quality_config": _best_quality(context_entries),
             "best_memory_config_passing_all_contexts": _best_memory(context_entries),
             "recommended_default": _recommended(context_entries),
+            "compression_estimate_x": _compression_estimate(context_entries),
             "rejected_configs": rejected,
             "production_ready": False,
         },
@@ -1153,7 +1214,8 @@ def main() -> None:
     )
     parser.add_argument(
         "--configs",
-        default="baseline_fp16,k8_v3_gs64,k8_v4_gs64,k8_v5_gs64,"
+        default="baseline_fp16,mixed_L0-1k8v4_restk6v4_gs64,"
+        "k8_v4_gs64,k8_v5_gs64,k8_v3_gs64,"
         "k6_v6_gs64,k8_v4_gs32,k8_v5_gs32,k4_v4_gs64",
         help="Comma-separated config names to test",
     )

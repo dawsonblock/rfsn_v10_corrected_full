@@ -213,7 +213,7 @@ def dequantize_group_unsigned(
 class PolarQuantizer:
     """
     Hierarchical PolarQuant reference quantizer.
-    Angles use fixed range [-pi, pi].
+    Angles use fixed range [-pi, pi] or adaptive per-tensor range.
     Radii use unsigned groupwise quantization.
     """
 
@@ -223,11 +223,13 @@ class PolarQuantizer:
         angle_bits: int = 5,
         radius_bits: int = 8,
         radius_group_size: int = 64,
+        adaptive_angle_range: bool = False,
     ):
         self.levels = levels
         self.angle_bits = angle_bits
         self.radius_bits = radius_bits
         self.radius_group_size = radius_group_size
+        self.adaptive_angle_range = adaptive_angle_range
 
     def quantize(self, x: mx.array) -> PolarPacked:
         angles, final_radii = iterative_hierarchical_polar_forward(
@@ -236,11 +238,20 @@ class PolarQuantizer:
         angle_codes: list[mx.array] = []
         angle_metas: list[UniformQuantMeta] = []
         for theta in angles:
+            if self.adaptive_angle_range:
+                min_val = float(mx.min(theta))
+                max_val = float(mx.max(theta))
+                # Guard against zero range
+                if max_val <= min_val:
+                    max_val = min_val + 1e-6
+            else:
+                min_val = -math.pi
+                max_val = math.pi
             codes, meta = quantize_uniform_fixed_range(
                 theta,
                 bits=self.angle_bits,
-                min_val=-math.pi,
-                max_val=math.pi,
+                min_val=min_val,
+                max_val=max_val,
             )
             angle_codes.append(codes)
             angle_metas.append(meta)

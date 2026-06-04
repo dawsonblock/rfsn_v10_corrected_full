@@ -51,6 +51,9 @@ class QuantizedKVManager:
         v_radius_bits: int = 6,
         cartesian_bits: int = 6,
         group_size: int = 64,
+        k_polar_enabled: bool = True,
+        v_polar_enabled: bool = True,
+        adaptive_angle_range: bool = False,
         use_qjl_score_correction: bool = False,
         qjl_proj_dim: int = 64,
     ):
@@ -65,6 +68,8 @@ class QuantizedKVManager:
             polar_radius_bits=k_radius_bits,
             cartesian_bits=cartesian_bits,
             group_size=group_size,
+            polar_enabled=k_polar_enabled,
+            adaptive_angle_range=adaptive_angle_range,
         )
         self.v_quant = HybridPolarCartesianQuantizer(
             feature_dim=feature_dim,
@@ -74,6 +79,8 @@ class QuantizedKVManager:
             polar_radius_bits=v_radius_bits,
             cartesian_bits=cartesian_bits,
             group_size=group_size,
+            polar_enabled=v_polar_enabled,
+            adaptive_angle_range=adaptive_angle_range,
         )
         self.qjl = QJLScoreCorrector(
             feature_dim=feature_dim,

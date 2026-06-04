@@ -3,7 +3,9 @@
 Reference math tests for experimental IsoQuant + Polar + QJL.
 These should pass before any Metal kernel is written.
 """
-import mlx.core as mx
+import pytest
+
+mx = pytest.importorskip("mlx.core")
 
 from rfsn_v10.quantization.isoquant_precondition import (
     IsoQuantPreconditioner,

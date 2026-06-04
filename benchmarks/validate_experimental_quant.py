@@ -22,6 +22,7 @@ import torch.nn.functional as F
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from rfsn_v10.quantization.kv_quant_manager import QuantizedKVManager
+from rfsn_v10.quantization.turbo_polar_kv_manager import TurboPolarKVManager
 
 # Alpha pass thresholds (same as stable baseline)
 COSINE_MEAN_THRESHOLD = 0.995
@@ -676,7 +677,7 @@ def _run_long_context_validation(
 
     def _best_memory(ctxs: list[dict]) -> str:
         best = ""
-        best_score = float("inf")
+        best_score = -1.0
         for name in _collect_config_names(ctxs):
             if not _passes_all_contexts(name, ctxs):
                 continue
@@ -761,33 +762,49 @@ def _get_hardware_info() -> dict[str, Any]:
 
 def _build_config(
     name: str,
-    mode: str = "hybrid_polar_cartesian",
+    mode: str = "turbo_polar",
     feature_dim: int = 64,
     use_qjl: bool = False,
     qjl_proj_dim: int = 64,
     polar_ratio: float = 0.65,
     polar_levels: int = 4,
-    k_angle_bits: int = 5,
+    k_angle_bits: int = 8,
     k_radius_bits: int = 8,
-    v_angle_bits: int = 4,
-    v_radius_bits: int = 6,
-    cartesian_bits: int = 6,
+    v_angle_bits: int = 7,
+    v_radius_bits: int = 8,
+    cartesian_bits: int = 5,
     group_size: int = 64,
+    k_polar_enabled: bool = True,
+    v_polar_enabled: bool = True,
+    adaptive_angle_range: bool = False,
 ) -> dict[str, Any]:
-    manager = QuantizedKVManager(
-        mode=mode,
-        feature_dim=feature_dim,
-        polar_ratio=polar_ratio,
-        polar_levels=polar_levels,
-        k_angle_bits=k_angle_bits,
-        k_radius_bits=k_radius_bits,
-        v_angle_bits=v_angle_bits,
-        v_radius_bits=v_radius_bits,
-        cartesian_bits=cartesian_bits,
-        group_size=group_size,
-        use_qjl_score_correction=use_qjl,
-        qjl_proj_dim=qjl_proj_dim,
-    )
+    if mode == "turbo_polar":
+        manager = TurboPolarKVManager(
+            feature_dim=feature_dim,
+            k_angle_bits=k_angle_bits,
+            k_radius_bits=k_radius_bits,
+            v_bits=cartesian_bits,
+            group_size=group_size,
+            adaptive_angle_range=adaptive_angle_range,
+        )
+    else:
+        manager = QuantizedKVManager(
+            mode=mode,
+            feature_dim=feature_dim,
+            polar_ratio=polar_ratio,
+            polar_levels=polar_levels,
+            k_angle_bits=k_angle_bits,
+            k_radius_bits=k_radius_bits,
+            v_angle_bits=v_angle_bits,
+            v_radius_bits=v_radius_bits,
+            cartesian_bits=cartesian_bits,
+            group_size=group_size,
+            k_polar_enabled=k_polar_enabled,
+            v_polar_enabled=v_polar_enabled,
+            adaptive_angle_range=adaptive_angle_range,
+            use_qjl_score_correction=use_qjl,
+            qjl_proj_dim=qjl_proj_dim,
+        )
     return {
         "name": name,
         "mode": mode,
@@ -824,8 +841,8 @@ def main() -> None:
     )
     parser.add_argument(
         "--mode",
-        default="hybrid_polar_cartesian",
-        choices=["none", "hybrid_polar_cartesian"],
+        default="turbo_polar",
+        choices=["none", "hybrid_polar_cartesian", "turbo_polar"],
         help="Quantization mode",
     )
     parser.add_argument(
@@ -838,6 +855,21 @@ def main() -> None:
         type=int,
         default=64,
         help="QJL projection dimension",
+    )
+    parser.add_argument(
+        "--no-k-polar",
+        action="store_true",
+        help="Disable polar quantization on keys (use cartesian only)",
+    )
+    parser.add_argument(
+        "--no-v-polar",
+        action="store_true",
+        help="Disable polar quantization on values (use cartesian only)",
+    )
+    parser.add_argument(
+        "--adaptive-angle",
+        action="store_true",
+        help="Use adaptive per-tensor angle ranges instead of fixed [-pi, pi]",
     )
     parser.add_argument(
         "--feature-dim",
@@ -860,7 +892,7 @@ def main() -> None:
     parser.add_argument(
         "--k-angle-bits",
         type=int,
-        default=5,
+        default=8,
         help="Key angle bits",
     )
     parser.add_argument(
@@ -872,19 +904,19 @@ def main() -> None:
     parser.add_argument(
         "--v-angle-bits",
         type=int,
-        default=4,
+        default=7,
         help="Value angle bits",
     )
     parser.add_argument(
         "--v-radius-bits",
         type=int,
-        default=6,
+        default=8,
         help="Value radius bits",
     )
     parser.add_argument(
         "--cartesian-bits",
         type=int,
-        default=6,
+        default=5,
         help="Cartesian partition bits",
     )
     parser.add_argument(
@@ -939,13 +971,17 @@ def main() -> None:
             v_radius_bits=args.v_radius_bits,
             cartesian_bits=args.cartesian_bits,
             group_size=args.group_size,
+            k_polar_enabled=not args.no_k_polar,
+            v_polar_enabled=not args.no_v_polar,
+            adaptive_angle_range=args.adaptive_angle,
         ),
     ]
 
     print(
         f"Running experimental validation: model={args.model}, "
         f"tokens={args.tokens}, positions={args.positions}, "
-        f"mode={args.mode}, qjl={args.use_qjl}"
+        f"mode={args.mode}, qjl={args.use_qjl}, "
+        f"k_polar={not args.no_k_polar}, v_polar={not args.no_v_polar}"
     )
 
     payload = _run_real_model_validation(

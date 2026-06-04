@@ -841,6 +841,8 @@ class RFSNTurboQuantKVManager:
         keys: mx.array,
         values: mx.array,
         token_count: int,
+        k_bits: int | None = None,
+        v_bits: int | None = None,
     ) -> None:
         """Store KV cache with TurboQuant compression.
 
@@ -866,10 +868,15 @@ class RFSNTurboQuantKVManager:
                 f"token_count must be positive, got {token_count}"
             )
 
+        k_bits = self.k_bits if k_bits is None else k_bits
+        v_bits = self.v_bits if v_bits is None else v_bits
+        if not (2 <= k_bits <= 8 and 2 <= v_bits <= 8):
+            raise ValueError("k_bits and v_bits must both be in [2, 8]")
+
         # Deterministic seed derived from cache identity for sign preconditioning
         seed = int(
             hashlib.sha256(
-                f"{skill_pattern}|{keys.shape}|{self.k_bits}|{self.v_bits}".encode()
+                f"{skill_pattern}|{keys.shape}|{k_bits}|{v_bits}".encode()
             ).hexdigest()[:8],
             16,
         )
@@ -932,11 +939,11 @@ class RFSNTurboQuantKVManager:
         (
             k_packed, k_scales, k_poff, k_soff,
             k_bnv, k_n,
-        ) = _quantize_blocks(k_pre, self.k_bits)
+        ) = _quantize_blocks(k_pre, k_bits)
         (
             v_packed, v_scales, v_poff, v_soff,
             v_bnv, v_n,
-        ) = _quantize_blocks(v_pre, self.v_bits)
+        ) = _quantize_blocks(v_pre, v_bits)
 
         # Create cache entry
         cache = TurboQuantKVCache(
@@ -945,8 +952,8 @@ class RFSNTurboQuantKVManager:
             v_packed=v_packed,
             v_scales=v_scales,
             shape=tuple(keys.shape),
-            k_bits=self.k_bits,
-            v_bits=self.v_bits,
+            k_bits=k_bits,
+            v_bits=v_bits,
             group_size=self.group_size,
             use_wht=self.use_wht,
             use_incoherent_signs=self.use_incoherent_signs,
@@ -1018,14 +1025,6 @@ class RFSNTurboQuantKVManager:
         if cache.format_version != "rfsn_v10":
             raise ValueError(
                 f"Unsupported cache format version: {cache.format_version}"
-            )
-
-        # Validate metadata matches current manager settings
-        if cache.k_bits != self.k_bits or cache.v_bits != self.v_bits:
-            raise ValueError(
-                f"metadata mismatch: stored k_bits={cache.k_bits} "
-                f"v_bits={cache.v_bits}, current k_bits={self.k_bits} "
-                f"v_bits={self.v_bits}"
             )
 
         # Validate group_size metadata

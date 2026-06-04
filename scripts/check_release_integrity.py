@@ -126,6 +126,24 @@ def check() -> list[str]:
                         f"README positive claim detected: {phrase!r}"
                     )
 
+        # README must qualify PolarQuant status if file exists
+        polar_quant_path = root / "rfsn_v10" / "quantization" / "polar_quant.py"
+        if polar_quant_path.exists():
+            readme_lower = readme.lower()
+            mentions_polar = (
+                "polar quantization" in readme_lower
+                or "polar quant" in readme_lower
+            )
+            has_qualifier = (
+                "stable runtime" in readme_lower
+                or "experimental" in readme_lower
+            )
+            if mentions_polar and not has_qualifier:
+                errors.append(
+                    "README mentions PolarQuant but does not qualify "
+                    "stable vs experimental status"
+                )
+
     # --- Main 28 artifact directory ---
     artifact_dir = root / "artifacts" / "proof" / "main28"
     if not artifact_dir.exists():
@@ -147,8 +165,24 @@ def check() -> list[str]:
             "main28_release_manifest.json",
         ]
         for artifact in required_artifacts:
-            if not (artifact_dir / artifact).exists():
+            artifact_path = artifact_dir / artifact
+            if not artifact_path.exists():
                 errors.append(f"required artifact missing: {artifact}")
+                continue
+            # Every JSON artifact with a "release" field must say main28
+            if artifact.endswith(".json"):
+                try:
+                    data = json.loads(
+                        artifact_path.read_text(encoding="utf-8")
+                    )
+                    release_field = data.get("release")
+                    if release_field is not None and release_field != "main28":
+                        errors.append(
+                            f"{artifact} release field is "
+                            f"'{release_field}' (expected 'main28')"
+                        )
+                except Exception:
+                    pass
 
         # Manifest must declare release = main28
         manifest_path = artifact_dir / "main28_release_manifest.json"

@@ -44,6 +44,8 @@ class HybridPolarCartesianQuantizer:
         cartesian_bits: int = 6,
         group_size: int = 64,
         rotation_seed: int = 42,
+        polar_enabled: bool = True,
+        adaptive_angle_range: bool = False,
     ):
         if feature_dim <= 0:
             raise ValueError("feature_dim must be positive")
@@ -54,10 +56,14 @@ class HybridPolarCartesianQuantizer:
         self.feature_dim = feature_dim
         self.polar_ratio = polar_ratio
         self.polar_levels = polar_levels
+        self.polar_enabled = polar_enabled
         self.base = 2**polar_levels
-        self.split_dim = self._choose_split_dim(
-            feature_dim, polar_ratio, self.base
-        )
+        if polar_enabled:
+            self.split_dim = self._choose_split_dim(
+                feature_dim, polar_ratio, self.base
+            )
+        else:
+            self.split_dim = 0
         self.iso = IsoQuantPreconditioner(
             feature_dim=feature_dim,
             seed=rotation_seed,
@@ -67,6 +73,7 @@ class HybridPolarCartesianQuantizer:
             angle_bits=polar_angle_bits,
             radius_bits=polar_radius_bits,
             radius_group_size=group_size,
+            adaptive_angle_range=adaptive_angle_range,
         )
         self.cartesian = GroupedCartesianQuantizer(
             bits=cartesian_bits,
@@ -102,9 +109,13 @@ class HybridPolarCartesianQuantizer:
             )
         original_shape = tuple(x.shape)
         rotated, iso_meta = self.iso.forward(x)
-        polar_part = rotated[..., :self.split_dim]
-        cart_part = rotated[..., self.split_dim:]
-        polar_packed = self.polar.quantize(polar_part)
+        if self.polar_enabled:
+            polar_part = rotated[..., :self.split_dim]
+            cart_part = rotated[..., self.split_dim:]
+            polar_packed = self.polar.quantize(polar_part)
+        else:
+            polar_packed = None
+            cart_part = rotated
         if cart_part.shape[-1] > 0:
             cart_packed = self.cartesian.quantize(cart_part)
         else:
@@ -119,14 +130,21 @@ class HybridPolarCartesianQuantizer:
         )
 
     def dequantize(self, packed: HybridPacked) -> mx.array:
-        polar_rec = self.polar.dequantize(packed.polar)
-        if packed.cartesian is not None:
-            cart_rec = self.cartesian.dequantize(packed.cartesian)
-            rotated_rec = mx.concatenate(
-                [polar_rec, cart_rec], axis=-1
-            )
+        if self.polar_enabled and packed.polar is not None:
+            polar_rec = self.polar.dequantize(packed.polar)
+            if packed.cartesian is not None:
+                cart_rec = self.cartesian.dequantize(packed.cartesian)
+                rotated_rec = mx.concatenate(
+                    [polar_rec, cart_rec], axis=-1
+                )
+            else:
+                rotated_rec = polar_rec
+        elif packed.cartesian is not None:
+            rotated_rec = self.cartesian.dequantize(packed.cartesian)
         else:
-            rotated_rec = polar_rec
+            raise ValueError(
+                "Packed data has no polar or cartesian component"
+            )
         if rotated_rec.shape[-1] != packed.feature_dim:
             raise ValueError(
                 f"Reconstructed D={rotated_rec.shape[-1]}, "
@@ -136,7 +154,9 @@ class HybridPolarCartesianQuantizer:
         return restored.reshape(packed.original_shape)
 
     def estimate_bytes(self, packed: HybridPacked) -> int:
-        total = self.polar.estimate_bytes(packed.polar)
+        total = 0
+        if self.polar_enabled and packed.polar is not None:
+            total += self.polar.estimate_bytes(packed.polar)
         if packed.cartesian is not None:
             total += self.cartesian.estimate_bytes(packed.cartesian)
         # Quaternion metadata is tiny but count it honestly:

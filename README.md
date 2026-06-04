@@ -18,7 +18,7 @@ Proof status:
 - real-model validation: alpha-level on real non-random model (Qwen/Qwen2.5-0.5B-Instruct)
 - long-context validation: 512, 1024, and 2048 tokens
 - throughput reporting: separates decode speed from total end-to-end cost
-- polar quant: not implemented
+- polar quant: not implemented in stable runtime; experimental reference exists in `rfsn_v10/quantization/`
 - true arbitrary partial dequantization: not implemented
 - per-layer sensitivity: deferred to future release
 
@@ -27,7 +27,7 @@ Not claimed:
 - sparse safe inference
 - universal speedup
 - end-to-end speedup (decode TPS comparable, total time slower due to compression overhead)
-- polar quantization
+- polar quantization in stable runtime (experimental reference exists)
 - true arbitrary partial dequantization
 
 ## Overview
@@ -262,7 +262,7 @@ Sparse decode is **disabled by default**. Current sparse max cosine is below the
 
 ## Known Limitations
 
-- Polar quantization is not implemented.
+- Polar quantization is not implemented in the stable runtime. Experimental reference modules exist in `rfsn_v10/quantization/` but are not validated or default.
 - True arbitrary partial dequantization is not implemented (selected-block reconstruction via `retrieve_blocks()` exists; arbitrary token-level partial dequant remains unimplemented).
 - Production hardening and end-to-end real-model validation remain in progress.
 - RFSN is not production-ready.
@@ -333,7 +333,7 @@ python scripts/check_release_integrity.py
 ⚠ MLX-dependent quality and performance validation is environment-dependent
 ⚠ Sparse quality remains warning-scoped; sparse decode defaults to disabled
 ⚠ Production hardening remains in progress
-❌ Polar quantization (not implemented)
+❌ Polar quantization in stable runtime (experimental reference exists in `rfsn_v10/quantization/`)
 ❌ True arbitrary partial dequantization (selected-block reconstruction exists via retrieve_blocks(); arbitrary token-level partial dequant remains unimplemented)
 ❌ Disk persistence (planned for future)
 
@@ -341,4 +341,4 @@ python scripts/check_release_integrity.py
 1. Run benchmarks to get performance numbers on your hardware
 2. Review real-model validation results and adjust compression configs if needed
 3. Consider adding disk persistence for long-running workloads
-4. Evaluate polar quantization for future quality improvement
+4. Evaluate polar quantization for future quality improvement (experimental reference in `rfsn_v10/quantization/`)

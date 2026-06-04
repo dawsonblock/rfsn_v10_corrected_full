@@ -1,5 +1,5 @@
 {
-  "release": "main27",
+  "release": "main28",
   "analysis": "generation_throughput",
   "model": "Qwen/Qwen2.5-0.5B-Instruct",
   "hardware": {
