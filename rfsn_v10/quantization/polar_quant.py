@@ -1,0 +1,290 @@
+#!/usr/bin/env python3
+"""
+Iterative hierarchical PolarQuant reference implementation.
+Correct math:
+    even = r * cos(theta)
+    odd  = r * sin(theta)
+Important:
+    Use atan2(odd, even), preserving full quadrant information.
+    Do NOT force angles into [0, pi/2] unless the corresponding coordinates are
+    guaranteed non-negative. Level 0 coordinates are not guaranteed
+    non-negative.
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass
+import math
+
+import mlx.core as mx
+
+
+@dataclass
+class UniformQuantMeta:
+    bits: int
+    min_val: float
+    max_val: float
+    original_shape: tuple[int, ...]
+
+
+@dataclass
+class GroupQuantMeta:
+    bits: int
+    group_size: int
+    original_shape: tuple[int, ...]
+    original_size: int
+    padded_size: int
+    scale: mx.array
+
+
+@dataclass
+class PolarPacked:
+    angle_codes: list[mx.array]
+    angle_metas: list[UniformQuantMeta]
+    radius_codes: mx.array
+    radius_meta: GroupQuantMeta
+    original_shape: tuple[int, ...]
+    levels: int
+
+
+def _require_divisible_by_levels(d: int, levels: int) -> None:
+    base = 2**levels
+    if d % base != 0:
+        raise ValueError(
+            f"Feature dimension D={d} must be divisible by 2**levels={base}."
+        )
+
+
+def iterative_hierarchical_polar_forward(
+    x: mx.array, levels: int = 4, eps: float = 1e-12
+) -> tuple[list[mx.array], mx.array]:
+    """
+    Non-recursive hierarchical polar transform.
+    Input:
+        x: [..., D]
+    Output:
+        angles_per_level:
+            level 0: [..., D/2]
+            level 1: [..., D/4]
+            ...
+        final_radii:
+            [..., D / 2**levels]
+    """
+    if levels <= 0:
+        raise ValueError(f"levels must be positive. Got {levels}")
+    d = x.shape[-1]
+    _require_divisible_by_levels(d, levels)
+    current = x.astype(mx.float32)
+    angles: list[mx.array] = []
+    for _ in range(levels):
+        even = current[..., ::2]
+        odd = current[..., 1::2]
+        r = mx.sqrt(even * even + odd * odd + eps)
+        theta = mx.arctan2(odd, even)  # range [-pi, pi], preserves signs
+        angles.append(theta)
+        current = r
+    final_radii = current
+    return angles, final_radii
+
+
+def iterative_hierarchical_polar_inverse(
+    angles_per_level: list[mx.array], final_radii: mx.array
+) -> mx.array:
+    """
+    Exact inverse of iterative_hierarchical_polar_forward when angles/radii
+    are unquantized.
+    """
+    if not angles_per_level:
+        return final_radii
+    current = final_radii.astype(mx.float32)
+    for theta in reversed(angles_per_level):
+        if theta.shape[:-1] != current.shape[:-1]:
+            raise ValueError(
+                f"Batch shape mismatch. theta={theta.shape}, "
+                f"current={current.shape}"
+            )
+        if theta.shape[-1] != current.shape[-1]:
+            raise ValueError(
+                f"Level shape mismatch. theta last dim={theta.shape[-1]}, "
+                f"current last dim={current.shape[-1]}"
+            )
+        even = current * mx.cos(theta)
+        odd = current * mx.sin(theta)
+        # Interleave without item assignment.
+        stacked = mx.stack([even, odd], axis=-1)
+        current = stacked.reshape(
+            current.shape[:-1] + (current.shape[-1] * 2,)
+        )
+    return current
+
+
+def quantize_uniform_fixed_range(
+    x: mx.array, bits: int, min_val: float, max_val: float
+) -> tuple[mx.array, UniformQuantMeta]:
+    """
+    Uniform quantization into unsigned integer codes over a fixed range.
+    Used for angles.
+    codes in [0, 2**bits - 1]
+    """
+    if not (2 <= bits <= 16):
+        raise ValueError(f"bits must be in [2,16]. Got {bits}")
+    if not max_val > min_val:
+        raise ValueError("max_val must be greater than min_val")
+    qmax = (1 << bits) - 1
+    x_clipped = mx.clip(x.astype(mx.float32), min_val, max_val)
+    scaled = (x_clipped - min_val) * (qmax / (max_val - min_val))
+    codes = mx.round(scaled).astype(mx.uint32)
+    meta = UniformQuantMeta(
+        bits=bits,
+        min_val=float(min_val),
+        max_val=float(max_val),
+        original_shape=tuple(x.shape),
+    )
+    return codes, meta
+
+
+def dequantize_uniform_fixed_range(
+    codes: mx.array, meta: UniformQuantMeta
+) -> mx.array:
+    qmax = (1 << meta.bits) - 1
+    x = (
+        codes.astype(mx.float32)
+        * ((meta.max_val - meta.min_val) / qmax)
+        + meta.min_val
+    )
+    return x.reshape(meta.original_shape)
+
+
+def quantize_group_unsigned(
+    x: mx.array, bits: int, group_size: int = 64, eps: float = 1e-8
+) -> tuple[mx.array, GroupQuantMeta]:
+    """
+    Groupwise unsigned quantization for non-negative radii.
+    Uses per-group max scale:
+        q = round(x / scale)
+        scale = max(x_group) / qmax
+    """
+    if not (2 <= bits <= 16):
+        raise ValueError(f"bits must be in [2,16]. Got {bits}")
+    if group_size <= 0:
+        raise ValueError("group_size must be positive")
+    original_shape = tuple(x.shape)
+    flat = x.astype(mx.float32).reshape(-1)
+    original_size = int(flat.size)
+    pad = (group_size - (original_size % group_size)) % group_size
+    if pad:
+        flat = mx.concatenate(
+            [flat, mx.zeros((pad,), dtype=flat.dtype)], axis=0
+        )
+    padded_size = int(flat.size)
+    grouped = flat.reshape(-1, group_size)
+    qmax = (1 << bits) - 1
+    max_abs = mx.maximum(
+        mx.max(grouped, axis=1),
+        mx.array(eps, dtype=mx.float32),
+    )
+    scale = max_abs / float(qmax)
+    codes = mx.round(grouped / scale[:, None])
+    codes = mx.clip(codes, 0, qmax).astype(mx.uint32).reshape(-1)
+    meta = GroupQuantMeta(
+        bits=bits,
+        group_size=group_size,
+        original_shape=original_shape,
+        original_size=original_size,
+        padded_size=padded_size,
+        scale=scale,
+    )
+    return codes, meta
+
+
+def dequantize_group_unsigned(
+    codes: mx.array, meta: GroupQuantMeta
+) -> mx.array:
+    flat = codes.astype(mx.float32).reshape(-1)
+    if int(flat.size) != meta.padded_size:
+        raise ValueError(
+            f"Expected {meta.padded_size} codes, got {flat.size}"
+        )
+    grouped = flat.reshape(-1, meta.group_size)
+    restored = grouped * meta.scale[:, None]
+    restored = restored.reshape(-1)[: meta.original_size]
+    return restored.reshape(meta.original_shape)
+
+
+class PolarQuantizer:
+    """
+    Hierarchical PolarQuant reference quantizer.
+    Angles use fixed range [-pi, pi].
+    Radii use unsigned groupwise quantization.
+    """
+
+    def __init__(
+        self,
+        levels: int = 4,
+        angle_bits: int = 5,
+        radius_bits: int = 8,
+        radius_group_size: int = 64,
+    ):
+        self.levels = levels
+        self.angle_bits = angle_bits
+        self.radius_bits = radius_bits
+        self.radius_group_size = radius_group_size
+
+    def quantize(self, x: mx.array) -> PolarPacked:
+        angles, final_radii = iterative_hierarchical_polar_forward(
+            x, self.levels
+        )
+        angle_codes: list[mx.array] = []
+        angle_metas: list[UniformQuantMeta] = []
+        for theta in angles:
+            codes, meta = quantize_uniform_fixed_range(
+                theta,
+                bits=self.angle_bits,
+                min_val=-math.pi,
+                max_val=math.pi,
+            )
+            angle_codes.append(codes)
+            angle_metas.append(meta)
+        radius_codes, radius_meta = quantize_group_unsigned(
+            final_radii,
+            bits=self.radius_bits,
+            group_size=self.radius_group_size,
+        )
+        return PolarPacked(
+            angle_codes=angle_codes,
+            angle_metas=angle_metas,
+            radius_codes=radius_codes,
+            radius_meta=radius_meta,
+            original_shape=tuple(x.shape),
+            levels=self.levels,
+        )
+
+    def dequantize(self, packed: PolarPacked) -> mx.array:
+        if packed.levels != self.levels:
+            raise ValueError(
+                f"Packed levels={packed.levels}, "
+                f"quantizer levels={self.levels}"
+            )
+        angles = [
+            dequantize_uniform_fixed_range(codes, meta)
+            for codes, meta in zip(
+                packed.angle_codes, packed.angle_metas
+            )
+        ]
+        final_radii = dequantize_group_unsigned(
+            packed.radius_codes, packed.radius_meta
+        )
+        restored = iterative_hierarchical_polar_inverse(angles, final_radii)
+        return restored.reshape(packed.original_shape)
+
+    def estimate_bytes(self, packed: PolarPacked) -> int:
+        """
+        Honest byte accounting before optional bit-packing.
+        This counts ideal packed bits for codes plus float32 scales.
+        """
+        angle_bits = sum(
+            int(c.size) * self.angle_bits for c in packed.angle_codes
+        )
+        radius_bits = int(packed.radius_codes.size) * self.radius_bits
+        scale_bytes = int(packed.radius_meta.scale.size) * 4
+        total_bits = angle_bits + radius_bits
+        return (total_bits + 7) // 8 + scale_bytes
