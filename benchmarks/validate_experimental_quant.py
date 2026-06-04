@@ -252,6 +252,32 @@ def _finite_mean(vals: list[float]) -> float:
     return float(sum(finite) / len(finite)) if finite else float("nan")
 
 
+def aggregate_memory_from_per_prompt(
+    per_prompt: list[dict],
+) -> dict:
+    """Aggregate memory from per-prompt rows using real-model cache basis."""
+    rows = [
+        r
+        for r in per_prompt
+        if r.get("fp16_kv_bytes") and r.get("total_compressed_bytes")
+    ]
+    if not rows:
+        return {
+            "fp16_kv_bytes": None,
+            "total_compressed_bytes": None,
+            "actual_compression_ratio": None,
+            "memory_basis": "missing",
+        }
+    fp16 = sum(int(r["fp16_kv_bytes"]) for r in rows) / len(rows)
+    comp = sum(int(r["total_compressed_bytes"]) for r in rows) / len(rows)
+    return {
+        "fp16_kv_bytes": int(fp16),
+        "total_compressed_bytes": int(comp),
+        "actual_compression_ratio": float(fp16 / comp) if comp > 0 else 0.0,
+        "memory_basis": "mean_per_prompt_real_model_cache",
+    }
+
+
 def _compute_logit_metrics(
     baseline_logits_list: list[torch.Tensor],
     compressed_logits_list: list[torch.Tensor],
@@ -664,6 +690,7 @@ def _run_real_model_validation(
             })
             continue
 
+        mem = aggregate_memory_from_per_prompt(per_prompt)
         agg: dict[str, Any] = {
             "name": config["name"],
             "mode": config.get("mode", "none"),
@@ -701,6 +728,12 @@ def _run_real_model_validation(
             "per_prompt": per_prompt,
             "prompts_evaluated": len(per_prompt),
         }
+        agg.update({
+            "fp16_kv_bytes": mem["fp16_kv_bytes"],
+            "total_compressed_bytes": mem["total_compressed_bytes"],
+            "actual_compression_ratio": mem["actual_compression_ratio"],
+            "memory_basis": mem["memory_basis"],
+        })
         agg["status"] = _determine_status(agg)
         config_results.append(agg)
         print(
@@ -1295,21 +1328,18 @@ def main() -> None:
     for cfg in payload.get("configs", []):
         memory_entries.append({
             "config": cfg["name"],
-            "fp16_bytes": cfg.get("fp16_kv_bytes", 0),
-            "compressed_bytes": cfg.get("actual_packed_code_bytes", 0),
-            "metadata_bytes": (
-                cfg.get("scale_metadata_bytes", 0)
-                + cfg.get("shape_metadata_bytes", 0)
-            ),
-            "qjl_bytes": cfg.get("qjl_overhead_bytes", 0),
-            "compression_ratio": cfg.get("actual_compression_ratio", 1.0),
+            "fp16_kv_bytes": cfg.get("fp16_kv_bytes"),
+            "total_compressed_bytes": cfg.get("total_compressed_bytes"),
+            "actual_compression_ratio": cfg.get("actual_compression_ratio"),
+            "memory_basis": cfg.get("memory_basis", "unknown"),
             "passes_quality": cfg.get("status") in ("pass", "reference"),
             "passes_all_contexts": None,  # filled after long-context run
+            "uses_qjl": cfg.get("qjl_overhead_bytes", 0) > 0,
         })
     memory_payload = {
         "release": "experimental",
         "model": args.model,
-        "configs": memory_entries,
+        "rows": memory_entries,
     }
     memory_out.write_text(
         json.dumps(memory_payload, indent=2) + "\n", encoding="utf-8"

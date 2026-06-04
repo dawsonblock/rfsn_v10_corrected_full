@@ -226,7 +226,23 @@ python scripts/check_production_regression.py \
 
 ## Experimental Quantization
 
-The following quantization path is **experimental** and not part of the stable runtime. It exists to evaluate whether IsoQuant + Polar + TurboPolar can complement or beat the stable `k8_v5_gs64` baseline.
+This section is about the **experimental branch only**. The stable runtime default remains `k8_v5_gs64`.
+
+**Stable Main 28:**
+
+- Default runtime config: `k8_v5_gs64`
+- Sparse decode: disabled by default
+- End-to-end speedup: not proven (decode TPS comparable, total time slower due to compression overhead)
+- Not production-ready
+
+**Experimental branch:**
+
+- IsoQuant / Polar / TurboPolar reference modules exist in `rfsn_v10/quantization/`
+- Bit-packing is real for 2–8 bit code buffers
+- Code widths above 8 use raw `uint32` fallback and are excluded from memory-optimized recommendations
+- QJL is implemented as a reference module but **fails** the shipped attention-score benchmark
+- Comparison and memory proof are experimental
+- **Not** the stable runtime default
 
 **Experimental modules** (in `rfsn_v10/quantization/`):
 
@@ -234,33 +250,22 @@ The following quantization path is **experimental** and not part of the stable r
 - `grouped_cartesian.py` - Grouped Cartesian quantizer with real bit-packing
 - `hybrid_polar_cartesian.py` - Hybrid Polar-Cartesian with IsoQuant rotation
 - `turbo_polar_quant.py` - WHT + single-level polar for keys, Cartesian for values
-- `qjl_score_correction.py` - QJL attention-score correction sketch
+- `qjl_score_correction.py` - QJL attention-score correction reference
 - `kv_quant_manager.py` - Experimental QuantizedKVManager
 - `turbo_polar_kv_manager.py` - TurboPolarKVManager wrapper
 
-**Real bit-packing**: Experimental quantizers use `BitPackedQuantizer` from `bitpack.py` to pack integer codes into compact `uint32` words. `estimate_bytes()` reports actual packed buffer bytes, not theoretical ideal bits.
-
-**Bit-width policy**: Bit-packing is real for 2–8 bit code buffers. Code widths above 8 currently use raw `uint32` fallback and are not memory-optimized.
-
-**QJL status**: QJL attention-score correction exists as research code but failed the current attention-score benchmark (worse MAE, RMSE, and KL than base reconstruction). It is disabled by default and not enabled in validated model paths.
+**QJL status**: QJL score correction is implemented as a reference module, but it currently fails the shipped attention-score benchmark and is disabled by default. It is not part of the validated model path.
 
 **Running experimental benchmarks**:
 ```bash
-# 0.5B model validation (produces real_model_validation.json,
-#                        long_context_validation.json,
-#                        memory_accounting.json)
+# 0.5B model validation (produces per-variant real/long artifacts
+#                        and memory_accounting.json)
 python benchmarks/validate_experimental_quant.py \
     --model Qwen/Qwen2.5-0.5B-Instruct \
     --tokens 512 \
     --positions 64 \
+    --configs experimental_hybrid,turbo_polar,adaptive,turbo_k8r8v6 \
     --out-dir artifacts/proof/experimental
-
-# 1.5B model validation (infrastructure ready; deferred run)
-python benchmarks/validate_experimental_quant.py \
-    --model Qwen/Qwen2.5-1.5B-Instruct \
-    --tokens 512 \
-    --positions 64 \
-    --out-dir artifacts/proof/experimental/qwen_1_5b
 
 # QJL attention-score validation
 python benchmarks/validate_qjl_attention_score.py \
@@ -277,7 +282,7 @@ python scripts/generate_experimental_comparison.py \
 pytest tests/test_experimental_bitpacking.py -q -s
 ```
 
-**Status**: Experimental path is not validated as production-ready. No config is recommended after failing any context. See `artifacts/proof/experimental/comparison_summary.md` for the latest fair ranking.
+**Status**: Experimental path is not validated as production-ready. No config is recommended after failing any context. Unknown context fields produce `needs_context_data`, never `candidate`. See `artifacts/proof/experimental/comparison_summary.md` for the latest fair ranking.
 
 Policy:
 - Tune thresholds in `scripts/proof_regression_thresholds.json` only when benchmark noise or hardware/runtime variance is proven to cause false positives across repeated runs.

@@ -147,7 +147,16 @@
         }
       ],
       "prompts_evaluated": 5,
-      "status": "pass"
+      "status": "pass",
+      "fp16_kv_bytes": 5492736,
+      "estimated_compressed_bytes": 2417760,
+      "actual_packed_code_bytes": 2417760,
+      "scale_metadata_bytes": 0,
+      "shape_metadata_bytes": 0,
+      "qjl_overhead_bytes": 0,
+      "total_compressed_bytes": 2417760,
+      "estimated_compression_ratio": 2.2718,
+      "actual_compression_ratio": 2.2718
     },
     {
       "name": "turbo_polar",
@@ -285,7 +294,16 @@
         }
       ],
       "prompts_evaluated": 5,
-      "status": "pass"
+      "status": "pass",
+      "fp16_kv_bytes": 5492736,
+      "estimated_compressed_bytes": 2417760,
+      "actual_packed_code_bytes": 2417760,
+      "scale_metadata_bytes": 0,
+      "shape_metadata_bytes": 0,
+      "qjl_overhead_bytes": 0,
+      "total_compressed_bytes": 2417760,
+      "estimated_compression_ratio": 2.2718,
+      "actual_compression_ratio": 2.2718
     },
     {
       "name": "adaptive",
@@ -423,7 +441,16 @@
         }
       ],
       "prompts_evaluated": 5,
-      "status": "pass"
+      "status": "pass",
+      "fp16_kv_bytes": 5492736,
+      "estimated_compressed_bytes": 2417760,
+      "actual_packed_code_bytes": 2417760,
+      "scale_metadata_bytes": 0,
+      "shape_metadata_bytes": 0,
+      "qjl_overhead_bytes": 0,
+      "total_compressed_bytes": 2417760,
+      "estimated_compression_ratio": 2.2718,
+      "actual_compression_ratio": 2.2718
     },
     {
       "name": "turbo_k8r8v6",
@@ -561,7 +588,16 @@
         }
       ],
       "prompts_evaluated": 5,
-      "status": "pass"
+      "status": "pass",
+      "fp16_kv_bytes": 5492736,
+      "estimated_compressed_bytes": 2600928,
+      "actual_packed_code_bytes": 2600928,
+      "scale_metadata_bytes": 0,
+      "shape_metadata_bytes": 0,
+      "qjl_overhead_bytes": 0,
+      "total_compressed_bytes": 2600928,
+      "estimated_compression_ratio": 2.1118,
+      "actual_compression_ratio": 2.1118
     }
   ],
   "sparse_enabled": false,

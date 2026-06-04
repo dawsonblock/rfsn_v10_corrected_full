@@ -65,7 +65,9 @@ def check() -> list[str]:
         # Check first 10 non-empty lines for Main 28 title
         lines = readme.splitlines()
         non_empty = [ln for ln in lines if ln.strip()][:10]
-        has_title = any(ln.startswith("# RFSN v10 Main 28") for ln in non_empty)
+        has_title = any(
+            ln.startswith("# RFSN v10 Main 28") for ln in non_empty
+        )
         if not has_title:
             errors.append("README title is not Main 28")
 
@@ -80,8 +82,9 @@ def check() -> list[str]:
             "artifacts/proof/main26",
             "artifacts/proof/main27",
         ]:
-            # Allow historical mentions if they appear after the word
-            # "historical" or inside a note about old releases — check each line
+            # Allow historical mentions if they appear after
+            # the word "historical" or inside a note about old
+            # releases — check each line
             for lineno, line in enumerate(readme.splitlines(), 1):
                 if stale in line:
                     lower = line.lower()
@@ -110,7 +113,9 @@ def check() -> list[str]:
         ]
         # Use word boundaries to avoid matching partial words
         # (e.g., "noted" contains "not")
-        negation_patterns = ["not ", "no ", "never ", "unimplemented", "disabled"]
+        negation_patterns = [
+            "not ", "no ", "never ", "unimplemented", "disabled"
+        ]
         for line in readme.splitlines():
             lower_line = line.lower()
             for phrase in false_claims:
@@ -127,7 +132,9 @@ def check() -> list[str]:
                     )
 
         # README must qualify PolarQuant status if file exists
-        polar_quant_path = root / "rfsn_v10" / "quantization" / "polar_quant.py"
+        polar_quant_path = (
+            root / "rfsn_v10" / "quantization" / "polar_quant.py"
+        )
         if polar_quant_path.exists():
             readme_lower = readme.lower()
             mentions_polar = (
@@ -182,19 +189,53 @@ def check() -> list[str]:
                             for row in data.get("rows", []):
                                 status = row.get("recommended_status", "")
                                 if status == "candidate":
-                                    # Candidate must pass all contexts
-                                    passes = all(
-                                        row.get(f"pass_{ctx}") == "pass"
-                                        for ctx in (512, 1024, 2048)
-                                        if row.get(f"pass_{ctx}") != "unknown"
-                                    )
-                                    if not passes:
-                                        errors.append(
-                                            f"comparison row {row['config']} "
-                                            f"is candidate but fails contexts"
-                                        )
+                                    for ctx in (512, 1024, 2048):
+                                        val = row.get(f"pass_{ctx}")
+                                        if val != "pass":
+                                            errors.append(
+                                                f"{row['config']}: candidate "
+                                                f"has non-pass context {ctx}: "
+                                                f"{val}"
+                                            )
                     except Exception:
                         pass
+
+        # Memory accounting consistency
+        mem_path = exp_dir / "memory_accounting.json"
+        if mem_path.exists():
+            try:
+                mem = json.loads(mem_path.read_text(encoding="utf-8"))
+                rows = mem.get("rows", [])
+                if not rows:
+                    errors.append("memory_accounting.json has no rows")
+                for row in rows:
+                    cfg = row.get("config", "<unknown>")
+                    ratio = row.get("actual_compression_ratio")
+                    fp16 = row.get("fp16_kv_bytes")
+                    comp = row.get("total_compressed_bytes")
+                    basis = row.get("memory_basis")
+                    if ratio is None or ratio <= 0:
+                        errors.append(
+                            f"{cfg}: invalid actual_compression_ratio"
+                        )
+                    if fp16 is None or fp16 <= 0:
+                        errors.append(f"{cfg}: invalid fp16_kv_bytes")
+                    if comp is None or comp <= 0:
+                        errors.append(
+                            f"{cfg}: invalid total_compressed_bytes"
+                        )
+                    if basis not in {
+                        "mean_per_prompt_real_model_cache",
+                        "real_model_cache",
+                    }:
+                        errors.append(
+                            f"{cfg}: memory_basis is not real-model based: "
+                            f"{basis}"
+                        )
+            except Exception as exc:
+                errors.append(
+                    f"memory_accounting.json parse error: {exc}"
+                )
 
     # --- Main 28 artifact directory ---
     artifact_dir = root / "artifacts" / "proof" / "main28"
@@ -240,10 +281,13 @@ def check() -> list[str]:
         manifest_path = artifact_dir / "main28_release_manifest.json"
         if manifest_path.exists():
             try:
-                manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+                manifest = json.loads(
+                    manifest_path.read_text(encoding="utf-8")
+                )
                 if manifest.get("release") != "main28":
                     errors.append(
-                        "main28_release_manifest.json release field is not 'main28'"
+                        "main28_release_manifest.json release "
+                        "field is not 'main28'"
                     )
             except Exception:
                 errors.append("main28_release_manifest.json is not valid JSON")
@@ -277,7 +321,8 @@ def check() -> list[str]:
                 model_id = data.get("model", "")
                 if "tiny-random" in model_id.lower():
                     errors.append(
-                        "real_model_validation.json still uses tiny-random model"
+                        "real_model_validation.json still uses "
+                        "tiny-random model"
                     )
                 if data.get("sparse_enabled") is True:
                     errors.append(
@@ -292,12 +337,14 @@ def check() -> list[str]:
                         )
                 if data.get("release") != "main28":
                     errors.append(
-                        "real_model_validation.json release field is not 'main28'"
+                        "real_model_validation.json release "
+                        "field is not 'main28'"
                     )
             except Exception as exc:
                 errors.append(f"real_model_validation.json parse error: {exc}")
 
-        # long_context_validation.json: recommended config must pass all contexts
+        # long_context_validation.json: recommended config must
+        # pass all contexts
         long_ctx_path = artifact_dir / "long_context_validation.json"
         if long_ctx_path.exists():
             try:
@@ -315,7 +362,9 @@ def check() -> list[str]:
                                         f"{ctx_entry.get('tokens')} tokens"
                                     )
             except Exception as exc:
-                errors.append(f"long_context_validation.json parse error: {exc}")
+                errors.append(
+                    f"long_context_validation.json parse error: {exc}"
+                )
 
     return errors
 
