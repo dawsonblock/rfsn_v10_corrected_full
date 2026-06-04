@@ -42,9 +42,9 @@
       "pass_512": "pass",
       "pass_1024": "pass",
       "pass_2048": "pass",
-      "compression_ratio": 2.3703703703703702,
-      "total_compressed_bytes": 2649024,
-      "memory_basis": "generation_throughput",
+      "compression_ratio": 2.2269967304997667,
+      "total_compressed_bytes": 2466432,
+      "memory_basis": "mean_per_prompt_real_model_cache",
       "recommended_status": "candidate"
     },
     {
@@ -58,9 +58,9 @@
       "pass_512": "pass",
       "pass_1024": "pass",
       "pass_2048": "pass",
-      "compression_ratio": 2.2857142857142856,
-      "total_compressed_bytes": 2747136,
-      "memory_basis": "generation_throughput",
+      "compression_ratio": 2.0820960698689954,
+      "total_compressed_bytes": 2638080,
+      "memory_basis": "mean_per_prompt_real_model_cache",
       "recommended_status": "candidate"
     },
     {
@@ -128,5 +128,10 @@
     "recommended_status values: reference, candidate, rejected_real_model, rejected_quality, rejected_context, rejected_no_compression, needs_memory_data, needs_context_data, missing_data",
     "No config is recommended after failing any context.",
     "Unknown context fields produce needs_context_data, never candidate."
+  ],
+  "memory_notes": [
+    "experimental_hybrid, turbo_polar, and adaptive use identical bit widths (8/8/7/8/5); memory differs only if cartesian_bits or group_size changes. adaptive differs only by adaptive_angle_range=True (quality tuning, not storage).",
+    "turbo_k8r8v6 uses cartesian_bits=6, producing larger codes (2,600,928 bytes).",
+    "All configs now use mean_per_prompt_real_model_cache basis via validate_experimental_quant.py."
   ]
 }

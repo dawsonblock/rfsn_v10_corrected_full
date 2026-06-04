@@ -8,8 +8,8 @@
 | Config | CosMean | CosMin | Top5 | KL | NLLΔ | 512 | 1024 | 2048 | CompRatio | Bytes | Status |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | baseline_fp16 | - | - | - | - | - | pass | pass | pass | 1.0000 | - | reference |
-| stable_k8_v5_gs64 | 0.9998 | 0.9950 | 0.9750 | 0.0000 | 0.0001 | pass | pass | pass | 2.3704 | 2649024 | candidate |
-| stable_k8_v5_gs32 | 0.9999 | 0.9992 | 0.9831 | 0.0000 | -0.0000 | pass | pass | pass | 2.2857 | 2747136 | candidate |
+| stable_k8_v5_gs64 | 0.9998 | 0.9950 | 0.9750 | 0.0000 | 0.0001 | pass | pass | pass | 2.2270 | 2466432 | candidate |
+| stable_k8_v5_gs32 | 0.9999 | 0.9992 | 0.9831 | 0.0000 | -0.0000 | pass | pass | pass | 2.0821 | 2638080 | candidate |
 | experimental_hybrid | 0.9996 | 0.9941 | 0.9762 | 0.0000 | 0.0001 | pass | pass | pass | 2.2718 | 2417760 | candidate |
 | turbo_polar | 0.9996 | 0.9941 | 0.9775 | 0.0000 | 0.0001 | pass | pass | pass | 2.2718 | 2417760 | candidate |
 | adaptive | 0.9999 | 0.9991 | 0.9869 | 0.0000 | 0.0001 | pass | pass | pass | 2.2718 | 2417760 | candidate |

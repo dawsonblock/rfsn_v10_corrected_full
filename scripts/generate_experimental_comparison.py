@@ -166,14 +166,24 @@ def _memory_from_throughput(throughput_data: dict, name: str) -> dict:
     return {}
 
 
-def load_stable_config(stable_dir: Path, alias: str, stable_name: str) -> dict:
+def load_stable_config(
+    stable_dir: Path, alias: str, stable_name: str
+) -> dict:
     real = _load_json(stable_dir / "real_model_validation.json")
     long = _load_json(stable_dir / "long_context_validation.json")
     throughput = _load_json(stable_dir / "generation_throughput.json")
 
     real_cfg = _find_config(real, stable_name) or {}
     context_passes = extract_context_passes(long or {}, stable_name)
-    mem = _memory_from_throughput(throughput, stable_name)
+
+    # Prefer same-basis memory from experimental script run
+    same_basis_mem = _load_json(
+        Path("artifacts/proof/experimental_stable_basis")
+        / "memory_accounting.json"
+    )
+    mem = _memory_from_accounting(same_basis_mem, stable_name)
+    if not mem:
+        mem = _memory_from_throughput(throughput, stable_name)
 
     ctx_status, ctx_detail = classify_context_status(context_passes)
 
@@ -422,6 +432,17 @@ def main() -> None:
             "No config is recommended after failing any context.",
             "Unknown context fields produce needs_context_data, "
             "never candidate.",
+        ],
+        "memory_notes": [
+            "experimental_hybrid, turbo_polar, and adaptive use "
+            "identical bit widths (8/8/7/8/5); memory differs "
+            "only if cartesian_bits or group_size changes. "
+            "adaptive differs only by adaptive_angle_range=True "
+            "(quality tuning, not storage).",
+            "turbo_k8r8v6 uses cartesian_bits=6, producing "
+            "larger codes (2,600,928 bytes).",
+            "All configs now use mean_per_prompt_real_model_cache "
+            "basis via validate_experimental_quant.py.",
         ],
     }
     json_path = out_dir / "comparison_summary.json"

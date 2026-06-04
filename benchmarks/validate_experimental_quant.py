@@ -268,11 +268,25 @@ def aggregate_memory_from_per_prompt(
             "actual_compression_ratio": None,
             "memory_basis": "missing",
         }
-    fp16 = sum(int(r["fp16_kv_bytes"]) for r in rows) / len(rows)
-    comp = sum(int(r["total_compressed_bytes"]) for r in rows) / len(rows)
+    fp16_vals = [int(r["fp16_kv_bytes"]) for r in rows]
+    comp_vals = [int(r["total_compressed_bytes"]) for r in rows]
+    fp16 = sum(fp16_vals) / len(rows)
+    comp = sum(comp_vals) / len(rows)
+    fp16_std = (
+        float(math.sqrt(sum((v - fp16) ** 2 for v in fp16_vals) / len(rows)))
+        if len(rows) > 1
+        else 0.0
+    )
+    comp_std = (
+        float(math.sqrt(sum((v - comp) ** 2 for v in comp_vals) / len(rows)))
+        if len(rows) > 1
+        else 0.0
+    )
     return {
         "fp16_kv_bytes": int(fp16),
+        "fp16_kv_bytes_std": int(fp16_std),
         "total_compressed_bytes": int(comp),
+        "total_compressed_bytes_std": int(comp_std),
         "actual_compression_ratio": float(fp16 / comp) if comp > 0 else 0.0,
         "memory_basis": "mean_per_prompt_real_model_cache",
     }
@@ -401,10 +415,20 @@ def _compute_memory_metrics(
 
         if hasattr(manager, "quantize") and hasattr(manager, "estimate_bytes"):
             packet = manager.quantize(k_mx, v_mx)
-            actual_packed += manager.estimate_bytes(packet)
+            packed = manager.estimate_bytes(packet)
+            actual_packed += packed
         elif hasattr(manager, "quantizer"):
             packet = manager.quantizer.quantize(k_mx, v_mx)
-            actual_packed += manager.quantizer.estimate_bytes(packet)
+            packed = manager.quantizer.estimate_bytes(packet)
+            actual_packed += packed
+
+        # Bit-packing sanity: packed must not exceed raw fp16 for this layer
+        raw_layer_bytes = int(k_mx.size + v_mx.size) * 2
+        if packed > raw_layer_bytes:
+            raise RuntimeError(
+                f"Bit-packing expansion: packed {packed} > "
+                f"raw {raw_layer_bytes} for {config.get('name')}"
+            )
 
         # QJL overhead if present
         if hasattr(packet, "uses_qjl") and packet.uses_qjl:
@@ -420,6 +444,15 @@ def _compute_memory_metrics(
                 qjl_overhead += int(packet.v_qjl.residual_norm.size) * 4
 
     total = actual_packed + qjl_overhead
+    ratio = fp16_bytes / max(total, 1)
+    expected = fp16_bytes / max(total, 1)
+    assert abs(ratio - expected) < 1e-9, (
+        f"compression ratio mismatch: {ratio} != {expected}"
+    )
+    if actual_packed > 0 and fp16_bytes > 0:
+        assert ratio >= 1.0 or config.get("name") == "baseline_fp16", (
+            f"{config.get('name')}: compression ratio {ratio} < 1.0"
+        )
     return {
         "fp16_kv_bytes": fp16_bytes,
         "estimated_compressed_bytes": actual_packed,
@@ -429,7 +462,7 @@ def _compute_memory_metrics(
         "qjl_overhead_bytes": qjl_overhead,
         "total_compressed_bytes": total,
         "estimated_compression_ratio": fp16_bytes / max(actual_packed, 1),
-        "actual_compression_ratio": fp16_bytes / max(total, 1),
+        "actual_compression_ratio": ratio,
     }
 
 
