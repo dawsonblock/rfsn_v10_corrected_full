@@ -2,6 +2,7 @@
 """Release integrity checker for RFSN v10 Main 28."""
 from __future__ import annotations
 
+import ast
 import json
 import subprocess
 import sys
@@ -151,6 +152,62 @@ def check() -> list[str]:
                     "stable vs experimental status"
                 )
 
+    # --- Pytest collection sanity check ---
+    try:
+        result = subprocess.run(
+            [sys.executable, "-m", "pytest", "--collect-only", "-q",
+             str(root / "tests")],
+            capture_output=True,
+            text=True,
+            timeout=60,
+            cwd=str(root),
+        )
+        if result.returncode != 0:
+            stderr_snippet = result.stderr[:500]
+            errors.append(
+                f"pytest collection failed: {stderr_snippet}"
+            )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        errors.append(f"pytest collection check could not run: {exc}")
+
+    # --- Test file MLX import safety ---
+    def _has_top_level_mlx_import(tree: ast.AST) -> bool:
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.Import, ast.ImportFrom)):
+                if isinstance(node, ast.Import):
+                    for alias in node.names:
+                        if alias.name == "mlx" or \
+                                alias.name.startswith("mlx."):
+                            return True
+                elif isinstance(node, ast.ImportFrom):
+                    if node.module and node.module.startswith("mlx"):
+                        return True
+        return False
+
+    def _has_importorskip(tree: ast.AST) -> bool:
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call):
+                func = node.func
+                if isinstance(func, ast.Attribute):
+                    if func.attr == "importorskip":
+                        return True
+                elif isinstance(func, ast.Name):
+                    if func.id == "importorskip":
+                        return True
+        return False
+
+    for test_file in (root / "tests").rglob("*.py"):
+        try:
+            source = test_file.read_text(encoding="utf-8")
+            tree = ast.parse(source)
+            if _has_top_level_mlx_import(tree) and not _has_importorskip(tree):
+                errors.append(
+                    f"{test_file.name} imports mlx at top level "
+                    f"without pytest.importorskip"
+                )
+        except (OSError, SyntaxError):
+            pass
+
     # --- Experimental branch checks ---
     exp_dir = root / "artifacts" / "proof" / "experimental"
     exp_code_present = (
@@ -189,15 +246,33 @@ def check() -> list[str]:
                             for row in data.get("rows", []):
                                 status = row.get("recommended_status", "")
                                 if status == "candidate":
+                                    # Candidate must have standard contexts
                                     for ctx in (512, 1024, 2048):
                                         val = row.get(f"pass_{ctx}")
                                         if val != "pass":
+                                            config = row.get(
+                                                "config", "unknown")
                                             errors.append(
-                                                f"{row['config']}: candidate "
+                                                f"{config}: candidate "
                                                 f"has non-pass context {ctx}: "
                                                 f"{val}"
                                             )
-                    except Exception:
+                                    # Candidate must have all required fields
+                                    required = {
+                                        "config",
+                                        "pass_512",
+                                        "pass_1024",
+                                        "pass_2048",
+                                        "recommended_status",
+                                    }
+                                    missing = required - set(row)
+                                    for key in missing:
+                                        config = row.get("config", "unknown")
+                                        errors.append(
+                                            f"{config}: candidate "
+                                            f"missing required field: {key}"
+                                        )
+                    except (OSError, json.JSONDecodeError):
                         pass
 
         # Memory accounting consistency

@@ -323,3 +323,61 @@ def test_sign_cache_is_thread_safe(tmp_path):
     y = manager._apply_signs_on_the_fly(x, seed=777)
     assert 2 <= len(manager._sign_cache) <= 9
     assert mx.sum(y).item() != 0.0
+
+
+def test_retrieve_legacy_packed_size_validation(kv_manager):
+    k = mx.random.normal((1, 8, 128, 64))
+    v = mx.random.normal((1, 8, 128, 64))
+    kv_manager.store("legacy_validate", k, v, 128)
+    cache = kv_manager.active_caches["legacy_validate"]
+    # Force legacy path by setting num_blocks=0
+    original_num_blocks = cache.num_blocks
+    cache.num_blocks = 0
+
+    # Correct size should pass
+    kv_manager.retrieve("legacy_validate", out_dtype=mx.float32)
+
+    # Too-small k_packed should fail
+    original_k = cache.k_packed
+    cache.k_packed = original_k[:1]
+    with pytest.raises(ValueError, match="metadata mismatch"):
+        kv_manager.retrieve("legacy_validate", out_dtype=mx.float32)
+    cache.k_packed = original_k
+
+    # Too-small v_packed should fail
+    original_v = cache.v_packed
+    cache.v_packed = original_v[:1]
+    with pytest.raises(ValueError, match="metadata mismatch"):
+        kv_manager.retrieve("legacy_validate", out_dtype=mx.float32)
+    cache.v_packed = original_v
+
+    cache.num_blocks = original_num_blocks
+
+
+def test_retrieve_block_packed_size_validation(kv_manager):
+    k = mx.random.normal((1, 8, 128, 64))
+    v = mx.random.normal((1, 8, 128, 64))
+    kv_manager.store("block_validate", k, v, 128)
+    cache = kv_manager.active_caches["block_validate"]
+    assert cache.num_blocks > 0
+
+    # Correct sizes should pass
+    kv_manager.retrieve("block_validate", out_dtype=mx.float32)
+
+    # Corrupt k block offset to make first block appear too small
+    original_offsets = cache.k_block_packed_offsets[:]
+    cache.k_block_packed_offsets[1] = (
+        cache.k_block_packed_offsets[0] + 1
+    )
+    with pytest.raises(ValueError, match="metadata mismatch"):
+        kv_manager.retrieve("block_validate", out_dtype=mx.float32)
+    cache.k_block_packed_offsets = original_offsets
+
+    # Corrupt v block offset similarly
+    original_v_offsets = cache.v_block_packed_offsets[:]
+    cache.v_block_packed_offsets[1] = (
+        cache.v_block_packed_offsets[0] + 1
+    )
+    with pytest.raises(ValueError, match="metadata mismatch"):
+        kv_manager.retrieve("block_validate", out_dtype=mx.float32)
+    cache.v_block_packed_offsets = original_v_offsets

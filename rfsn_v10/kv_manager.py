@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import math
+import sys
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -805,12 +806,27 @@ class RFSNTurboQuantKVManager:
     # ------------------------------------------------------------------
     def _estimate_cache_bytes(self, cache: TurboQuantKVCache) -> int:
         """Estimate the memory usage of a cache entry in bytes."""
-        return (
+        base = (
             cache.k_packed.size * 4  # uint32
             + cache.k_scales.size * 4  # float32
             + cache.v_packed.size * 4  # uint32
             + cache.v_scales.size * 4  # float32
         )
+        # Account for Python list overhead of block metadata (approximate)
+        if cache.num_blocks > 0:
+            list_overhead = sum(
+                sys.getsizeof(lst)
+                for lst in (
+                    cache.k_block_packed_offsets,
+                    cache.k_block_scale_offsets,
+                    cache.k_block_n_values,
+                    cache.v_block_packed_offsets,
+                    cache.v_block_scale_offsets,
+                    cache.v_block_n_values,
+                )
+            )
+            base += list_overhead
+        return base
 
     def _enforce_memory_budget(self) -> None:
         """Evict least-recently-used unpinned caches until budget is met."""
@@ -866,6 +882,10 @@ class RFSNTurboQuantKVManager:
         if token_count <= 0:
             raise ValueError(
                 f"token_count must be positive, got {token_count}"
+            )
+        if keys.shape[2] <= 0:
+            raise ValueError(
+                f"Sequence dimension must be positive, got {keys.shape[2]}"
             )
 
         k_bits = self.k_bits if k_bits is None else k_bits
@@ -1034,6 +1054,59 @@ class RFSNTurboQuantKVManager:
                 f"current group_size={self.group_size}"
             )
 
+        # Validate bits consistency against packed data shapes
+        def _expected_packed_words(n_values: int, bits: int) -> int:
+            codes_per_word = 32 // bits
+            return (n_values + codes_per_word - 1) // codes_per_word
+
+        if cache.num_blocks == 0:
+            expected_k = _expected_packed_words(
+                cache.k_n_values, cache.k_bits
+            )
+            if cache.k_packed.size < expected_k:
+                raise ValueError(
+                    f"metadata mismatch: stored k_bits={cache.k_bits} "
+                    f"inconsistent with k_packed size "
+                    f"({cache.k_packed.size} vs expected at least {expected_k})"
+                )
+            expected_v = _expected_packed_words(
+                cache.v_n_values, cache.v_bits
+            )
+            if cache.v_packed.size < expected_v:
+                raise ValueError(
+                    f"metadata mismatch: stored v_bits={cache.v_bits} "
+                    f"inconsistent with v_packed size "
+                    f"({cache.v_packed.size} vs expected at least {expected_v})"
+                )
+        else:
+            for blk in range(cache.num_blocks):
+                k_expected = _expected_packed_words(
+                    cache.k_block_n_values[blk], cache.k_bits
+                )
+                k_actual = (
+                    cache.k_block_packed_offsets[blk + 1]
+                    - cache.k_block_packed_offsets[blk]
+                )
+                if k_expected != k_actual:
+                    raise ValueError(
+                        f"metadata mismatch: stored k_bits={cache.k_bits} "
+                        f"inconsistent with block {blk} k_packed size "
+                        f"({k_actual} vs expected {k_expected})"
+                    )
+                v_expected = _expected_packed_words(
+                    cache.v_block_n_values[blk], cache.v_bits
+                )
+                v_actual = (
+                    cache.v_block_packed_offsets[blk + 1]
+                    - cache.v_block_packed_offsets[blk]
+                )
+                if v_expected != v_actual:
+                    raise ValueError(
+                        f"metadata mismatch: stored v_bits={cache.v_bits} "
+                        f"inconsistent with block {blk} v_packed size "
+                        f"({v_actual} vs expected {v_expected})"
+                    )
+
         if cache.num_blocks == 0:
             # Legacy cache without per-block offsets
             k_rec = self._reconstruct_cached_tensor(
@@ -1123,7 +1196,12 @@ class RFSNTurboQuantKVManager:
         block_indices = sorted(set(int(i) for i in block_indices))
 
         _b, _h, t, _d = cache.shape
-        max_blocks = max(1, (t + block_size - 1) // block_size)
+        if block_size != cache.block_size:
+            raise ValueError(
+                f"block_size mismatch: requested {block_size} "
+                f"but cache was stored with {cache.block_size}"
+            )
+        max_blocks = max(1, (t + cache.block_size - 1) // cache.block_size)
         if block_indices[-1] >= max_blocks:
             raise ValueError(
                 f"block index out of range: max valid is {max_blocks - 1}, "
