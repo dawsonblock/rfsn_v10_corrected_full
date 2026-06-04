@@ -495,7 +495,7 @@ _DEFAULT_VALIDATION_PROMPTS: list[str] = [
     ),
     # 4. JSON-like structured data continuation
     (
-        '{"project": "rfsn_v10", "version": "main27", "status": "alpha", '
+        '{"project": "rfsn_v10", "version": "main28", "status": "alpha", '
         '"components": [{"name": "kv_manager", "type": "compression", '
         '"bits": [4, 5, 6, 8]}, {"name": "attention", "type": "sparse", '
         '"top_k": 0.3}, {"name": "runtime", "type": "orchestrator"}], '
@@ -655,7 +655,7 @@ def _run_real_model_validation(
         )
 
     payload: dict[str, Any] = {
-        "release": "main27",
+        "release": "main28",
         "validation_class": "real_non_random_model_validation",
         "model": model_id,
         "hardware": _get_hardware_info(),
@@ -874,7 +874,7 @@ def _run_long_context_validation(
     ]
 
     payload: dict[str, Any] = {
-        "release": "main27",
+        "release": "main28",
         "model": model_id,
         "contexts": context_entries,
         "summary": {
@@ -1010,7 +1010,7 @@ def _run_per_layer_sensitivity(
     }
 
     payload: dict[str, Any] = {
-        "release": "main27",
+        "release": "main28",
         "analysis": "per_layer_sensitivity",
         "model": model_id,
         "tokens_tested": tokens,
@@ -1144,7 +1144,7 @@ def _run_targeted_layer_protection(
         })
 
     payload: dict[str, Any] = {
-        "release": "main27",
+        "release": "main28",
         "analysis": "targeted_layer_protection",
         "model": model_id,
         "tokens_tested": tokens,
@@ -1227,12 +1227,12 @@ def main() -> None:
     )
     parser.add_argument(
         "--out",
-        default="artifacts/proof/main27/real_model_validation.json",
+        default="artifacts/proof/main28/real_model_validation.json",
         help="Output JSON path for real-model validation",
     )
     parser.add_argument(
         "--long-context-out",
-        default="artifacts/proof/main27/long_context_validation.json",
+        default="artifacts/proof/main28/long_context_validation.json",
         help="Output JSON path for long-context validation",
     )
     parser.add_argument(
@@ -1247,7 +1247,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--per-layer-out",
-        default="artifacts/proof/main27/per_layer_sensitivity.json",
+        default="artifacts/proof/main28/per_layer_sensitivity.json",
         help="Output path for per-layer sensitivity",
     )
     parser.add_argument(
@@ -1257,7 +1257,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--early-layer-out",
-        default="artifacts/proof/main27/early_layer_protection.json",
+        default="artifacts/proof/main28/early_layer_protection.json",
         help="Output path for early-layer protection",
     )
     args = parser.parse_args()

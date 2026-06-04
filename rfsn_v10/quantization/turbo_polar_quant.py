@@ -14,6 +14,9 @@ import mlx.core as mx
 from rfsn_v10.quantization.grouped_cartesian import GroupedCartesianQuantizer
 from rfsn_v10.quantization.polar_quant import PolarQuantizer
 
+# PackedPolarCodes and PackedCartesianCodes are used implicitly
+# through the quantizer return types.
+
 
 def _wht(x: mx.array) -> mx.array:
     """Recursive normalized Walsh-Hadamard transform."""

@@ -224,6 +224,57 @@ python scripts/check_production_regression.py \
     --baseline benchmarks/production_baseline.json
 ```
 
+## Experimental Quantization
+
+The following quantization path is **experimental** and not part of the stable runtime. It exists to evaluate whether IsoQuant + Polar + TurboPolar can complement or beat the stable `k8_v5_gs64` baseline.
+
+**Experimental modules** (in `rfsn_v10/quantization/`):
+
+- `polar_quant.py` - Hierarchical PolarQuant with real bit-packing
+- `grouped_cartesian.py` - Grouped Cartesian quantizer with real bit-packing
+- `hybrid_polar_cartesian.py` - Hybrid Polar-Cartesian with IsoQuant rotation
+- `turbo_polar_quant.py` - WHT + single-level polar for keys, Cartesian for values
+- `qjl_score_correction.py` - QJL attention-score correction sketch
+- `kv_quant_manager.py` - Experimental QuantizedKVManager
+- `turbo_polar_kv_manager.py` - TurboPolarKVManager wrapper
+
+**Real bit-packing**: Experimental quantizers use `BitPackedQuantizer` from `bitpack.py` to pack integer codes into compact `uint32` words. `estimate_bytes()` reports actual packed buffer bytes, not theoretical ideal bits.
+
+**Running experimental benchmarks**:
+```bash
+# 0.5B model validation (produces real_model_validation.json,
+#                        long_context_validation.json,
+#                        memory_accounting.json)
+python benchmarks/validate_experimental_quant.py \
+    --model Qwen/Qwen2.5-0.5B-Instruct \
+    --tokens 512 \
+    --positions 64 \
+    --out-dir artifacts/proof/experimental
+
+# 1.5B model validation (infrastructure ready; deferred run)
+python benchmarks/validate_experimental_quant.py \
+    --model Qwen/Qwen2.5-1.5B-Instruct \
+    --tokens 512 \
+    --positions 64 \
+    --out-dir artifacts/proof/experimental/qwen_1_5b
+
+# QJL attention-score validation
+python benchmarks/validate_qjl_attention_score.py \
+    --out artifacts/proof/experimental/qjl_attention_score.json
+
+# Stable-vs-experimental comparison report
+python scripts/generate_experimental_comparison.py \
+    --experimental-dir artifacts/proof/experimental \
+    --stable-dir artifacts/proof/main28
+```
+
+**Experimental test**:
+```bash
+pytest tests/test_experimental_bitpacking.py -q -s
+```
+
+**Status**: Experimental path is not validated as production-ready. No config is recommended after failing any context. See `artifacts/proof/experimental/comparison_summary.md` for the latest fair ranking.
+
 Policy:
 - Tune thresholds in `scripts/proof_regression_thresholds.json` only when benchmark noise or hardware/runtime variance is proven to cause false positives across repeated runs.
 - Refresh baseline files in `benchmarks/proof_baselines/<profile>/` when performance or quality changes are intentional and accepted after review.

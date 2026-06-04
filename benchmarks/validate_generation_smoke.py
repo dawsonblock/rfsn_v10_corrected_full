@@ -7,13 +7,13 @@ Runs greedy decode for baseline and compressed KV configs, then checks:
   - Repetition rate (fraction of duplicate n-grams)
   - No NaN/Inf in logits at any decode step
 
-Produces a JSON summary at --out (default: artifacts/proof/main27/generation_smoke.json).
+Produces a JSON summary at --out (default: artifacts/proof/main28/generation_smoke.json).
 
 Usage:
   python benchmarks/validate_generation_smoke.py \\
       --model Qwen/Qwen2.5-0.5B-Instruct \\
       --tokens 128 --decode 32 \\
-      --out artifacts/proof/main27/generation_smoke.json
+      --out artifacts/proof/main28/generation_smoke.json
 """
 from __future__ import annotations
 
@@ -365,7 +365,7 @@ def _run_smoke(
         )
 
     payload: dict[str, Any] = {
-        "release": "main27",
+        "release": "main28",
         "analysis": "generation_smoke",
         "model": model_id,
         "context_tokens": int(input_ids.shape[1]),
@@ -409,7 +409,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--out",
-        default="artifacts/proof/main27/generation_smoke.json",
+        default="artifacts/proof/main28/generation_smoke.json",
         help="Output JSON path",
     )
     parser.add_argument(

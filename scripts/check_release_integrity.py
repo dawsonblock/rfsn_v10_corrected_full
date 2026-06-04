@@ -144,6 +144,58 @@ def check() -> list[str]:
                     "stable vs experimental status"
                 )
 
+    # --- Experimental branch checks ---
+    exp_dir = root / "artifacts" / "proof" / "experimental"
+    exp_code_present = (
+        root / "rfsn_v10" / "quantization" / "polar_quant.py"
+    ).exists()
+    if exp_code_present:
+        # If experimental code exists, certain artifacts should exist
+        required_exp_artifacts = [
+            "real_model_validation.json",
+            "long_context_validation.json",
+            "memory_accounting.json",
+            "comparison_summary.json",
+            "comparison_summary.md",
+            "qjl_attention_score.json",
+        ]
+        for artifact in required_exp_artifacts:
+            artifact_path = exp_dir / artifact
+            if not artifact_path.exists():
+                errors.append(
+                    f"experimental artifact missing: {artifact}"
+                )
+            else:
+                if artifact.endswith(".json"):
+                    try:
+                        data = json.loads(
+                            artifact_path.read_text(encoding="utf-8")
+                        )
+                        # No config should claim production-ready
+                        for key in ("production_ready", "production-ready"):
+                            if data.get(key) is True:
+                                errors.append(
+                                    f"{artifact} claims production_ready=True"
+                                )
+                        # Check comparison_summary for rejected configs
+                        if artifact == "comparison_summary.json":
+                            for row in data.get("rows", []):
+                                status = row.get("recommended_status", "")
+                                if status == "candidate":
+                                    # Candidate must pass all contexts
+                                    passes = all(
+                                        row.get(f"pass_{ctx}") == "pass"
+                                        for ctx in (512, 1024, 2048)
+                                        if row.get(f"pass_{ctx}") != "unknown"
+                                    )
+                                    if not passes:
+                                        errors.append(
+                                            f"comparison row {row['config']} "
+                                            f"is candidate but fails contexts"
+                                        )
+                    except Exception:
+                        pass
+
     # --- Main 28 artifact directory ---
     artifact_dir = root / "artifacts" / "proof" / "main28"
     if not artifact_dir.exists():

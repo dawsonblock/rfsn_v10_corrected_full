@@ -18,14 +18,14 @@ from dataclasses import dataclass
 import mlx.core as mx
 
 from .isoquant_precondition import IsoQuantMetadata, IsoQuantPreconditioner
-from .polar_quant import PolarPacked, PolarQuantizer
-from .grouped_cartesian import CartesianPacked, GroupedCartesianQuantizer
+from .polar_quant import PackedPolarCodes, PolarQuantizer
+from .grouped_cartesian import PackedCartesianCodes, GroupedCartesianQuantizer
 
 
 @dataclass
 class HybridPacked:
-    polar: PolarPacked
-    cartesian: CartesianPacked | None
+    polar: PackedPolarCodes | None
+    cartesian: PackedCartesianCodes | None
     iso_meta: IsoQuantMetadata
     original_shape: tuple[int, ...]
     split_dim: int
@@ -159,7 +159,7 @@ class HybridPolarCartesianQuantizer:
             total += self.polar.estimate_bytes(packed.polar)
         if packed.cartesian is not None:
             total += self.cartesian.estimate_bytes(packed.cartesian)
-        # Quaternion metadata is tiny but count it honestly:
+        # IsoQuant metadata is tiny but count it honestly:
         # q_l + q_r = 8 floats.
         total += 8 * 4
         return total

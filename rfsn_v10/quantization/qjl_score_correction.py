@@ -50,7 +50,6 @@ class QJLScoreCorrector:
         self.proj_dim = proj_dim
         self.seed = seed
         self.eps = eps
-        mx.random.seed(seed)
         # Rows are standard Gaussian vectors g_i ~ N(0, I).
         self.projection = mx.random.normal(
             (proj_dim, feature_dim)

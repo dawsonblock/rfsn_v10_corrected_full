@@ -7,7 +7,7 @@ Supports bit widths 2-8 with exact roundtrip guarantees.
 """
 from __future__ import annotations
 
-from .compat import mx
+import mlx.core as mx
 
 # Version-safe float dtype detection
 FLOAT_DTYPES = {

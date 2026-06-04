@@ -17,6 +17,17 @@ import math
 
 import mlx.core as mx
 
+from rfsn_v10.bitpack import BitPackedQuantizer
+
+
+@dataclass
+class PackedCodeBuffer:
+    packed: mx.array
+    n_values: int
+    bits: int
+    original_shape: tuple[int, ...]
+    dtype: str = "uint32"
+
 
 @dataclass
 class UniformQuantMeta:
@@ -37,13 +48,47 @@ class GroupQuantMeta:
 
 
 @dataclass
+class PackedPolarCodes:
+    packed_angle_codes: list[PackedCodeBuffer]
+    packed_radius_codes: PackedCodeBuffer
+    angle_metas: list[UniformQuantMeta]
+    radius_meta: GroupQuantMeta
+    original_shape: tuple[int, ...]
+    levels: int
+
+
+@dataclass
 class PolarPacked:
+    """Unpacked raw-code variant kept for backward compatibility."""
     angle_codes: list[mx.array]
     angle_metas: list[UniformQuantMeta]
     radius_codes: mx.array
     radius_meta: GroupQuantMeta
     original_shape: tuple[int, ...]
     levels: int
+
+
+def _pack_code_buffer(codes: mx.array, bits: int) -> PackedCodeBuffer:
+    """Pack codes; for bits > 8 store as uint32 without word packing."""
+    flat = codes.reshape(-1)
+    if bits <= 8:
+        packed, n_values = BitPackedQuantizer.pack(flat, bits)
+    else:
+        packed = flat.astype(mx.uint32)
+        n_values = int(flat.size)
+    return PackedCodeBuffer(
+        packed=packed,
+        n_values=n_values,
+        bits=bits,
+        original_shape=tuple(codes.shape),
+    )
+
+
+def _unpack_code_buffer(buf: PackedCodeBuffer) -> mx.array:
+    """Unpack codes; for bits > 8 return raw uint32 slice."""
+    if buf.bits <= 8:
+        return BitPackedQuantizer.unpack(buf.packed, buf.n_values, buf.bits)
+    return buf.packed[:buf.n_values]
 
 
 def _require_divisible_by_levels(d: int, levels: int) -> None:
@@ -231,17 +276,16 @@ class PolarQuantizer:
         self.radius_group_size = radius_group_size
         self.adaptive_angle_range = adaptive_angle_range
 
-    def quantize(self, x: mx.array) -> PolarPacked:
+    def quantize(self, x: mx.array) -> PackedPolarCodes:
         angles, final_radii = iterative_hierarchical_polar_forward(
             x, self.levels
         )
-        angle_codes: list[mx.array] = []
+        packed_angle_codes: list[PackedCodeBuffer] = []
         angle_metas: list[UniformQuantMeta] = []
         for theta in angles:
             if self.adaptive_angle_range:
                 min_val = float(mx.min(theta))
                 max_val = float(mx.max(theta))
-                # Guard against zero range
                 if max_val <= min_val:
                     max_val = min_val + 1e-6
             else:
@@ -253,49 +297,57 @@ class PolarQuantizer:
                 min_val=min_val,
                 max_val=max_val,
             )
-            angle_codes.append(codes)
+            packed_angle_codes.append(
+                _pack_code_buffer(codes, self.angle_bits)
+            )
             angle_metas.append(meta)
         radius_codes, radius_meta = quantize_group_unsigned(
             final_radii,
             bits=self.radius_bits,
             group_size=self.radius_group_size,
         )
-        return PolarPacked(
-            angle_codes=angle_codes,
+        packed_radius_codes = _pack_code_buffer(
+            radius_codes, self.radius_bits
+        )
+        return PackedPolarCodes(
+            packed_angle_codes=packed_angle_codes,
+            packed_radius_codes=packed_radius_codes,
             angle_metas=angle_metas,
-            radius_codes=radius_codes,
             radius_meta=radius_meta,
             original_shape=tuple(x.shape),
             levels=self.levels,
         )
 
-    def dequantize(self, packed: PolarPacked) -> mx.array:
+    def dequantize(self, packed: PackedPolarCodes) -> mx.array:
         if packed.levels != self.levels:
             raise ValueError(
                 f"Packed levels={packed.levels}, "
                 f"quantizer levels={self.levels}"
             )
         angles = [
-            dequantize_uniform_fixed_range(codes, meta)
-            for codes, meta in zip(
-                packed.angle_codes, packed.angle_metas
+            dequantize_uniform_fixed_range(
+                _unpack_code_buffer(buf), meta
+            )
+            for buf, meta in zip(
+                packed.packed_angle_codes, packed.angle_metas
             )
         ]
         final_radii = dequantize_group_unsigned(
-            packed.radius_codes, packed.radius_meta
+            _unpack_code_buffer(packed.packed_radius_codes),
+            packed.radius_meta,
         )
         restored = iterative_hierarchical_polar_inverse(angles, final_radii)
         return restored.reshape(packed.original_shape)
 
-    def estimate_bytes(self, packed: PolarPacked) -> int:
+    def estimate_bytes(self, packed: PackedPolarCodes) -> int:
         """
-        Honest byte accounting before optional bit-packing.
-        This counts ideal packed bits for codes plus float32 scales.
+        Actual byte accounting of packed buffers plus float32 scales.
         """
-        angle_bits = sum(
-            int(c.size) * self.angle_bits for c in packed.angle_codes
+        angle_bytes = sum(
+            int(buf.packed.size) * 4 for buf in packed.packed_angle_codes
         )
-        radius_bits = int(packed.radius_codes.size) * self.radius_bits
+        radius_bytes = int(packed.packed_radius_codes.packed.size) * 4
         scale_bytes = int(packed.radius_meta.scale.size) * 4
-        total_bits = angle_bits + radius_bits
-        return (total_bits + 7) // 8 + scale_bytes
+        # Angle metadata: 4 floats per meta
+        meta_bytes = len(packed.angle_metas) * 4 * 4
+        return angle_bytes + radius_bytes + scale_bytes + meta_bytes

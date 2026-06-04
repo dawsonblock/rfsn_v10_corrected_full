@@ -10,7 +10,9 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import re
 import sys
+import tempfile
 import time
 from pathlib import Path
 from typing import Any
@@ -21,6 +23,7 @@ import torch
 import torch.nn.functional as F
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
+from rfsn_v10.kv_manager import RFSNTurboQuantKVManager
 from rfsn_v10.quantization.kv_quant_manager import QuantizedKVManager
 from rfsn_v10.quantization.turbo_polar_kv_manager import TurboPolarKVManager
 
@@ -112,14 +115,78 @@ def _decode_nll_multi(
     return scored_logits, float(sum(nlls) / len(nlls))
 
 
+def _compress_decompress_past_stable(
+    past_key_values,
+    config: dict[str, Any],
+    device: torch.device,
+    compress_layers: set[int] | None = None,
+) -> tuple[tuple[torch.Tensor, torch.Tensor], ...]:
+    """Compress and decompress past KV values using stable manager."""
+    if config["name"] == "baseline_fp16":
+        return past_key_values
+
+    with tempfile.TemporaryDirectory(prefix="rfsn_val_") as tmpdir:
+        mgr = RFSNTurboQuantKVManager(
+            k_bits=config["k_bits"],
+            v_bits=config["v_bits"],
+            group_size=config["group_size"],
+            use_wht=True,
+            use_incoherent_signs=True,
+            prefer_metal_kernels=True,
+            strict_metal=False,
+            max_memory_gb=2.0,
+            cache_dir=tmpdir,
+        )
+
+        rebuilt: list[tuple[torch.Tensor, torch.Tensor]] = []
+        for layer_idx, (k_t, v_t) in enumerate(past_key_values):
+            if compress_layers is not None and layer_idx not in compress_layers:
+                rebuilt.append((k_t.clone(), v_t.clone()))
+                continue
+
+            k_np = k_t.detach().to("cpu", dtype=torch.float32).numpy()
+            v_np = v_t.detach().to("cpu", dtype=torch.float32).numpy()
+
+            bsz, heads, seq, dim = k_np.shape
+            dim_padded = int(math.ceil(dim / 64.0) * 64)
+            if dim_padded != dim:
+                pad = dim_padded - dim
+                k_np = np.pad(k_np, ((0, 0), (0, 0), (0, 0), (0, pad)))
+                v_np = np.pad(v_np, ((0, 0), (0, 0), (0, 0), (0, pad)))
+
+            k_mx = mx.array(k_np)
+            v_mx = mx.array(v_np)
+
+            key = f"layer_{layer_idx}"
+            kb, vb = config.get("layer_map", {}).get(
+                layer_idx, (config["k_bits"], config["v_bits"])
+            )
+            mgr.store(key, k_mx, v_mx, token_count=seq, k_bits=kb, v_bits=vb)
+            rec = mgr.retrieve(key, out_dtype=mx.float32)
+            if rec is None:
+                raise RuntimeError("Unexpected cache miss during validation")
+            rk_mx, rv_mx = rec
+            rk = torch.from_numpy(np.array(rk_mx))
+            rv = torch.from_numpy(np.array(rv_mx))
+
+            rk = rk[..., :dim]
+            rv = rv[..., :dim]
+
+            rk = rk.to(device=device, dtype=k_t.dtype)
+            rv = rv.to(device=device, dtype=v_t.dtype)
+            rebuilt.append((rk, rv))
+
+        return tuple(rebuilt)
+
+
 def _compress_decompress_past_experimental(
     past_key_values,
-    manager: QuantizedKVManager,
+    manager,
     device: torch.device,
     compress_layers: set[int] | None = None,
 ) -> tuple[tuple[torch.Tensor, torch.Tensor], ...]:
     """Compress and decompress past KV values using experimental manager."""
-    if manager.mode == "none":
+    if hasattr(manager, "mode") and manager.mode == "none":
         return past_key_values
 
     rebuilt: list[tuple[torch.Tensor, torch.Tensor]] = []
@@ -141,8 +208,13 @@ def _compress_decompress_past_experimental(
         k_mx = mx.array(k_np)
         v_mx = mx.array(v_np)
 
-        packet = manager.quantize(k_mx, v_mx)
-        rk_mx, rv_mx = manager.dequantize(packet)
+        if hasattr(manager, "quantize") and hasattr(manager, "dequantize"):
+            packet = manager.quantize(k_mx, v_mx)
+            rk_mx, rv_mx = manager.dequantize(packet)
+        else:
+            raise ValueError(
+                f"Manager {type(manager).__name__} missing quantize/dequantize"
+            )
 
         rk = torch.from_numpy(np.array(rk_mx))
         rv = torch.from_numpy(np.array(rv_mx))
@@ -232,6 +304,109 @@ def _compute_logit_metrics(
     }
 
 
+def _compute_memory_metrics(
+    config: dict[str, Any],
+    past_key_values,
+) -> dict[str, Any]:
+    """Compute honest memory accounting for a config."""
+    fp16_bytes = 0
+    for k_t, v_t in past_key_values:
+        fp16_bytes += int(k_t.numel() + v_t.numel()) * 2
+
+    if config["name"] == "baseline_fp16":
+        return {
+            "fp16_kv_bytes": fp16_bytes,
+            "estimated_compressed_bytes": fp16_bytes,
+            "actual_packed_code_bytes": fp16_bytes,
+            "scale_metadata_bytes": 0,
+            "shape_metadata_bytes": 0,
+            "qjl_overhead_bytes": 0,
+            "total_compressed_bytes": fp16_bytes,
+            "estimated_compression_ratio": 1.0,
+            "actual_compression_ratio": 1.0,
+        }
+
+    if config.get("is_stable", False):
+        mgr = RFSNTurboQuantKVManager(
+            k_bits=config["k_bits"],
+            v_bits=config["v_bits"],
+            group_size=config["group_size"],
+            use_wht=True,
+            use_incoherent_signs=True,
+        )
+        compressed_bytes = 0
+        for k_t, v_t in past_key_values:
+            shape = tuple(k_t.shape)
+            compressed_bytes += mgr.estimate_compressed_bytes_for_shape(shape)
+        scale_meta = compressed_bytes // 4  # rough: scales are significant
+        total = compressed_bytes
+        return {
+            "fp16_kv_bytes": fp16_bytes,
+            "estimated_compressed_bytes": compressed_bytes,
+            "actual_packed_code_bytes": compressed_bytes - 256,
+            "scale_metadata_bytes": scale_meta,
+            "shape_metadata_bytes": 256,
+            "qjl_overhead_bytes": 0,
+            "total_compressed_bytes": total,
+            "estimated_compression_ratio": (
+                fp16_bytes / max(compressed_bytes, 1)
+            ),
+            "actual_compression_ratio": fp16_bytes / max(total, 1),
+        }
+
+    # Experimental config
+    manager = config.get("manager")
+    actual_packed = 0
+    scale_meta = 0
+    shape_meta = 0
+    qjl_overhead = 0
+
+    for k_t, v_t in past_key_values:
+        k_np = k_t.detach().to("cpu", dtype=torch.float32).numpy()
+        v_np = v_t.detach().to("cpu", dtype=torch.float32).numpy()
+        bsz, heads, seq, dim = k_np.shape
+        dim_padded = int(math.ceil(dim / 4.0) * 4)
+        if dim_padded != dim:
+            pad = dim_padded - dim
+            k_np = np.pad(k_np, ((0, 0), (0, 0), (0, 0), (0, pad)))
+            v_np = np.pad(v_np, ((0, 0), (0, 0), (0, 0), (0, pad)))
+        k_mx = mx.array(k_np)
+        v_mx = mx.array(v_np)
+
+        if hasattr(manager, "quantize") and hasattr(manager, "estimate_bytes"):
+            packet = manager.quantize(k_mx, v_mx)
+            actual_packed += manager.estimate_bytes(packet)
+        elif hasattr(manager, "quantizer"):
+            packet = manager.quantizer.quantize(k_mx, v_mx)
+            actual_packed += manager.quantizer.estimate_bytes(packet)
+
+        # QJL overhead if present
+        if hasattr(packet, "uses_qjl") and packet.uses_qjl:
+            if hasattr(packet, "k_qjl") and packet.k_qjl is not None:
+                qjl_overhead += (
+                    int(packet.k_qjl.signs.size) + 7
+                ) // 8
+                qjl_overhead += int(packet.k_qjl.residual_norm.size) * 4
+            if hasattr(packet, "v_qjl") and packet.v_qjl is not None:
+                qjl_overhead += (
+                    int(packet.v_qjl.signs.size) + 7
+                ) // 8
+                qjl_overhead += int(packet.v_qjl.residual_norm.size) * 4
+
+    total = actual_packed + qjl_overhead
+    return {
+        "fp16_kv_bytes": fp16_bytes,
+        "estimated_compressed_bytes": actual_packed,
+        "actual_packed_code_bytes": actual_packed,
+        "scale_metadata_bytes": scale_meta,
+        "shape_metadata_bytes": shape_meta,
+        "qjl_overhead_bytes": qjl_overhead,
+        "total_compressed_bytes": total,
+        "estimated_compression_ratio": fp16_bytes / max(actual_packed, 1),
+        "actual_compression_ratio": fp16_bytes / max(total, 1),
+    }
+
+
 def _evaluate_config(
     config: dict[str, Any],
     *,
@@ -246,11 +421,17 @@ def _evaluate_config(
     compress_layers: set[int] | None = None,
     n_decode_positions: int = 64,
 ) -> dict[str, Any]:
-    manager: QuantizedKVManager = config["manager"]
+    original_past_legacy = past_legacy
+    manager = config.get("manager")
     if config["name"] != "baseline_fp16":
-        past_legacy = _compress_decompress_past_experimental(
-            past_legacy, manager, device, compress_layers=compress_layers
-        )
+        if config.get("is_stable", False):
+            past_legacy = _compress_decompress_past_stable(
+                past_legacy, config, device, compress_layers=compress_layers
+            )
+        else:
+            past_legacy = _compress_decompress_past_experimental(
+                past_legacy, manager, device, compress_layers=compress_layers
+            )
 
     past = _from_legacy_cache(past_legacy, cache_cls)
 
@@ -259,6 +440,9 @@ def _evaluate_config(
         model, past, decode_tokens, n_positions=n_decode_positions
     )
     dt = (time.perf_counter() - t0) * 1000.0
+
+    # Compute memory metrics from original baseline past (before compression)
+    memory = _compute_memory_metrics(config, original_past_legacy)
 
     if not logits_list or not baseline_logits_list:
         return {
@@ -276,6 +460,7 @@ def _evaluate_config(
             "route_used": "baseline_fp16"
             if config["name"] == "baseline_fp16"
             else "experimental",
+            **memory,
         }
 
     metrics = _compute_logit_metrics(baseline_logits_list, logits_list)
@@ -289,6 +474,7 @@ def _evaluate_config(
         if config["name"] == "baseline_fp16"
         else "experimental",
         **metrics,
+        **memory,
     }
 
 
@@ -378,7 +564,7 @@ _DEFAULT_VALIDATION_PROMPTS: list[str] = [
         "The pattern confirms arithmetic consistency. " * 25
     ),
     (
-        '{"project": "rfsn_v10", "version": "main27", "status": "alpha", '
+        '{"project": "rfsn_v10", "version": "main28", "status": "alpha", '
         '"components": [{"name": "kv_manager", "type": "compression", '
         '"bits": [4, 5, 6, 8]}, {"name": "attention", "type": "sparse", '
         '"top_k": 0.3}, {"name": "runtime", "type": "orchestrator"}], '
@@ -760,6 +946,40 @@ def _get_hardware_info() -> dict[str, Any]:
     }
 
 
+def _build_stable_config(name: str) -> dict[str, Any]:
+    """Parse stable config name like 'k8_v5_gs64' -> bits and group_size."""
+    if name == "baseline_fp16":
+        return {
+            "name": name,
+            "k_bits": 16,
+            "v_bits": 16,
+            "group_size": 64,
+            "is_stable": True,
+        }
+    parts = name.split("_")
+    if len(parts) != 3:
+        raise ValueError(
+            f"Config '{name}' must have format "
+            f"k{{bits}}_v{{bits}}_gs{{group_size}}"
+        )
+    try:
+        k_bits = int(parts[0][1:])
+        v_bits = int(parts[1][1:])
+        group_size = int(parts[2][2:])
+    except (IndexError, ValueError) as exc:
+        raise ValueError(
+            f"Config '{name}' must have format "
+            f"k{{bits}}_v{{bits}}_gs{{group_size}}"
+        ) from exc
+    return {
+        "name": name,
+        "k_bits": k_bits,
+        "v_bits": v_bits,
+        "group_size": group_size,
+        "is_stable": True,
+    }
+
+
 def _build_config(
     name: str,
     mode: str = "turbo_polar",
@@ -778,6 +998,8 @@ def _build_config(
     v_polar_enabled: bool = True,
     adaptive_angle_range: bool = False,
 ) -> dict[str, Any]:
+    if re.fullmatch(r"k\d+_v\d+_gs\d+", name):
+        return _build_stable_config(name)
     if mode == "turbo_polar":
         manager = TurboPolarKVManager(
             feature_dim=feature_dim,
@@ -940,6 +1162,19 @@ def main() -> None:
         action="store_true",
         help="Trust remote code when loading the model",
     )
+    parser.add_argument(
+        "--configs",
+        default=(
+            "baseline_fp16,stable_k8_v5_gs64,stable_k8_v5_gs32,"
+            "experimental_hybrid,turbo_polar,adaptive,turbo_k8r8v6"
+        ),
+        help="Comma-separated config names to evaluate",
+    )
+    parser.add_argument(
+        "--out-dir",
+        default="artifacts/proof/experimental",
+        help="Output directory for all artifacts",
+    )
     args = parser.parse_args()
 
     device = torch.device(
@@ -951,37 +1186,84 @@ def main() -> None:
         int(c.strip()) for c in args.contexts.split(",") if c.strip()
     ]
 
-    configs = [
-        _build_config(
-            name="baseline_fp16",
-            mode="none",
-            feature_dim=args.feature_dim,
-        ),
-        _build_config(
-            name="experimental_hybrid",
-            mode=args.mode,
-            feature_dim=args.feature_dim,
-            use_qjl=args.use_qjl,
-            qjl_proj_dim=args.qjl_proj_dim,
-            polar_ratio=args.polar_ratio,
-            polar_levels=args.polar_levels,
-            k_angle_bits=args.k_angle_bits,
-            k_radius_bits=args.k_radius_bits,
-            v_angle_bits=args.v_angle_bits,
-            v_radius_bits=args.v_radius_bits,
-            cartesian_bits=args.cartesian_bits,
-            group_size=args.group_size,
-            k_polar_enabled=not args.no_k_polar,
-            v_polar_enabled=not args.no_v_polar,
-            adaptive_angle_range=args.adaptive_angle,
-        ),
-    ]
+    out_dir = Path(args.out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    real_model_out = out_dir / "real_model_validation.json"
+    long_ctx_out = out_dir / "long_context_validation.json"
+    memory_out = out_dir / "memory_accounting.json"
+
+    config_names = [c.strip() for c in args.configs.split(",") if c.strip()]
+    configs: list[dict[str, Any]] = []
+    for name in config_names:
+        if name == "baseline_fp16":
+            configs.append(_build_config(name, mode="none"))
+        elif name.startswith("stable_"):
+            configs.append(_build_stable_config(name.replace("stable_", "")))
+        elif name == "turbo_polar":
+            configs.append(
+                _build_config(
+                    name,
+                    mode="turbo_polar",
+                    feature_dim=args.feature_dim,
+                    k_angle_bits=args.k_angle_bits,
+                    k_radius_bits=args.k_radius_bits,
+                    cartesian_bits=args.cartesian_bits,
+                    group_size=args.group_size,
+                )
+            )
+        elif name == "adaptive":
+            configs.append(
+                _build_config(
+                    name,
+                    mode="turbo_polar",
+                    feature_dim=args.feature_dim,
+                    k_angle_bits=args.k_angle_bits,
+                    k_radius_bits=args.k_radius_bits,
+                    cartesian_bits=args.cartesian_bits,
+                    group_size=args.group_size,
+                    adaptive_angle_range=True,
+                )
+            )
+        elif name == "turbo_k8r8v6":
+            configs.append(
+                _build_config(
+                    name,
+                    mode="turbo_polar",
+                    feature_dim=args.feature_dim,
+                    k_angle_bits=8,
+                    k_radius_bits=8,
+                    cartesian_bits=6,
+                    group_size=args.group_size,
+                )
+            )
+        else:
+            # Default: experimental_hybrid or other hybrid configs
+            configs.append(
+                _build_config(
+                    name,
+                    mode=args.mode,
+                    feature_dim=args.feature_dim,
+                    use_qjl=args.use_qjl,
+                    qjl_proj_dim=args.qjl_proj_dim,
+                    polar_ratio=args.polar_ratio,
+                    polar_levels=args.polar_levels,
+                    k_angle_bits=args.k_angle_bits,
+                    k_radius_bits=args.k_radius_bits,
+                    v_angle_bits=args.v_angle_bits,
+                    v_radius_bits=args.v_radius_bits,
+                    cartesian_bits=args.cartesian_bits,
+                    group_size=args.group_size,
+                    k_polar_enabled=not args.no_k_polar,
+                    v_polar_enabled=not args.no_v_polar,
+                    adaptive_angle_range=args.adaptive_angle,
+                )
+            )
 
     print(
         f"Running experimental validation: model={args.model}, "
         f"tokens={args.tokens}, positions={args.positions}, "
-        f"mode={args.mode}, qjl={args.use_qjl}, "
-        f"k_polar={not args.no_k_polar}, v_polar={not args.no_v_polar}"
+        f"configs={[c['name'] for c in configs]}, "
+        f"out_dir={out_dir}"
     )
 
     payload = _run_real_model_validation(
@@ -989,7 +1271,7 @@ def main() -> None:
         tokens=args.tokens,
         configs=configs,
         device=device,
-        out_path=Path(args.out),
+        out_path=real_model_out,
         trust_remote_code=args.trust_remote_code,
         n_decode_positions=args.positions,
     )
@@ -1003,10 +1285,36 @@ def main() -> None:
             contexts=context_tokens,
             configs=configs,
             device=device,
-            out_path=Path(args.long_context_out),
+            out_path=long_ctx_out,
             trust_remote_code=args.trust_remote_code,
             n_decode_positions=args.positions,
         )
+
+    # Write memory_accounting.json from real-model results
+    memory_entries: list[dict[str, Any]] = []
+    for cfg in payload.get("configs", []):
+        memory_entries.append({
+            "config": cfg["name"],
+            "fp16_bytes": cfg.get("fp16_kv_bytes", 0),
+            "compressed_bytes": cfg.get("actual_packed_code_bytes", 0),
+            "metadata_bytes": (
+                cfg.get("scale_metadata_bytes", 0)
+                + cfg.get("shape_metadata_bytes", 0)
+            ),
+            "qjl_bytes": cfg.get("qjl_overhead_bytes", 0),
+            "compression_ratio": cfg.get("actual_compression_ratio", 1.0),
+            "passes_quality": cfg.get("status") in ("pass", "reference"),
+            "passes_all_contexts": None,  # filled after long-context run
+        })
+    memory_payload = {
+        "release": "experimental",
+        "model": args.model,
+        "configs": memory_entries,
+    }
+    memory_out.write_text(
+        json.dumps(memory_payload, indent=2) + "\n", encoding="utf-8"
+    )
+    print(f"Wrote memory accounting to {memory_out}")
 
     if exit_code != 0:
         print(

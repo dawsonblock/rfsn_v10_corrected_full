@@ -16,6 +16,21 @@ from dataclasses import dataclass
 
 import mlx.core as mx
 
+from rfsn_v10.bitpack import BitPackedQuantizer
+
+from .polar_quant import PackedCodeBuffer
+
+
+@dataclass
+class PackedCartesianCodes:
+    packed_codes: PackedCodeBuffer
+    scale: mx.array
+    bits: int
+    group_size: int
+    original_shape: tuple[int, ...]
+    original_size: int
+    padded_size: int
+
 
 @dataclass
 class CartesianPacked:
@@ -41,7 +56,7 @@ class GroupedCartesianQuantizer:
         self.group_size = group_size
         self.eps = eps
 
-    def quantize(self, x: mx.array) -> CartesianPacked:
+    def quantize(self, x: mx.array) -> PackedCartesianCodes:
         original_shape = tuple(x.shape)
         flat = x.astype(mx.float32).reshape(-1)
         original_size = int(flat.size)
@@ -62,8 +77,19 @@ class GroupedCartesianQuantizer:
         q_signed = mx.round(grouped / scale[:, None])
         q_signed = mx.clip(q_signed, -qmax, qmax)
         codes = (q_signed + qmax).astype(mx.uint32).reshape(-1)
-        return CartesianPacked(
-            codes=codes,
+        if self.bits <= 8:
+            packed, n_values = BitPackedQuantizer.pack(codes, self.bits)
+        else:
+            packed = codes.astype(mx.uint32)
+            n_values = int(codes.size)
+        packed_buf = PackedCodeBuffer(
+            packed=packed,
+            n_values=n_values,
+            bits=self.bits,
+            original_shape=tuple(codes.shape),
+        )
+        return PackedCartesianCodes(
+            packed_codes=packed_buf,
             scale=scale,
             bits=self.bits,
             group_size=self.group_size,
@@ -72,12 +98,17 @@ class GroupedCartesianQuantizer:
             padded_size=padded_size,
         )
 
-    def dequantize(self, packed: CartesianPacked) -> mx.array:
+    def dequantize(self, packed: PackedCartesianCodes) -> mx.array:
         if packed.bits != self.bits:
             raise ValueError(
                 f"Packed bits={packed.bits}, quantizer bits={self.bits}"
             )
-        flat = packed.codes.astype(mx.float32).reshape(-1)
+        buf = packed.packed_codes
+        if buf.bits <= 8:
+            codes = BitPackedQuantizer.unpack(buf.packed, buf.n_values, buf.bits)
+        else:
+            codes = buf.packed[:buf.n_values]
+        flat = codes.astype(mx.float32).reshape(-1)
         if int(flat.size) != packed.padded_size:
             raise ValueError(
                 f"Expected {packed.padded_size} codes, got {flat.size}"
@@ -89,8 +120,7 @@ class GroupedCartesianQuantizer:
         restored = restored.reshape(-1)[: packed.original_size]
         return restored.reshape(packed.original_shape)
 
-    def estimate_bytes(self, packed: CartesianPacked) -> int:
-        code_bits = int(packed.codes.size) * packed.bits
-        code_bytes = (code_bits + 7) // 8
+    def estimate_bytes(self, packed: PackedCartesianCodes) -> int:
+        code_bytes = int(packed.packed_codes.packed.size) * 4
         scale_bytes = int(packed.scale.size) * 4
         return code_bytes + scale_bytes

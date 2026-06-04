@@ -14,7 +14,7 @@ Usage:
   python benchmarks/benchmark_generation_throughput.py \\
       --model Qwen/Qwen2.5-0.5B-Instruct \\
       --tokens 256 --decode 64 --repeats 5 \\
-      --out artifacts/proof/main27/generation_throughput.json
+      --out artifacts/proof/main28/generation_throughput.json
 """
 from __future__ import annotations
 
@@ -412,7 +412,7 @@ def _run_benchmark(
         )
 
     payload: dict[str, Any] = {
-        "release": "main27",
+        "release": "main28",
         "analysis": "generation_throughput",
         "model": model_id,
         "hardware": _get_hardware_info(),
@@ -460,7 +460,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--out",
-        default="artifacts/proof/main27/generation_throughput.json",
+        default="artifacts/proof/main28/generation_throughput.json",
         help="Output JSON path",
     )
     parser.add_argument(
