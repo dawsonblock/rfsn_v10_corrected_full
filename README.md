@@ -1,6 +1,6 @@
-# RFSN v10 Main 27 — Validation Semantics Correction
+# RFSN v10 Main 28 — Proof Consistency + Long-Context + Throughput Honesty
 
-## Status: RFSN v10 Main 27 — Validation Semantics Correction
+## Status: RFSN v10 Main 28 — Proof Consistency + Long-Context + Throughput Honesty
 
 Implemented:
 - low-bit KV cache compression
@@ -16,14 +16,17 @@ Proof status:
 - fused route: proven by fused_kernel_benchmark.json (cosine 1.000, max_abs_diff 0.0)
 - sparse decode: below threshold, disabled by default
 - real-model validation: alpha-level on real non-random model (Qwen/Qwen2.5-0.5B-Instruct)
-- long-context validation: included
+- long-context validation: 512, 1024, and 2048 tokens
+- throughput reporting: separates decode speed from total end-to-end cost
 - polar quant: not implemented
 - true arbitrary partial dequantization: not implemented
+- per-layer sensitivity: deferred to future release
 
 Not claimed:
 - production LLM deployment
 - sparse safe inference
 - universal speedup
+- end-to-end speedup (decode TPS comparable, total time slower due to compression overhead)
 - polar quantization
 - true arbitrary partial dequantization
 
@@ -165,30 +168,30 @@ python3 benchmarks/benchmark_end_to_end.py
 # Generate proof artifacts (JSON + summary report)
 ./scripts/run_proof_artifacts.sh
 # Optional custom output dir, iterations, and profile
-./scripts/run_proof_artifacts.sh artifacts/proof/main27 3 main27
+./scripts/run_proof_artifacts.sh artifacts/proof/main28 3 main28
 
 # Compare current proof run vs tracked baseline
 python3 scripts/compare_proof_runs.py \
-    --profile main27 \
+    --profile main28 \
     --baseline-dir benchmarks/proof_baselines/main10 \
-    --current-dir artifacts/proof/main27 \
-    --output-json artifacts/proof/main27/trend_report.json \
-    --output-md artifacts/proof/main27/trend_report.md
+    --current-dir artifacts/proof/main28 \
+    --output-json artifacts/proof/main28/trend_report.json \
+    --output-md artifacts/proof/main28/trend_report.md
 
 # Enforce regression gate (non-zero exit on threshold breach)
 python3 scripts/check_proof_regression.py \
     --baseline benchmarks/proof_baselines/main10 \
-    --current artifacts/proof/main27 \
-    --output-json artifacts/proof/main27/regression_report.json \
-    --output-md artifacts/proof/main27/regression_report.md
+    --current artifacts/proof/main28 \
+    --output-json artifacts/proof/main28/regression_report.json \
+    --output-md artifacts/proof/main28/regression_report.md
 
 # Generate kernel benchmark evidence
 python3 benchmarks/benchmark_kernel_paths.py \
-    --out artifacts/proof/main27/kernel_benchmark.json
+    --out artifacts/proof/main28/kernel_benchmark.json
 
 # Generate plot artifacts from proof JSON
 python3 scripts/generate_plots.py \
-    --input-dir artifacts/proof/main27 \
+    --input-dir artifacts/proof/main28 \
     --output-dir results/plots
 
 # Real-model validation (auto-downloads from HuggingFace)
@@ -197,7 +200,7 @@ python3 benchmarks/validate_real_model_kv.py \
     --tokens 512 \
     --positions 64 \
     --configs k8_v3_gs64,k8_v4_gs64,k8_v5_gs64,k8_v4_gs32,k8_v5_gs32,k6_v6_gs64,k4_v4_gs64 \
-    --out artifacts/proof/main27/real_model_validation.json
+    --out artifacts/proof/main28/real_model_validation.json
 
 # Long-context validation
 python3 benchmarks/validate_long_context_kv.py \
@@ -205,7 +208,7 @@ python3 benchmarks/validate_long_context_kv.py \
     --contexts 512,1024,2048 \
     --positions 64 \
     --configs k8_v3_gs64,k8_v4_gs64,k8_v5_gs64,k8_v4_gs32,k8_v5_gs32,k6_v6_gs64,k4_v4_gs64 \
-    --out artifacts/proof/main27/long_context_validation.json
+    --out artifacts/proof/main28/long_context_validation.json
 
 # Production-grade model validation
 # Download a model first:
@@ -214,10 +217,10 @@ python tools/model_download.py mistral-7b --output-dir models
 python benchmarks/validate_production_model.py \
     --model-path models/mistral-7b \
     --prompt-suite prompts/validation_suite.json \
-    --out artifacts/proof/main27/production_validation.json
+    --out artifacts/proof/main28/production_validation.json
 # Check against baseline:
 python scripts/check_production_regression.py \
-    --results artifacts/proof/main27/production_validation.json \
+    --results artifacts/proof/main28/production_validation.json \
     --baseline benchmarks/production_baseline.json
 ```
 
@@ -238,20 +241,20 @@ python3 scripts/profile_memory.py
 
 ## Proof Artifacts
 
-All Main 27 proof artifacts are in `artifacts/proof/main27/`.
+All Main 28 proof artifacts are in `artifacts/proof/main28/`.
 
-Note: Main 23, 24, 25, and 26 artifacts are retained in their respective subdirectories for historical reference only.
+Note: Main 23, 24, 25, 26, and 27 artifacts are retained in their respective subdirectories for historical reference only.
 
 ## Recommended Configs
 
-- **Compression-oriented**: `k8_v3_gs64` (8-bit K / 3-bit V / group_size 64)
-- **Balanced**: `k8_v4_gs64` (8-bit K / 4-bit V / group_size 64)
-- **Quality-oriented**: `k8_v5_gs64` or `k8_v5_gs32`
-- **Rejected**: `k4_v4_gs64`, `k6_v6_gs64` (fail alpha thresholds)
+- **Recommended practical default**: `k8_v5_gs64` (8-bit K / 5-bit V / group_size 64)
+- **Best quality**: `k8_v5_gs32` (8-bit K / 5-bit V / group_size 32)
+- **Lowest-bit passing**: `k8_v4_gs64` (8-bit K / 4-bit V / group_size 64)
+- **Rejected**: `k8_v3_gs64`, `k6_v6_gs64`, `k4_v4_gs64` (fail alpha thresholds or long-context validation)
 
 ## Real-Model Validation
 
-Main 27 includes real non-random model validation on `Qwen/Qwen2.5-0.5B-Instruct` with corrected causal LM NLL scoring (≥64 decode positions) and multi-position logit metrics. Results are alpha-level: quality metrics are reported honestly with pass/fail thresholds. NaN metrics are marked `nan_fail`. If thresholds are not met, the config is marked `fail`.
+Main 28 includes real non-random model validation on `Qwen/Qwen2.5-0.5B-Instruct` with corrected causal LM NLL scoring (≥64 decode positions) and multi-position logit metrics. Results are alpha-level: quality metrics are reported honestly with pass/fail thresholds. NaN metrics are marked `nan_fail`. If thresholds are not met, the config is marked `fail`.
 
 ## Sparse Decode Status
 
@@ -272,9 +275,9 @@ pip install -e ".[dev,real_model]"
 pip install mlx
 
 # Run synthetic proof benchmarks
-python benchmarks/benchmark_kernel_paths.py --out artifacts/proof/main27/kernel_benchmark.json
-python benchmarks/benchmark_fused_kernel.py --out artifacts/proof/main27/fused_kernel_benchmark.json
-python benchmarks/benchmark_optimizations.py --out artifacts/proof/main27/optimization_benchmark.json
+python benchmarks/benchmark_kernel_paths.py --out artifacts/proof/main28/kernel_benchmark.json
+python benchmarks/benchmark_fused_kernel.py --out artifacts/proof/main28/fused_kernel_benchmark.json
+python benchmarks/benchmark_optimizations.py --out artifacts/proof/main28/optimization_benchmark.json
 
 # Run real-model validation (64 decode positions, corrected causal NLL)
 python benchmarks/validate_real_model_kv.py \
@@ -282,7 +285,7 @@ python benchmarks/validate_real_model_kv.py \
     --tokens 512 \
     --positions 64 \
     --configs k8_v3_gs64,k8_v4_gs64,k8_v5_gs64,k8_v4_gs32,k8_v5_gs32,k6_v6_gs64,k4_v4_gs64 \
-    --out artifacts/proof/main27/real_model_validation.json
+    --out artifacts/proof/main28/real_model_validation.json
 
 # Run long-context validation
 python benchmarks/validate_long_context_kv.py \
@@ -290,21 +293,23 @@ python benchmarks/validate_long_context_kv.py \
     --contexts 512,1024,2048 \
     --positions 64 \
     --configs k8_v3_gs64,k8_v4_gs64,k8_v5_gs64,k8_v4_gs32,k8_v5_gs32,k6_v6_gs64,k4_v4_gs64 \
-    --out artifacts/proof/main27/long_context_validation.json
+    --out artifacts/proof/main28/long_context_validation.json
 
 # Run generation smoke test
 python benchmarks/validate_generation_smoke.py \
     --model Qwen/Qwen2.5-0.5B-Instruct \
-    --max-new-tokens 64 \
+    --tokens 128 \
+    --decode 64 \
     --configs baseline_fp16,k8_v4_gs64,k8_v5_gs64,k8_v5_gs32 \
-    --out artifacts/proof/main27/generation_smoke.json
+    --out artifacts/proof/main28/generation_smoke.json
 
 # Run throughput benchmark
 python benchmarks/benchmark_generation_throughput.py \
     --model Qwen/Qwen2.5-0.5B-Instruct \
-    --contexts 512,1024,2048 \
-    --configs baseline_fp16,k8_v4_gs64,k8_v5_gs64,k8_v5_gs32 \
-    --out artifacts/proof/main27/generation_throughput.json
+    --tokens 512 \
+    --decode 64 \
+    --configs baseline_fp16,k8_v4_gs64,k8_v5_gs64,k8_v4_gs32,k8_v5_gs32 \
+    --out artifacts/proof/main28/generation_throughput.json
 
 # Run release integrity check
 python scripts/check_release_integrity.py

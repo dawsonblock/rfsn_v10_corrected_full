@@ -1,6 +1,6 @@
 {
-  "release": "main27",
-  "generated_at": "2026-06-04T03:32:56.451244+00:00",
+  "release": "main28",
+  "generated_at": "2026-06-04T03:33:53.984313+00:00",
   "artifacts": {
     "kernel_benchmark_json": "kernel_benchmark.json",
     "fused_kernel_benchmark_json": "fused_kernel_benchmark.json",
@@ -13,7 +13,7 @@
     "mlx_test_summary_md": "mlx_test_summary.md",
     "mlx_pytest_raw_log": "mlx_pytest_raw.log",
     "mlx_pytest_junit_xml": "mlx_pytest_junit.xml",
-    "main27_release_manifest_json": "main27_release_manifest.json"
+    "main28_release_manifest_json": "main28_release_manifest.json"
   },
   "status": "partial",
   "missing_optional": [

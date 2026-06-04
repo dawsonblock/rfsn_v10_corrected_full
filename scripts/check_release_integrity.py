@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Release integrity checker for RFSN v10 Main 26."""
+"""Release integrity checker for RFSN v10 Main 28."""
 from __future__ import annotations
 
 import json
+import subprocess
 import sys
 from pathlib import Path
 
@@ -61,18 +62,23 @@ def check() -> list[str]:
         errors.append("README.md missing or unreadable")
 
     if readme:
-        # Check first 10 non-empty lines for Main 27 title
+        # Check first 10 non-empty lines for Main 28 title
         lines = readme.splitlines()
         non_empty = [ln for ln in lines if ln.strip()][:10]
-        has_title = any(ln.startswith("# RFSN v10 Main 27") for ln in non_empty)
+        has_title = any(ln.startswith("# RFSN v10 Main 28") for ln in non_empty)
         if not has_title:
-            errors.append("README title is not Main 27")
+            errors.append("README title is not Main 28")
+
+        # Check status section
+        if "## Status: RFSN v10 Main 28" not in readme:
+            errors.append("README status section is not Main 28")
 
         for stale in [
             "artifacts/proof/main23",
             "artifacts/proof/main24",
             "artifacts/proof/main25",
             "artifacts/proof/main26",
+            "artifacts/proof/main27",
         ]:
             # Allow historical mentions if they appear after the word
             # "historical" or inside a note about old releases — check each line
@@ -120,10 +126,10 @@ def check() -> list[str]:
                         f"README positive claim detected: {phrase!r}"
                     )
 
-    # --- Main 27 artifact directory ---
-    artifact_dir = root / "artifacts" / "proof" / "main27"
+    # --- Main 28 artifact directory ---
+    artifact_dir = root / "artifacts" / "proof" / "main28"
     if not artifact_dir.exists():
-        errors.append("artifacts/proof/main27 missing")
+        errors.append("artifacts/proof/main28 missing")
     else:
         required_artifacts = [
             "kernel_benchmark.json",
@@ -134,44 +140,45 @@ def check() -> list[str]:
             "generation_smoke.json",
             "generation_throughput.json",
             "proof_summary.md",
+            "summary.json",
             "mlx_test_summary.md",
             "mlx_pytest_raw.log",
             "mlx_pytest_junit.xml",
-            "main27_release_manifest.json",
+            "main28_release_manifest.json",
         ]
         for artifact in required_artifacts:
             if not (artifact_dir / artifact).exists():
                 errors.append(f"required artifact missing: {artifact}")
 
-        # Manifest must declare release = main27
-        manifest_path = artifact_dir / "main27_release_manifest.json"
+        # Manifest must declare release = main28
+        manifest_path = artifact_dir / "main28_release_manifest.json"
         if manifest_path.exists():
             try:
                 manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-                if manifest.get("release") != "main27":
+                if manifest.get("release") != "main28":
                     errors.append(
-                        "main27_release_manifest.json release field is not 'main27'"
+                        "main28_release_manifest.json release field is not 'main28'"
                     )
             except Exception:
-                errors.append("main27_release_manifest.json is not valid JSON")
+                errors.append("main28_release_manifest.json is not valid JSON")
 
-        # MLX summary must identify Main 27
+        # MLX summary must identify Main 28
         mlx_summary_path = artifact_dir / "mlx_test_summary.md"
         if mlx_summary_path.exists():
             try:
                 mlx_summary = mlx_summary_path.read_text(encoding="utf-8")
-                if "Main 27" not in mlx_summary:
-                    errors.append("MLX summary does not identify Main 27")
+                if "Main 28" not in mlx_summary:
+                    errors.append("MLX summary does not identify Main 28")
             except OSError:
                 pass
 
-        # proof_summary.md must identify Main 27
+        # proof_summary.md must identify Main 28
         proof_path = artifact_dir / "proof_summary.md"
         if proof_path.exists():
             try:
                 proof = proof_path.read_text(encoding="utf-8")
-                if "Main 27" not in proof:
-                    errors.append("proof_summary.md does not identify Main 27")
+                if "Main 28" not in proof:
+                    errors.append("proof_summary.md does not identify Main 28")
             except OSError:
                 pass
 
@@ -197,9 +204,9 @@ def check() -> list[str]:
                             f"config {cfg.get('name')!r} evaluated only "
                             f"{pos} positions (minimum 32 required)"
                         )
-                if data.get("release") != "main27":
+                if data.get("release") != "main28":
                     errors.append(
-                        "real_model_validation.json release field is not 'main27'"
+                        "real_model_validation.json release field is not 'main28'"
                     )
             except Exception as exc:
                 errors.append(f"real_model_validation.json parse error: {exc}")
@@ -233,6 +240,25 @@ def main() -> int:
         for e in errors:
             print(f"ERROR: {e}", file=sys.stderr)
         return 1
+
+    # Run proof-summary / JSON consistency checker
+    consistency_script = Path("scripts/check_proof_summary_consistency.py")
+    if consistency_script.exists():
+        try:
+            subprocess.run(
+                [sys.executable, str(consistency_script)],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+        except subprocess.CalledProcessError as exc:
+            print(
+                "ERROR: proof-summary consistency check failed: "
+                f"{exc.stderr}",
+                file=sys.stderr,
+            )
+            return 1
+
     print("release integrity OK")
     return 0
 
