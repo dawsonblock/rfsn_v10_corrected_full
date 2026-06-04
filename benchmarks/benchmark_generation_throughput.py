@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generation throughput benchmark for RFSN v10 Main 27.
+"""Generation throughput benchmark for RFSN v10 Main 28.
 
 Measures:
   - Tokens/second (decode throughput)
@@ -439,7 +439,7 @@ def _run_benchmark(
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="RFSN v10 Main 26 generation throughput benchmark"
+        description="RFSN v10 Main 28 generation throughput benchmark"
     )
     parser.add_argument(
         "--model", default="Qwen/Qwen2.5-0.5B-Instruct",

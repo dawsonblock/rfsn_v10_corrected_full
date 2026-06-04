@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Main 26 real-model KV validation runner.
+"""Main 28 real-model KV validation runner.
 
 Runs a HuggingFace causal LM (auto-downloaded) in baseline and compressed
 modes. Compresses KV past tensors via RFSN TurboQuant, then decodes and

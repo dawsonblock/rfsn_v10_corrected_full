@@ -73,7 +73,7 @@
       "pass_512": "pass",
       "pass_1024": "pass",
       "pass_2048": "pass",
-      "compression_ratio": 2.2718,
+      "compression_ratio": 2.27182846932698,
       "total_compressed_bytes": 2417760,
       "memory_basis": "mean_per_prompt_real_model_cache",
       "recommended_status": "candidate"
@@ -88,7 +88,7 @@
       "pass_512": "pass",
       "pass_1024": "pass",
       "pass_2048": "pass",
-      "compression_ratio": 2.2718,
+      "compression_ratio": 2.27182846932698,
       "total_compressed_bytes": 2417760,
       "memory_basis": "mean_per_prompt_real_model_cache",
       "recommended_status": "candidate"
@@ -103,7 +103,7 @@
       "pass_512": "pass",
       "pass_1024": "pass",
       "pass_2048": "pass",
-      "compression_ratio": 2.2718,
+      "compression_ratio": 2.27182846932698,
       "total_compressed_bytes": 2417760,
       "memory_basis": "mean_per_prompt_real_model_cache",
       "recommended_status": "candidate"
@@ -118,7 +118,7 @@
       "pass_512": "pass",
       "pass_1024": "pass",
       "pass_2048": "pass",
-      "compression_ratio": 2.1118,
+      "compression_ratio": 2.1118370058686744,
       "total_compressed_bytes": 2600928,
       "memory_basis": "mean_per_prompt_real_model_cache",
       "recommended_status": "candidate"

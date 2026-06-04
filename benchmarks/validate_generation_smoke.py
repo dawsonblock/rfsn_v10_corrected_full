@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generation smoke test for RFSN v10 Main 27.
+"""Generation smoke test for RFSN v10 Main 28.
 
 Runs greedy decode for baseline and compressed KV configs, then checks:
   - Token match rate vs baseline (first N tokens)
@@ -385,7 +385,9 @@ def _run_smoke(
 # ---------------------------------------------------------------------------
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="RFSN v10 Main 26 generation smoke test")
+    parser = argparse.ArgumentParser(
+        description="RFSN v10 Main 28 generation smoke test"
+    )
     parser.add_argument(
         "--model", default="Qwen/Qwen2.5-0.5B-Instruct",
         help="HuggingFace model ID",
