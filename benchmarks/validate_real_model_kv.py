@@ -456,15 +456,7 @@ def _determine_status(result: dict[str, Any], *, baseline_nll: float = 0.0) -> s
 
 
 _DEFAULT_VALIDATION_PROMPTS: list[str] = [
-    "The quick brown fox jumps over the lazy dog. " * 200,
-    (
-        "In the beginning, there was light. The universe expanded rapidly, "
-        "and galaxies formed from the primordial soup of hydrogen and helium. "
-        "Stars ignited and burned for millions of years before exploding. "
-        "Heavy elements were forged in these stellar furnaces and "
-        "scattered across the cosmos. Planets formed, oceans arose, "
-        "and life began. " * 15
-    ),
+    # 1. Technical explanation (self-referential to the system being tested)
     (
         "Machine learning models are trained on large datasets to learn "
         "statistical patterns. The transformer architecture uses self-attention "
@@ -474,6 +466,45 @@ _DEFAULT_VALIDATION_PROMPTS: list[str] = [
         "Quantization reduces memory bandwidth at the cost of "
         "numerical precision. " * 15
     ),
+    # 2. Code completion pattern
+    (
+        "def compute_statistics(data):\n"
+        "    \"\"\"Calculate mean, median, and standard deviation.\"\"\"\n"
+        "    n = len(data)\n"
+        "    if n == 0:\n"
+        "        return None\n"
+        "    mean = sum(data) / n\n"
+        "    variance = sum((x - mean) ** 2 for x in data) / n\n"
+        "    std_dev = variance ** 0.5\n"
+        "    sorted_data = sorted(data)\n"
+        "    mid = n // 2\n"
+        "    median = sorted_data[mid] if n % 2 else "
+        "(sorted_data[mid - 1] + sorted_data[mid]) / 2\n"
+        "    return {\"mean\": mean, \"median\": median, \"std\": std_dev}\n\n"
+        "# Example usage with test data\n"
+        "test_values = [23, 45, 67, 89, 12, 34, 56, 78, 90, 11]\n"
+        "result = compute_statistics(test_values)\n"
+        "print(f\"Mean: {result['mean']:.2f}\")\n\n" * 10
+    ),
+    # 3. Number reasoning / arithmetic reasoning
+    (
+        "Calculate the following step by step: 127 plus 345 equals 472. "
+        "Now multiply 472 by 3 to obtain 1416. Divide 1416 by 4 to get 354. "
+        "Add 100 to reach 454. Subtract 54 to return to 400. "
+        "Double it for 800. Halve that for 400 again. "
+        "The pattern confirms arithmetic consistency. " * 25
+    ),
+    # 4. JSON-like structured data continuation
+    (
+        '{"project": "rfsn_v10", "version": "main26", "status": "alpha", '
+        '"components": [{"name": "kv_manager", "type": "compression", '
+        '"bits": [4, 5, 6, 8]}, {"name": "attention", "type": "sparse", '
+        '"top_k": 0.3}, {"name": "runtime", "type": "orchestrator"}], '
+        '"metrics": {"cosine_mean": 0.999, "kl_div": 0.001, "nll_delta": 0.01}, '
+        '"hardware": {"device": "mps", "memory_gb": 16}} ' * 80
+    ),
+    # 5. Long repeated context (original staple)
+    "The quick brown fox jumps over the lazy dog. " * 200,
 ]
 
 

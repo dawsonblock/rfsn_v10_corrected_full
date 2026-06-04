@@ -18,7 +18,7 @@
           "avg_nll_delta": -6.449939348840417e-05,
           "token_positions_evaluated": 64,
           "kl_divergence_mean": 8.556149623473175e-06,
-          "latency_ms": 1905.7129170105327,
+          "latency_ms": 1597.4079160077963,
           "route_used": "retrieve",
           "status": "pass",
           "oom": false
@@ -36,7 +36,7 @@
           "avg_nll_delta": 1.3219946481513034e-05,
           "token_positions_evaluated": 64,
           "kl_divergence_mean": 4.467479811864905e-06,
-          "latency_ms": 2105.835082998965,
+          "latency_ms": 1576.7603749991395,
           "route_used": "retrieve",
           "status": "pass",
           "oom": false
@@ -54,7 +54,7 @@
           "avg_nll_delta": 4.392276480302826e-05,
           "token_positions_evaluated": 64,
           "kl_divergence_mean": 9.360246622236446e-07,
-          "latency_ms": 2538.920541002881,
+          "latency_ms": 1615.8171249990119,
           "route_used": "retrieve",
           "status": "pass",
           "oom": false
@@ -72,7 +72,7 @@
           "avg_nll_delta": 7.32474319420362e-05,
           "token_positions_evaluated": 64,
           "kl_divergence_mean": 4.94000778417103e-06,
-          "latency_ms": 1843.2125420076773,
+          "latency_ms": 1561.9387079932494,
           "route_used": "retrieve",
           "status": "pass",
           "oom": false
@@ -90,7 +90,7 @@
           "avg_nll_delta": -1.685812128471298e-05,
           "token_positions_evaluated": 64,
           "kl_divergence_mean": 7.478279258066323e-07,
-          "latency_ms": 1754.6292089973576,
+          "latency_ms": 1478.5925410105847,
           "route_used": "retrieve",
           "status": "pass",
           "oom": false
@@ -108,7 +108,7 @@
           "avg_nll_delta": 0.04608891182942898,
           "token_positions_evaluated": 64,
           "kl_divergence_mean": 0.01530646625906229,
-          "latency_ms": 1699.343416999909,
+          "latency_ms": 1787.046041994472,
           "route_used": "retrieve",
           "status": "fail",
           "oom": false
@@ -126,7 +126,7 @@
           "avg_nll_delta": 2.386156141918036,
           "token_positions_evaluated": 64,
           "kl_divergence_mean": 8.035765647888184,
-          "latency_ms": 1773.478499992052,
+          "latency_ms": 2069.0471669950057,
           "route_used": "retrieve",
           "status": "fail",
           "oom": false
@@ -149,7 +149,7 @@
           "avg_nll_delta": 0.0003426394941925537,
           "token_positions_evaluated": 64,
           "kl_divergence_mean": 0.007454446982592344,
-          "latency_ms": 2481.905291992007,
+          "latency_ms": 1776.4271670021117,
           "route_used": "retrieve",
           "status": "fail",
           "oom": false
@@ -167,7 +167,7 @@
           "avg_nll_delta": 2.55045300718848e-05,
           "token_positions_evaluated": 64,
           "kl_divergence_mean": 2.9904131224611774e-06,
-          "latency_ms": 4257.8712919930695,
+          "latency_ms": 1974.524332996225,
           "route_used": "retrieve",
           "status": "pass",
           "oom": false
@@ -185,7 +185,7 @@
           "avg_nll_delta": 7.784257149978657e-06,
           "token_positions_evaluated": 64,
           "kl_divergence_mean": 5.190691808820702e-06,
-          "latency_ms": 2292.0414580003126,
+          "latency_ms": 2030.0197080068756,
           "route_used": "retrieve",
           "status": "pass",
           "oom": false
@@ -203,7 +203,7 @@
           "avg_nll_delta": 3.072251377034263e-05,
           "token_positions_evaluated": 64,
           "kl_divergence_mean": 2.2803906176704913e-06,
-          "latency_ms": 1989.231290994212,
+          "latency_ms": 2188.1305830029305,
           "route_used": "retrieve",
           "status": "pass",
           "oom": false
@@ -221,7 +221,7 @@
           "avg_nll_delta": 3.984986847171967e-06,
           "token_positions_evaluated": 64,
           "kl_divergence_mean": 6.884218919367413e-07,
-          "latency_ms": 2502.692541005672,
+          "latency_ms": 1835.5689160089241,
           "route_used": "retrieve",
           "status": "pass",
           "oom": false
@@ -239,7 +239,7 @@
           "avg_nll_delta": 0.015234461091495177,
           "token_positions_evaluated": 64,
           "kl_divergence_mean": 0.3212536573410034,
-          "latency_ms": 2062.058833995252,
+          "latency_ms": 1775.511625004583,
           "route_used": "retrieve",
           "status": "fail",
           "oom": false
@@ -257,7 +257,7 @@
           "avg_nll_delta": 0.039147385106389265,
           "token_positions_evaluated": 64,
           "kl_divergence_mean": 0.13992157578468323,
-          "latency_ms": 2024.5595000014873,
+          "latency_ms": 1737.2148750000633,
           "route_used": "retrieve",
           "status": "fail",
           "oom": false
@@ -280,7 +280,7 @@
           "avg_nll_delta": -1.7211568092534435e-05,
           "token_positions_evaluated": 64,
           "kl_divergence_mean": 5.5832556427048985e-06,
-          "latency_ms": 26021.082207997097,
+          "latency_ms": 2623.681500001112,
           "route_used": "retrieve",
           "status": "pass",
           "oom": false
@@ -298,7 +298,7 @@
           "avg_nll_delta": -1.3156882346265775e-05,
           "token_positions_evaluated": 64,
           "kl_divergence_mean": 2.2192239157448057e-07,
-          "latency_ms": 22045.425332995364,
+          "latency_ms": 2581.9217910029693,
           "route_used": "retrieve",
           "status": "pass",
           "oom": false
@@ -316,7 +316,7 @@
           "avg_nll_delta": -5.340405664355785e-06,
           "token_positions_evaluated": 64,
           "kl_divergence_mean": 1.6659248558426043e-07,
-          "latency_ms": 3093.3172090008156,
+          "latency_ms": 2650.972041999921,
           "route_used": "retrieve",
           "status": "pass",
           "oom": false
@@ -334,7 +334,7 @@
           "avg_nll_delta": -1.5111527773115085e-05,
           "token_positions_evaluated": 64,
           "kl_divergence_mean": 3.8613529795838986e-07,
-          "latency_ms": 2663.283833011519,
+          "latency_ms": 16154.166292006266,
           "route_used": "retrieve",
           "status": "pass",
           "oom": false
@@ -352,7 +352,7 @@
           "avg_nll_delta": -1.1587575613702938e-05,
           "token_positions_evaluated": 64,
           "kl_divergence_mean": 2.6210341275145765e-07,
-          "latency_ms": 3104.210999998031,
+          "latency_ms": 21310.28033301118,
           "route_used": "retrieve",
           "status": "pass",
           "oom": false
@@ -370,7 +370,7 @@
           "avg_nll_delta": 0.015475073940137918,
           "token_positions_evaluated": 64,
           "kl_divergence_mean": 0.0030268304981291294,
-          "latency_ms": 2687.2323749994393,
+          "latency_ms": 28295.64779199427,
           "route_used": "retrieve",
           "status": "fail",
           "oom": false
@@ -388,7 +388,7 @@
           "avg_nll_delta": 0.8616877480284302,
           "token_positions_evaluated": 64,
           "kl_divergence_mean": 0.06944256275892258,
-          "latency_ms": 3213.6307080072584,
+          "latency_ms": 13883.614541002316,
           "route_used": "retrieve",
           "status": "fail",
           "oom": false

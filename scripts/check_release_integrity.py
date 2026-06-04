@@ -127,6 +127,7 @@ def check() -> list[str]:
         required_artifacts = [
             "kernel_benchmark.json",
             "fused_kernel_benchmark.json",
+            "optimization_benchmark.json",
             "real_model_validation.json",
             "long_context_validation.json",
             "generation_smoke.json",
