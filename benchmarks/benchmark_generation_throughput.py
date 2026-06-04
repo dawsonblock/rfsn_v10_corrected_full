@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generation throughput benchmark for RFSN v10 Main 26.
+"""Generation throughput benchmark for RFSN v10 Main 27.
 
 Measures:
   - Tokens/second (decode throughput)
@@ -14,7 +14,7 @@ Usage:
   python benchmarks/benchmark_generation_throughput.py \\
       --model Qwen/Qwen2.5-0.5B-Instruct \\
       --tokens 256 --decode 64 --repeats 5 \\
-      --out artifacts/proof/main26/generation_throughput.json
+      --out artifacts/proof/main27/generation_throughput.json
 """
 from __future__ import annotations
 
@@ -105,7 +105,10 @@ def _compress_past(past_legacy: list, config: dict, device: torch.device) -> lis
     for k, v in past_legacy:
         k_np = k.float().cpu().numpy()
         v_np = v.float().cpu().numpy()
-        mgr = RFSNTurboQuantKVManager(k_bits=k_bits, v_bits=v_bits, group_size=group_size)
+        mgr = RFSNTurboQuantKVManager(
+            k_bits=k_bits, v_bits=v_bits, group_size=group_size,
+            cache_dir=str(Path.home() / ".rfsn_cache"),
+        )
         token_count = k.shape[2]  # [B, H, T, D]
         mgr.store(
             skill_pattern="throughput",
@@ -190,23 +193,26 @@ def _percentile(data: list[float], pct: float) -> float:
 
 def _run_trial(
     model,
-    input_ids: torch.Tensor,
+    last_tok_ids: torch.Tensor,
     past_legacy: list | None,
     cache_cls: type | None,
     n_decode: int,
 ) -> dict[str, float]:
-    """Run one timed greedy decode trial. Returns timing stats."""
-    if past_legacy is not None:
-        past = _from_legacy_cache(past_legacy, cache_cls)
-        ctx_input = input_ids[:, -1:]
-    else:
-        past = None
-        ctx_input = input_ids
+    """Run one timed greedy decode trial. Returns timing stats.
 
-    # TTFT: time to produce first token
+    `last_tok_ids` is the single last context token (shape [1,1]).
+    `past_legacy` holds KV for all preceding context tokens.
+    """
+    past = _from_legacy_cache(past_legacy, cache_cls) if past_legacy else None
+
+    # TTFT: time to produce first token after feeding last context token
     t_start = time.perf_counter()
     with torch.no_grad():
-        out = model(input_ids=ctx_input, past_key_values=past, use_cache=True)
+        out = model(
+            input_ids=last_tok_ids,
+            past_key_values=past,
+            use_cache=True,
+        )
     past = out.past_key_values
     t_first = time.perf_counter()
     ttft_ms = (t_first - t_start) * 1000.0
@@ -214,12 +220,14 @@ def _run_trial(
     # Decode remaining tokens
     per_token_ms: list[float] = []
     logits = out.logits[:, -1, :]
-    for _ in range(n_decode):
+    for _ in range(n_decode - 1):
         next_tok = torch.argmax(logits, dim=-1, keepdim=True)
         t0 = time.perf_counter()
         with torch.no_grad():
             out = model(
-                input_ids=next_tok, past_key_values=past, use_cache=True
+                input_ids=next_tok,
+                past_key_values=past,
+                use_cache=True,
             )
         t1 = time.perf_counter()
         per_token_ms.append((t1 - t0) * 1000.0)
@@ -227,7 +235,9 @@ def _run_trial(
         logits = out.logits[:, -1, :]
 
     total_decode_ms = sum(per_token_ms)
-    tokens_per_sec = (n_decode / total_decode_ms * 1000.0) if total_decode_ms > 0 else float("nan")
+    tokens_per_sec = (
+        (n_decode - 1) / total_decode_ms * 1000.0
+    ) if total_decode_ms > 0 else float("nan")
 
     return {
         "ttft_ms": ttft_ms,
@@ -279,41 +289,74 @@ def _run_benchmark(
     input_ids = inputs["input_ids"][:, :tokens].to(device)
     print(f"Context tokens: {input_ids.shape[1]}, decode steps: {n_decode}")
 
-    # Pre-compute context KV cache once
+    # Pre-compute context KV cache from all-but-last token
     with torch.no_grad():
-        ctx_out = model(input_ids=input_ids, use_cache=True)
-    ctx_legacy, ctx_cache_cls = _to_legacy_cache(ctx_out.past_key_values)
+        pre_out = model(input_ids=input_ids[:, :-1], use_cache=True)
+    pre_legacy, pre_cache_cls = _to_legacy_cache(pre_out.past_key_values)
+
+    # Baseline also uses the same pre-context past
+    baseline_past = _clone_legacy_cache(pre_legacy)
 
     def _mean(vals: list[float]) -> float:
         finite = [v for v in vals if math.isfinite(v)]
         return sum(finite) / len(finite) if finite else float("nan")
+
+    # Estimate FP16 KV bytes from first layer shape
+    first_k = pre_legacy[0][0]
+    layers = len(pre_legacy)
+    _, heads, seq, dim = first_k.shape
+    fp16_kv_bytes = layers * seq * heads * dim * 2 * 2  # K + V, fp16
 
     config_results: list[dict[str, Any]] = []
 
     for config in configs:
         print(f"  Benchmarking {config['name']} (warmup={warmup}, repeats={repeats}) ...")
         mem_before = _peak_memory_mb()
+        t_compress_start = time.perf_counter()
 
         # Build per-trial past caches
-        def _get_past() -> tuple[list | None, type | None]:
-            if config["name"] == "baseline_fp16":
-                return _clone_legacy_cache(ctx_legacy), ctx_cache_cls
-            return (
-                _compress_past(_clone_legacy_cache(ctx_legacy), config, device),
-                ctx_cache_cls,
+        if config["name"] == "baseline_fp16":
+            past_cache = _clone_legacy_cache(baseline_past)
+            compress_ms = 0.0
+            compressed_kv_bytes = fp16_kv_bytes
+        else:
+            past_cache = _compress_past(
+                _clone_legacy_cache(baseline_past), config, device
             )
+            compress_ms = (time.perf_counter() - t_compress_start) * 1000.0
+            # Estimate compressed bytes based on bit widths
+            k_bits = config["k_bits"]
+            v_bits = config["v_bits"]
+            group_size = config["group_size"]
+            # Quantized tensor: (seq * heads * dim) * bits / 8 bytes
+            # Plus scale per group: (seq * heads * dim / group_size) * 2 bytes
+            k_quant = seq * heads * dim * k_bits / 8
+            v_quant = seq * heads * dim * v_bits / 8
+            k_scale = (seq * heads * dim / group_size) * 2
+            v_scale = (seq * heads * dim / group_size) * 2
+            compressed_kv_bytes = int(
+                layers * (k_quant + v_quant + k_scale + v_scale)
+            )
+
+        mem_after_compress = _peak_memory_mb()
+
+        last_tok = input_ids[:, -1:]
 
         # Warmup
         for _ in range(warmup):
-            past_w, cls_w = _get_past()
-            _run_trial(model, input_ids, past_w, cls_w, n_decode)
+            _run_trial(model, last_tok, past_cache, pre_cache_cls, n_decode)
 
         # Timed trials
         trial_results: list[dict[str, float]] = []
         for _ in range(repeats):
-            past_r, cls_r = _get_past()
+            if config["name"] == "baseline_fp16":
+                trial_past = _clone_legacy_cache(baseline_past)
+            else:
+                trial_past = _compress_past(
+                    _clone_legacy_cache(baseline_past), config, device
+                )
             trial_results.append(
-                _run_trial(model, input_ids, past_r, cls_r, n_decode)
+                _run_trial(model, last_tok, trial_past, pre_cache_cls, n_decode)
             )
 
         mem_after = _peak_memory_mb()
@@ -321,13 +364,20 @@ def _run_benchmark(
             mem_after - mem_before if math.isfinite(mem_after) else float("nan")
         )
 
+        prefill_ms = _mean([r["ttft_ms"] for r in trial_results])
+        decode_ms = _mean([r["total_decode_ms"] for r in trial_results])
+        total_end_to_end_ms = prefill_ms + decode_ms + compress_ms
+
         agg: dict[str, Any] = {
             "name": config["name"],
             "k_bits": config["k_bits"],
             "v_bits": config["v_bits"],
             "group_size": config["group_size"],
             "repeats": repeats,
-            "ttft_ms_mean": _mean([r["ttft_ms"] for r in trial_results]),
+            "prefill_ms_mean": prefill_ms,
+            "compress_ms_mean": compress_ms,
+            "decode_ms_mean": decode_ms,
+            "total_end_to_end_ms_mean": total_end_to_end_ms,
             "tokens_per_sec_mean": _mean(
                 [r["tokens_per_sec"] for r in trial_results]
             ),
@@ -340,18 +390,24 @@ def _run_benchmark(
             "p99_token_ms_mean": _mean(
                 [r["p99_token_ms"] for r in trial_results]
             ),
+            "fp16_kv_bytes": fp16_kv_bytes,
+            "compressed_kv_bytes": compressed_kv_bytes,
+            "effective_compression_ratio": (
+                fp16_kv_bytes / compressed_kv_bytes
+                if compressed_kv_bytes > 0 else float("nan")
+            ),
             "peak_mem_delta_mb": peak_mem_delta_mb,
         }
         config_results.append(agg)
         print(
             f"    tps={agg['tokens_per_sec_mean']:.1f} "
-            f"ttft={agg['ttft_ms_mean']:.1f}ms "
+            f"prefill={agg['prefill_ms_mean']:.1f}ms "
             f"p50={agg['p50_token_ms_mean']:.2f}ms "
             f"peak_delta={agg['peak_mem_delta_mb']:.1f}MB"
         )
 
     payload: dict[str, Any] = {
-        "release": "main26",
+        "release": "main27",
         "analysis": "generation_throughput",
         "model": model_id,
         "hardware": _get_hardware_info(),
@@ -398,7 +454,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--out",
-        default="artifacts/proof/main26/generation_throughput.json",
+        default="artifacts/proof/main27/generation_throughput.json",
         help="Output JSON path",
     )
     parser.add_argument(

@@ -40,7 +40,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--out",
-        default="artifacts/proof/main26/long_context_validation.json",
+        default="artifacts/proof/main27/long_context_validation.json",
         help="Output JSON path",
     )
     args = parser.parse_args()

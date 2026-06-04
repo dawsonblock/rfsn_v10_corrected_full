@@ -124,111 +124,35 @@ def _decode_nll_multi(
     past,
     decode_tokens: torch.Tensor,
     n_positions: int = 64,
-) -> tuple[torch.Tensor, float]:
-    """Causal-correct multi-position NLL; return (first_logits, avg_nll).
+) -> tuple[list[torch.Tensor], float]:
+    """Causal-correct multi-position NLL; return (all_scored_logits, avg_nll).
 
     Scoring rule (causal LM):
       - logits produced by feeding token t predict token t+1.
-      - To score decode_tokens[i], we must use the logits that were live
+      - To score decode_tokens[i], we use the logits that were live
         *before* decode_tokens[i] was fed (i.e. after feeding
         decode_tokens[i-1], or the context forward pass for i==0).
 
-    Procedure:
-      1. The caller has already run the context forward pass and stored the
-         resulting past + logits in `past` (we re-derive pre-token-0 logits
-         by running the context forward pass implicitly via the initial `past`).
-      2. For each position i in [0, n):
-           a. Obtain logits_i = logits predicting decode_tokens[i].
-              For i==0 these come from a short forward pass with no new tokens
-              (we feed an empty slice — but since past already contains the
-              context, we instead get them by passing the LAST context token
-              again is wrong; the correct approach is: the caller must pass
-              the pre-decode logits directly.)
+    Uses shifted-window scoring: token 0 advances the cache but is NOT
+    scored.  Tokens 1..n are each scored against the logits produced by
+    the previous forward pass.  This yields `n_positions` scored logits.
 
-    Because the caller computes baseline_logits as the last context logits
-    (logits after the context forward pass, before any decode token is fed),
-    we receive those as `past` implicitly via the cache state.  We therefore:
-      - Use the logits returned by the PREVIOUS forward pass to score the
-        CURRENT token, advancing the cache with the current token after scoring.
+    Returns:
+        all_scored_logits: list of logits tensors, one per scored position.
+                         Length == number of positions actually scored.
+        avg_nll: mean NLL over all scored positions.
     """
     n = min(n_positions, decode_tokens.shape[1])
     if n == 0:
-        dummy = torch.zeros(1, 1)
-        return dummy, float("nan")
+        return [], float("nan")
 
     nlls: list[float] = []
+    scored_logits: list[torch.Tensor] = []
     current_past = past
-    first_logits: torch.Tensor | None = None
-
-    # Get the logits that predict decode_tokens[:, 0] by running a zero-length
-    # "peek" — actually we must derive them from context.  The context forward
-    # pass was already run by the caller; `past` holds that KV state.  We do
-    # one forward pass with the first decode token to (a) score it against the
-    # pre-existing context logits and (b) advance the cache.
-    #
-    # The correct scoring sequence:
-    #   prev_logits = context_last_logits   (caller computed these)
-    #   for i in range(n):
-    #       nll[i] = cross_entropy(prev_logits, decode_tokens[i])
-    #       prev_logits, current_past = forward(decode_tokens[i], current_past)
-    #
-    # But we don't receive context_last_logits here. We recover them by running
-    # a single forward pass over decode_tokens[:,0:1] BEFORE scoring, capture
-    # logits (which predict token 1), then score token 0 against the pre-feed
-    # logits obtained from a context-peek forward pass.
-    #
-    # Simpler and equivalent: run a forward pass with NO new tokens but with the
-    # current past to get the logits predicting the next (first decode) token.
-    # HuggingFace models don't support input_ids of length 0 cleanly, so we
-    # a single peek token (the first decode token) and score it against the
-    # logits from the context-only cache by doing:
-    #   peek_out = model(input_ids=decode_tokens[:,0:1], past=current_past)
-    #   peek_logits = peek_out.logits[:, -1, :]   # predicts token 1
-    #   But to get logits that predict token 0 we need the logits BEFORE
-    #   feeding token 0, which are the context's final logits.
-    #
-    # Resolution: the caller always passes `past` from a context forward pass
-    # that also returned logits.  We accept an optional `context_last_logits`
-    # parameter; if not provided we run one additional context-peek step.
-    # For backward-compat this function signature keeps `past` only and we
-    # do the peek internally.
-
-    # Step 0: obtain logits that predict decode_tokens[:,0] by running the
-    # context past through a dummy forward of shape (1,1) =
-    # decode_tokens[:,0:1].
-    # The logits of THIS forward predict decode_tokens[:,1], but the logits
-    # WE NEED to score decode_tokens[:,0] are the output of the CONTEXT pass.
-    # We recover them with a separate peek: feed a zero-pad or use the cache
-    # approach below.
-    #
-    # The cleanest approach that doesn't require changing callers:
-    #   score_logits[i] = logits produced by forward(decode_tokens[i-1], ...)
-    #   For i==0: score_logits[0] = logits produced by forward(context, ...)
-    #             which the caller stored in `past` but didn't return.
-    # We run one additional forward with decode_tokens[:,0:1] to get its output
-    # logits (which score token 1), then iterate from token 1 onward.
-    # For token 0 we score it against the logits from the context forward pass,
-    # which we obtain by running a no-op that passes the full context — too
-    # expensive.  Instead, we use the convention that `past` was built from
-    # `context_ids` and we also pass `context_logits` as an optional arg.
-    #
-    # To avoid a large refactor of all call sites we use a pragmatic approach:
-    # perform scoring using the SHIFTED window — score decode_tokens[1..n]
-    # using logits from decode_tokens[0..n-1] forward passes, starting from the
-    # context KV state.  Token 0 is used only to advance the cache (not scored).
-    # This gives n-1 correctly scored positions.  n is bumped by 1 so that we
-    # still evaluate `n_positions` correctly-scored tokens.
-    #
-    # Concretely:
-    #   i=0: feed tok[0] -> get logits_0 (predicts tok[1]); cache advances
-    #   i=1: score tok[1] against logits_0; feed tok[1] -> logits_1
-    #   ...
-    #   i=n: score tok[n] against logits_{n-1}
-    # We evaluate n_positions scored tokens by consuming n_positions+1
-    # decode tokens.
-
-    n_consume = min(n_positions + 1, decode_tokens.shape[1])
     prev_logits: torch.Tensor | None = None
+
+    # Shifted-window: consume n_positions+1 tokens to score n_positions.
+    n_consume = min(n_positions + 1, decode_tokens.shape[1])
 
     for i in range(n_consume):
         tok = decode_tokens[:, i:i + 1]
@@ -243,20 +167,17 @@ def _decode_nll_multi(
 
         if prev_logits is not None:
             # Score tok[i] against logits produced BEFORE feeding tok[i]
-            if first_logits is None:
-                first_logits = prev_logits
             if _has_nan_or_inf(prev_logits):
-                dummy = torch.zeros(1, 1)
-                return dummy, float("nan")
+                return [], float("nan")
             nll = float(F.cross_entropy(prev_logits, tok[:, 0]).item())
             nlls.append(nll)
+            scored_logits.append(prev_logits)
 
         prev_logits = logits
 
-    if first_logits is None or not nlls:
-        dummy = torch.zeros(1, 1)
-        return dummy, float("nan")
-    return first_logits, float(sum(nlls) / len(nlls))
+    if not nlls or not scored_logits:
+        return [], float("nan")
+    return scored_logits, float(sum(nlls) / len(nlls))
 
 
 def _compress_decompress_past(
@@ -282,6 +203,7 @@ def _compress_decompress_past(
         prefer_metal_kernels=True,
         strict_metal=False,
         max_memory_gb=2.0,
+        cache_dir=str(Path.home() / ".rfsn_cache"),
     )
 
     rebuilt: list[tuple[torch.Tensor, torch.Tensor]] = []
@@ -341,6 +263,65 @@ def _clone_legacy_cache(legacy_cache):
     return tuple((k.clone(), v.clone()) for k, v in legacy_cache)
 
 
+def _finite_mean(vals: list[float]) -> float:
+    """Return mean of finite values, or NaN if none."""
+    finite = [v for v in vals if math.isfinite(v)]
+    return float(sum(finite) / len(finite)) if finite else float("nan")
+
+
+def _compute_logit_metrics(
+    baseline_logits_list: list[torch.Tensor],
+    compressed_logits_list: list[torch.Tensor],
+) -> dict[str, float]:
+    """Compute cosine, top1, top5, KL across all scored positions."""
+    assert len(baseline_logits_list) == len(compressed_logits_list)
+    cosines: list[float] = []
+    top1_matches = 0
+    top5_overlaps: list[float] = []
+    kls: list[float] = []
+    max_diffs: list[float] = []
+
+    for b_log, c_log in zip(baseline_logits_list, compressed_logits_list):
+        b = b_log.float()
+        c = c_log.float()
+
+        if _has_nan_or_inf(b) or _has_nan_or_inf(c):
+            cosines.append(float("nan"))
+            top5_overlaps.append(float("nan"))
+            kls.append(float("nan"))
+            max_diffs.append(float("nan"))
+            continue
+
+        cos = _cosine(b, c)
+        cosines.append(cos)
+
+        b_top1 = int(torch.argmax(b, dim=-1).item())
+        c_top1 = int(torch.argmax(c, dim=-1).item())
+        top1_matches += int(b_top1 == c_top1)
+
+        top5 = _topk_overlap(b, c, k=5)
+        top5_overlaps.append(top5)
+
+        kl = _kl_div(b, c)
+        kls.append(kl)
+
+        mad = float(torch.max(torch.abs(b - c)).item())
+        max_diffs.append(mad)
+
+    n = len(baseline_logits_list)
+    return {
+        "logit_cosine_mean": _finite_mean(cosines),
+        "logit_cosine_min": min(
+            c for c in cosines if math.isfinite(c)
+        ) if any(math.isfinite(c) for c in cosines) else float("nan"),
+        "logit_max_abs_diff": _finite_mean(max_diffs),
+        "top1_match_rate": top1_matches / n if n > 0 else float("nan"),
+        "top5_overlap_mean": _finite_mean(top5_overlaps),
+        "kl_divergence_mean": _finite_mean(kls),
+        "token_positions_evaluated": n,
+    }
+
+
 def _evaluate_config(
     config: dict[str, Any],
     *,
@@ -349,7 +330,7 @@ def _evaluate_config(
     past_legacy,
     cache_cls,
     decode_tokens: torch.Tensor,
-    baseline_logits: torch.Tensor,
+    baseline_logits_list: list[torch.Tensor],
     baseline_nll: float,
     device: torch.device,
     compress_layers: set[int] | None = None,
@@ -363,47 +344,44 @@ def _evaluate_config(
     past = _from_legacy_cache(past_legacy, cache_cls)
 
     t0 = time.perf_counter()
-    logits, nll = _decode_nll_multi(
+    logits_list, nll = _decode_nll_multi(
         model, past, decode_tokens, n_positions=n_decode_positions
     )
-    decode_len = decode_tokens.shape[1]
-    actual_positions = min(n_decode_positions, max(0, decode_len - 1))
     dt = (time.perf_counter() - t0) * 1000.0
 
-    nan_logits = _has_nan_or_inf(logits)
-    cosine = _cosine(logits, baseline_logits)
-    if nan_logits or _has_nan_or_inf(baseline_logits):
-        max_abs_diff = float("nan")
-        top1_match = float("nan")
-        top5 = float("nan")
-    else:
-        max_abs_diff = float(
-            torch.max(torch.abs(logits - baseline_logits)).item()
-        )
-        top1_match = float(
-            torch.argmax(logits, dim=-1).item()
-            == torch.argmax(baseline_logits, dim=-1).item()
-        )
-        top5 = _topk_overlap(logits, baseline_logits, k=5)
-    kl = _kl_div(baseline_logits, logits)
+    if not logits_list or not baseline_logits_list:
+        return {
+            "name": config["name"],
+            "k_bits": config["k_bits"],
+            "v_bits": config["v_bits"],
+            "group_size": config["group_size"],
+            "logit_cosine_mean": float("nan"),
+            "logit_cosine_min": float("nan"),
+            "logit_max_abs_diff": float("nan"),
+            "top1_match_rate": float("nan"),
+            "top5_overlap_mean": float("nan"),
+            "avg_nll_delta": float("nan"),
+            "token_positions_evaluated": 0,
+            "kl_divergence_mean": float("nan"),
+            "latency_ms": dt,
+            "route_used": "retrieve"
+            if config["name"] != "baseline_fp16"
+            else "baseline_fp16",
+        }
+
+    metrics = _compute_logit_metrics(baseline_logits_list, logits_list)
 
     return {
         "name": config["name"],
         "k_bits": config["k_bits"],
         "v_bits": config["v_bits"],
         "group_size": config["group_size"],
-        "logit_cosine_mean": cosine,
-        "logit_cosine_min": cosine,
-        "logit_max_abs_diff": max_abs_diff,
-        "top1_match_rate": top1_match,
-        "top5_overlap_mean": top5,
         "avg_nll_delta": nll - baseline_nll,
-        "token_positions_evaluated": actual_positions,
-        "kl_divergence_mean": kl,
         "latency_ms": dt,
         "route_used": "retrieve"
         if config["name"] != "baseline_fp16"
         else "baseline_fp16",
+        **metrics,
     }
 
 
@@ -496,7 +474,7 @@ _DEFAULT_VALIDATION_PROMPTS: list[str] = [
     ),
     # 4. JSON-like structured data continuation
     (
-        '{"project": "rfsn_v10", "version": "main26", "status": "alpha", '
+        '{"project": "rfsn_v10", "version": "main27", "status": "alpha", '
         '"components": [{"name": "kv_manager", "type": "compression", '
         '"bits": [4, 5, 6, 8]}, {"name": "attention", "type": "sparse", '
         '"top_k": 0.3}, {"name": "runtime", "type": "orchestrator"}], '
@@ -566,7 +544,7 @@ def _run_real_model_validation(
             baseline_ctx.past_key_values
         )
         baseline_past = _from_legacy_cache(baseline_legacy, baseline_cache_cls)
-        baseline_logits, baseline_nll = _decode_nll_multi(
+        baseline_logits_list, baseline_nll = _decode_nll_multi(
             model, baseline_past, decode_tokens, n_positions=n_decode_positions
         )
 
@@ -578,7 +556,7 @@ def _run_real_model_validation(
                 past_legacy=_clone_legacy_cache(baseline_legacy),
                 cache_cls=baseline_cache_cls,
                 decode_tokens=decode_tokens,
-                baseline_logits=baseline_logits,
+                baseline_logits_list=baseline_logits_list,
                 baseline_nll=baseline_nll,
                 device=device,
                 n_decode_positions=n_decode_positions,
@@ -587,10 +565,6 @@ def _run_real_model_validation(
             prompt_results_by_config[config["name"]].append(result)
 
     # Aggregate: mean each metric across prompts per config
-    def _finite_mean(vals: list[float]) -> float:
-        finite = [v for v in vals if math.isfinite(v)]
-        return float(sum(finite) / len(finite)) if finite else float("nan")
-
     config_results: list[dict[str, Any]] = []
     for config in configs:
         per_prompt = prompt_results_by_config[config["name"]]
@@ -655,7 +629,7 @@ def _run_real_model_validation(
         )
 
     payload: dict[str, Any] = {
-        "release": "main26",
+        "release": "main27",
         "validation_class": "real_non_random_model_validation",
         "model": model_id,
         "hardware": _get_hardware_info(),
@@ -718,7 +692,7 @@ def _run_long_context_validation(
             baseline_ctx.past_key_values
         )
         baseline_past = _from_legacy_cache(baseline_legacy, baseline_cache_cls)
-        baseline_logits, baseline_nll = _decode_nll_multi(
+        baseline_logits_list, baseline_nll = _decode_nll_multi(
             model, baseline_past, decode_tokens, n_positions=n_decode_positions
         )
 
@@ -732,7 +706,7 @@ def _run_long_context_validation(
                     past_legacy=_clone_legacy_cache(baseline_legacy),
                     cache_cls=baseline_cache_cls,
                     decode_tokens=decode_tokens,
-                    baseline_logits=baseline_logits,
+                    baseline_logits_list=baseline_logits_list,
                     baseline_nll=baseline_nll,
                     device=device,
                     n_decode_positions=n_decode_positions,
@@ -840,7 +814,7 @@ def _run_long_context_validation(
     ]
 
     payload: dict[str, Any] = {
-        "release": "main26",
+        "release": "main27",
         "model": model_id,
         "contexts": context_entries,
         "summary": {
@@ -894,7 +868,7 @@ def _run_per_layer_sensitivity(
         baseline_ctx.past_key_values
     )
     baseline_past = _from_legacy_cache(baseline_legacy, baseline_cache_cls)
-    baseline_logits, baseline_nll = _decode_nll_multi(
+    baseline_logits_list, baseline_nll = _decode_nll_multi(
         model, baseline_past, decode_tokens, n_positions=64
     )
 
@@ -916,7 +890,7 @@ def _run_per_layer_sensitivity(
                 past_legacy=_clone_legacy_cache(baseline_legacy),
                 cache_cls=baseline_cache_cls,
                 decode_tokens=decode_tokens,
-                baseline_logits=baseline_logits,
+                baseline_logits_list=baseline_logits_list,
                 baseline_nll=baseline_nll,
                 device=device,
                 compress_layers={layer_idx},
@@ -975,7 +949,7 @@ def _run_per_layer_sensitivity(
     }
 
     payload: dict[str, Any] = {
-        "release": "main26",
+        "release": "main27",
         "analysis": "per_layer_sensitivity",
         "model": model_id,
         "tokens_tested": tokens,
@@ -1033,7 +1007,7 @@ def _run_targeted_layer_protection(
         baseline_ctx.past_key_values
     )
     baseline_past = _from_legacy_cache(baseline_legacy, baseline_cache_cls)
-    baseline_logits, baseline_nll = _decode_nll_multi(
+    baseline_logits_list, baseline_nll = _decode_nll_multi(
         model, baseline_past, decode_tokens, n_positions=64
     )
 
@@ -1086,7 +1060,7 @@ def _run_targeted_layer_protection(
                 past_legacy=_clone_legacy_cache(baseline_legacy),
                 cache_cls=baseline_cache_cls,
                 decode_tokens=decode_tokens,
-                baseline_logits=baseline_logits,
+                baseline_logits_list=baseline_logits_list,
                 baseline_nll=baseline_nll,
                 device=device,
                 compress_layers=compress_set,
@@ -1109,7 +1083,7 @@ def _run_targeted_layer_protection(
         })
 
     payload: dict[str, Any] = {
-        "release": "main26",
+        "release": "main27",
         "analysis": "targeted_layer_protection",
         "model": model_id,
         "tokens_tested": tokens,
@@ -1191,12 +1165,12 @@ def main() -> None:
     )
     parser.add_argument(
         "--out",
-        default="artifacts/proof/main26/real_model_validation.json",
+        default="artifacts/proof/main27/real_model_validation.json",
         help="Output JSON path for real-model validation",
     )
     parser.add_argument(
         "--long-context-out",
-        default="artifacts/proof/main26/long_context_validation.json",
+        default="artifacts/proof/main27/long_context_validation.json",
         help="Output JSON path for long-context validation",
     )
     parser.add_argument(
@@ -1211,7 +1185,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--per-layer-out",
-        default="artifacts/proof/main26/per_layer_sensitivity.json",
+        default="artifacts/proof/main27/per_layer_sensitivity.json",
         help="Output path for per-layer sensitivity",
     )
     parser.add_argument(
@@ -1221,7 +1195,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--early-layer-out",
-        default="artifacts/proof/main26/early_layer_protection.json",
+        default="artifacts/proof/main27/early_layer_protection.json",
         help="Output path for early-layer protection",
     )
     args = parser.parse_args()

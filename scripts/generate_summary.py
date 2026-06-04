@@ -18,7 +18,7 @@ REQUIRED_ARTIFACTS = [
     "mlx_test_summary.md",
     "mlx_pytest_raw.log",
     "mlx_pytest_junit.xml",
-    "main26_release_manifest.json",
+    "main27_release_manifest.json",
 ]
 
 OPTIONAL_ARTIFACTS = [
@@ -28,7 +28,7 @@ OPTIONAL_ARTIFACTS = [
 
 
 def main() -> int:
-    proof_dir = Path("artifacts/proof/main26")
+    proof_dir = Path("artifacts/proof/main27")
 
     artifacts = {}
     missing_required = []
@@ -49,7 +49,7 @@ def main() -> int:
         return 1
 
     summary = {
-        "release": "main26",
+        "release": "main27",
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "artifacts": artifacts,
         "status": "complete" if not missing_optional else "partial",

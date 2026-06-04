@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generation smoke test for RFSN v10 Main 26.
+"""Generation smoke test for RFSN v10 Main 27.
 
 Runs greedy decode for baseline and compressed KV configs, then checks:
   - Token match rate vs baseline (first N tokens)
@@ -7,13 +7,13 @@ Runs greedy decode for baseline and compressed KV configs, then checks:
   - Repetition rate (fraction of duplicate n-grams)
   - No NaN/Inf in logits at any decode step
 
-Produces a JSON summary at --out (default: artifacts/proof/main26/generation_smoke.json).
+Produces a JSON summary at --out (default: artifacts/proof/main27/generation_smoke.json).
 
 Usage:
   python benchmarks/validate_generation_smoke.py \\
       --model Qwen/Qwen2.5-0.5B-Instruct \\
       --tokens 128 --decode 32 \\
-      --out artifacts/proof/main26/generation_smoke.json
+      --out artifacts/proof/main27/generation_smoke.json
 """
 from __future__ import annotations
 
@@ -123,7 +123,10 @@ def _compress_past(past_legacy: list, config: dict, device: torch.device) -> lis
     for k, v in past_legacy:
         k_np = k.float().cpu().numpy()
         v_np = v.float().cpu().numpy()
-        mgr = RFSNTurboQuantKVManager(k_bits=k_bits, v_bits=v_bits, group_size=group_size)
+        mgr = RFSNTurboQuantKVManager(
+            k_bits=k_bits, v_bits=v_bits, group_size=group_size,
+            cache_dir=str(Path.home() / ".rfsn_cache"),
+        )
         token_count = k.shape[2]  # [B, H, T, D]
         mgr.store(
             skill_pattern="smoke_test",
@@ -261,10 +264,11 @@ def _run_smoke(
     baseline_dt = (time.perf_counter() - t0) * 1000.0
     baseline_text = tokenizer.decode(baseline_toks, skip_special_tokens=True)
 
-    # Run context forward pass once for compressed configs
+    # Build baseline past from all-but-last context token.
+    # The last token will be fed once below to avoid duplication.
     with torch.no_grad():
-        ctx_out = model(input_ids=input_ids, use_cache=True)
-    ctx_legacy, ctx_cache_cls = _to_legacy_cache(ctx_out.past_key_values)
+        pre_out = model(input_ids=input_ids[:, :-1], use_cache=True)
+    pre_legacy, pre_cache_cls = _to_legacy_cache(pre_out.past_key_values)
 
     results: list[dict[str, Any]] = []
 
@@ -279,16 +283,43 @@ def _run_smoke(
             latency_ms = baseline_dt
         else:
             compressed = _compress_past(
-                _clone_legacy_cache(ctx_legacy), config, device
+                _clone_legacy_cache(pre_legacy), config, device
             )
             t0 = time.perf_counter()
-            gen_toks, _, had_nan = _greedy_decode(
-                model,
-                input_ids[:, -1:],
-                n_decode,
-                past_legacy=compressed,
-                cache_cls=ctx_cache_cls,
-            )
+
+            # Feed last context token ONCE through compressed past
+            compressed_past = _from_legacy_cache(compressed, pre_cache_cls)
+            with torch.no_grad():
+                first_out = model(
+                    input_ids=input_ids[:, -1:],
+                    past_key_values=compressed_past,
+                    use_cache=True,
+                )
+
+            # Continue greedy decode
+            first_logits = first_out.logits[:, -1, :].float()
+            had_nan = _has_nan_or_inf(first_logits)
+            first_tok = int(torch.argmax(first_logits, dim=-1).item())
+            gen_toks = [first_tok]
+            past = first_out.past_key_values
+
+            for _ in range(n_decode - 1):
+                next_ids = torch.tensor(
+                    [[gen_toks[-1]]], device=device
+                )
+                with torch.no_grad():
+                    out = model(
+                        input_ids=next_ids,
+                        past_key_values=past,
+                        use_cache=True,
+                    )
+                past = out.past_key_values
+                logits = out.logits[:, -1, :].float()
+                if _has_nan_or_inf(logits):
+                    had_nan = True
+                next_tok = int(torch.argmax(logits, dim=-1).item())
+                gen_toks.append(next_tok)
+
             latency_ms = (time.perf_counter() - t0) * 1000.0
             gen_text = tokenizer.decode(gen_toks, skip_special_tokens=True)
             n = min(len(gen_toks), len(baseline_toks))
@@ -329,7 +360,7 @@ def _run_smoke(
         )
 
     payload: dict[str, Any] = {
-        "release": "main26",
+        "release": "main27",
         "analysis": "generation_smoke",
         "model": model_id,
         "context_tokens": int(input_ids.shape[1]),
@@ -372,7 +403,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--out",
-        default="artifacts/proof/main26/generation_smoke.json",
+        default="artifacts/proof/main27/generation_smoke.json",
         help="Output JSON path",
     )
     parser.add_argument(

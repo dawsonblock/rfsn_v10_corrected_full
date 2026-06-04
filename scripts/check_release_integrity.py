@@ -61,17 +61,18 @@ def check() -> list[str]:
         errors.append("README.md missing or unreadable")
 
     if readme:
-        # Check first 10 non-empty lines for Main 26 title
+        # Check first 10 non-empty lines for Main 27 title
         lines = readme.splitlines()
         non_empty = [ln for ln in lines if ln.strip()][:10]
-        has_title = any(ln.startswith("# RFSN v10 Main 26") for ln in non_empty)
+        has_title = any(ln.startswith("# RFSN v10 Main 27") for ln in non_empty)
         if not has_title:
-            errors.append("README title is not Main 26")
+            errors.append("README title is not Main 27")
 
         for stale in [
             "artifacts/proof/main23",
             "artifacts/proof/main24",
             "artifacts/proof/main25",
+            "artifacts/proof/main26",
         ]:
             # Allow historical mentions if they appear after the word
             # "historical" or inside a note about old releases — check each line
@@ -119,10 +120,10 @@ def check() -> list[str]:
                         f"README positive claim detected: {phrase!r}"
                     )
 
-    # --- Main 26 artifact directory ---
-    artifact_dir = root / "artifacts" / "proof" / "main26"
+    # --- Main 27 artifact directory ---
+    artifact_dir = root / "artifacts" / "proof" / "main27"
     if not artifact_dir.exists():
-        errors.append("artifacts/proof/main26 missing")
+        errors.append("artifacts/proof/main27 missing")
     else:
         required_artifacts = [
             "kernel_benchmark.json",
@@ -136,41 +137,41 @@ def check() -> list[str]:
             "mlx_test_summary.md",
             "mlx_pytest_raw.log",
             "mlx_pytest_junit.xml",
-            "main26_release_manifest.json",
+            "main27_release_manifest.json",
         ]
         for artifact in required_artifacts:
             if not (artifact_dir / artifact).exists():
                 errors.append(f"required artifact missing: {artifact}")
 
-        # Manifest must declare release = main26
-        manifest_path = artifact_dir / "main26_release_manifest.json"
+        # Manifest must declare release = main27
+        manifest_path = artifact_dir / "main27_release_manifest.json"
         if manifest_path.exists():
             try:
                 manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-                if manifest.get("release") != "main26":
+                if manifest.get("release") != "main27":
                     errors.append(
-                        "main26_release_manifest.json release field is not 'main26'"
+                        "main27_release_manifest.json release field is not 'main27'"
                     )
             except Exception:
-                errors.append("main26_release_manifest.json is not valid JSON")
+                errors.append("main27_release_manifest.json is not valid JSON")
 
-        # MLX summary must identify Main 26
+        # MLX summary must identify Main 27
         mlx_summary_path = artifact_dir / "mlx_test_summary.md"
         if mlx_summary_path.exists():
             try:
                 mlx_summary = mlx_summary_path.read_text(encoding="utf-8")
-                if "Main 26" not in mlx_summary:
-                    errors.append("MLX summary does not identify Main 26")
+                if "Main 27" not in mlx_summary:
+                    errors.append("MLX summary does not identify Main 27")
             except OSError:
                 pass
 
-        # proof_summary.md must identify Main 26
+        # proof_summary.md must identify Main 27
         proof_path = artifact_dir / "proof_summary.md"
         if proof_path.exists():
             try:
                 proof = proof_path.read_text(encoding="utf-8")
-                if "Main 26" not in proof:
-                    errors.append("proof_summary.md does not identify Main 26")
+                if "Main 27" not in proof:
+                    errors.append("proof_summary.md does not identify Main 27")
             except OSError:
                 pass
 
@@ -196,9 +197,9 @@ def check() -> list[str]:
                             f"config {cfg.get('name')!r} evaluated only "
                             f"{pos} positions (minimum 32 required)"
                         )
-                if data.get("release") != "main26":
+                if data.get("release") != "main27":
                     errors.append(
-                        "real_model_validation.json release field is not 'main26'"
+                        "real_model_validation.json release field is not 'main27'"
                     )
             except Exception as exc:
                 errors.append(f"real_model_validation.json parse error: {exc}")
