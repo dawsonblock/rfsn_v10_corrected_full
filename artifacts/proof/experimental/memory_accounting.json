@@ -1,0 +1,46 @@
+{
+  "release": "experimental",
+  "model": "Qwen/Qwen2.5-0.5B-Instruct",
+  "configs": [
+    {
+      "config": "experimental_hybrid",
+      "fp16_bytes": 524288,
+      "compressed_bytes": 176068,
+      "metadata_bytes": 0,
+      "qjl_bytes": 0,
+      "compression_ratio": 2.9778,
+      "passes_quality": true,
+      "passes_all_contexts": true
+    },
+    {
+      "config": "turbo_polar",
+      "fp16_bytes": 524288,
+      "compressed_bytes": 274448,
+      "metadata_bytes": 0,
+      "qjl_bytes": 0,
+      "compression_ratio": 1.9103,
+      "passes_quality": true,
+      "passes_all_contexts": true
+    },
+    {
+      "config": "adaptive",
+      "fp16_bytes": 524288,
+      "compressed_bytes": 179628,
+      "metadata_bytes": 0,
+      "qjl_bytes": 0,
+      "compression_ratio": 2.9187,
+      "passes_quality": true,
+      "passes_all_contexts": true
+    },
+    {
+      "config": "turbo_k8r8v6",
+      "fp16_bytes": 524288,
+      "compressed_bytes": 248236,
+      "metadata_bytes": 0,
+      "qjl_bytes": 0,
+      "compression_ratio": 2.1121,
+      "passes_quality": true,
+      "passes_all_contexts": true
+    }
+  ]
+}

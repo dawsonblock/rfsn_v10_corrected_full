@@ -7,13 +7,13 @@
 
 | Config | CosMean | CosMin | Top5 | KL | NLLΔ | 512 | 1024 | 2048 | CompRatio | Bytes | Status |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| baseline_fp16 | 1.0000 | 1.0000 | 1.0000 | 0.0000 | 0.0000 | fail | fail | fail | - | - | reference |
+| baseline_fp16 | - | - | - | - | - | unknown | unknown | unknown | - | - | missing_data |
 | stable_k8_v5_gs64 | 0.9998 | 0.9950 | 0.9750 | 0.0000 | 0.0001 | unknown | unknown | unknown | - | - | needs_memory_data |
 | stable_k8_v5_gs32 | 0.9999 | 0.9992 | 0.9831 | 0.0000 | -0.0000 | unknown | unknown | unknown | - | - | needs_memory_data |
-| experimental_hybrid | 0.9996 | 0.9981 | 0.9738 | 0.0000 | 0.0002 | pass | pass | pass | - | - | needs_memory_data |
-| turbo_polar | - | - | - | - | - | unknown | unknown | unknown | - | - | missing_data |
-| adaptive | - | - | - | - | - | unknown | unknown | unknown | - | - | missing_data |
-| turbo_k8r8v6 | - | - | - | - | - | unknown | unknown | unknown | - | - | missing_data |
+| experimental_hybrid | 0.9996 | 0.9941 | 0.9762 | 0.0000 | 0.0001 | pass | pass | pass | 2.9778 | 176068 | candidate |
+| turbo_polar | 0.9996 | 0.9941 | 0.9762 | 0.0000 | 0.0001 | unknown | unknown | unknown | 1.9103 | 274448 | candidate |
+| adaptive | 0.9997 | 0.9973 | 0.9769 | 0.0000 | 0.0000 | unknown | unknown | unknown | 2.9187 | 179628 | candidate |
+| turbo_k8r8v6 | 0.9998 | 0.9963 | 0.9800 | 0.0000 | -0.0001 | unknown | unknown | unknown | 2.1121 | 248236 | candidate |
 
 ## Legend
 

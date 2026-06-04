@@ -175,6 +175,22 @@ class QuantizedKVManager:
         # Do NOT apply QJL here. QJL is score correction only.
         return k_rec, v_rec
 
+    def estimate_bytes(self, packet: QuantizedKVPacket) -> int:
+        """Return packed-buffer byte estimate for the K/V packet."""
+        return int(packet.k_bytes + packet.v_bytes)
+
+    def memory_report(self, packet: QuantizedKVPacket) -> dict[str, Any]:
+        compressed = self.estimate_bytes(packet)
+        ratio = packet.fp16_bytes / compressed if compressed > 0 else 1.0
+        return {
+            "fp16_kv_bytes": int(packet.fp16_bytes),
+            "k_compressed_bytes": int(packet.k_bytes),
+            "v_compressed_bytes": int(packet.v_bytes),
+            "total_compressed_bytes": int(compressed),
+            "actual_compression_ratio": float(ratio),
+            "uses_qjl": bool(packet.uses_qjl),
+        }
+
     def compression_ratio(self, packet: QuantizedKVPacket) -> float:
         compressed = packet.k_bytes + packet.v_bytes
         if compressed <= 0:

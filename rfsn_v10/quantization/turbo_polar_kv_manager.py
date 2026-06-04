@@ -34,5 +34,8 @@ class TurboPolarKVManager:
     def dequantize(self, packed):
         return self.quantizer.dequantize(packed)
 
+    def estimate_bytes(self, packed) -> int:
+        return self.quantizer.estimate_bytes(packed)
+
     def compression_ratio(self, packed, k: mx.array, v: mx.array) -> float:
         return self.quantizer.compression_ratio(packed, k, v)

@@ -29,9 +29,8 @@ def _wht(x: mx.array) -> mx.array:
     odd = x[..., 1::2]
     h1 = _wht(even + odd)
     h2 = _wht(even - odd)
-    out = mx.zeros(x.shape, dtype=x.dtype)
-    out[..., ::2] = h1
-    out[..., 1::2] = h2
+    stacked = mx.stack([h1, h2], axis=-1)
+    out = stacked.reshape(x.shape)
     return out / math.sqrt(2)
 
 

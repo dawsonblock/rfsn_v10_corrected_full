@@ -240,6 +240,10 @@ The following quantization path is **experimental** and not part of the stable r
 
 **Real bit-packing**: Experimental quantizers use `BitPackedQuantizer` from `bitpack.py` to pack integer codes into compact `uint32` words. `estimate_bytes()` reports actual packed buffer bytes, not theoretical ideal bits.
 
+**Bit-width policy**: Bit-packing is real for 2–8 bit code buffers. Code widths above 8 currently use raw `uint32` fallback and are not memory-optimized.
+
+**QJL status**: QJL attention-score correction exists as research code but failed the current attention-score benchmark (worse MAE, RMSE, and KL than base reconstruction). It is disabled by default and not enabled in validated model paths.
+
 **Running experimental benchmarks**:
 ```bash
 # 0.5B model validation (produces real_model_validation.json,
