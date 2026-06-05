@@ -15,11 +15,14 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from threading import RLock, get_ident
-from typing import Optional
+from typing import Any, Optional
 
 from .compat import mx
 
 from .bitpack import BitPackedQuantizer
+from .quantization.hybrid_polar_cartesian import (
+    HybridPolarCartesianQuantizer,
+)
 from .kernels import (
     KernelRouteError,
     apply_hash_signs_metal,
@@ -60,6 +63,9 @@ class TurboQuantKVCache:
     v_block_n_values: list[int] = field(default_factory=list)
     pinned: bool = False
     last_used: float = 0.0
+    quant_mode: str = "cartesian"
+    k_hybrid: Any | None = None
+    v_hybrid: Any | None = None
 
     @property
     def use_incoherent(self) -> bool:
@@ -92,8 +98,18 @@ class RFSNTurboQuantKVManager:
         cache_dir: str = ".rfsn_cache",
         group_size: int = 64,
         block_size: int = 64,
+        quant_mode: str = "cartesian",
+        polar_ratio: float = 0.65,
+        polar_levels: int = 4,
+        polar_angle_bits: int = 5,
+        polar_radius_bits: int = 8,
     ):
         # Validate parameters
+        if quant_mode not in ("cartesian", "hybrid_polar_cartesian"):
+            raise ValueError(
+                f"quant_mode must be 'cartesian' or "
+                f"'hybrid_polar_cartesian', got {quant_mode}"
+            )
         if not (2 <= k_bits <= 8):
             raise ValueError(f"k_bits must be between 2 and 8, got {k_bits}")
         if not (2 <= v_bits <= 8):
@@ -130,6 +146,13 @@ class RFSNTurboQuantKVManager:
         self.cache_dir = Path(cache_dir)
         self.group_size = group_size
         self.block_size = block_size
+        self.quant_mode = quant_mode
+        self._polar_ratio = polar_ratio
+        self._polar_levels = polar_levels
+        self._polar_angle_bits = polar_angle_bits
+        self._polar_radius_bits = polar_radius_bits
+        self._k_quant_polar: HybridPolarCartesianQuantizer | None = None
+        self._v_quant_polar: HybridPolarCartesianQuantizer | None = None
         # Cache for sign masks to avoid regenerating for same shape/seed/dtype.
         self._sign_cache: dict[tuple[tuple[int, ...], int, mx.Dtype, int], mx.array] = {}
         self._sign_cache_lock = RLock()
@@ -138,6 +161,29 @@ class RFSNTurboQuantKVManager:
         self._pinned_bytes = 0
         self.last_reconstruction_kernel = "sequential_reference"
         self.cache_dir.mkdir(parents=True, exist_ok=True)
+
+    def _ensure_polar_quantizers(self, feature_dim: int) -> None:
+        """Lazily create polar quantizers with the correct feature_dim."""
+        if self._k_quant_polar is None:
+            self._k_quant_polar = HybridPolarCartesianQuantizer(
+                feature_dim=feature_dim,
+                polar_ratio=self._polar_ratio,
+                polar_levels=self._polar_levels,
+                polar_angle_bits=self._polar_angle_bits,
+                polar_radius_bits=self._polar_radius_bits,
+                cartesian_bits=self.k_bits,
+                group_size=self.group_size,
+            )
+        if self._v_quant_polar is None:
+            self._v_quant_polar = HybridPolarCartesianQuantizer(
+                feature_dim=feature_dim,
+                polar_ratio=self._polar_ratio,
+                polar_levels=self._polar_levels,
+                polar_angle_bits=self._polar_angle_bits,
+                polar_radius_bits=self._polar_radius_bits,
+                cartesian_bits=self.v_bits,
+                group_size=self.group_size,
+            )
 
     @property
     def use_incoherent(self) -> bool:
@@ -289,6 +335,19 @@ class RFSNTurboQuantKVManager:
             raise ValueError("k_bits and v_bits must both be in [2, 8]")
         if group_size <= 0:
             raise ValueError("group_size must be positive")
+
+        if self.quant_mode == "hybrid_polar_cartesian":
+            self._ensure_polar_quantizers(shape[-1])
+            assert self._k_quant_polar is not None
+            assert self._v_quant_polar is not None
+            dummy_k = mx.zeros(shape, dtype=mx.float32)
+            dummy_v = mx.zeros(shape, dtype=mx.float32)
+            k_packed = self._k_quant_polar.quantize(dummy_k)
+            v_packed = self._v_quant_polar.quantize(dummy_v)
+            return (
+                self._k_quant_polar.estimate_bytes(k_packed)
+                + self._v_quant_polar.estimate_bytes(v_packed)
+            )
 
         n_values = math.prod(shape)
 
@@ -806,6 +865,17 @@ class RFSNTurboQuantKVManager:
     # ------------------------------------------------------------------
     def _estimate_cache_bytes(self, cache: TurboQuantKVCache) -> int:
         """Estimate the memory usage of a cache entry in bytes."""
+        if cache.quant_mode == "hybrid_polar_cartesian":
+            total = 0
+            if cache.k_hybrid is not None:
+                total += self._k_quant_polar.estimate_bytes(  # type: ignore[union-attr]
+                    cache.k_hybrid
+                )
+            if cache.v_hybrid is not None:
+                total += self._v_quant_polar.estimate_bytes(  # type: ignore[union-attr]
+                    cache.v_hybrid
+                )
+            return total
         base = (
             cache.k_packed.size * 4  # uint32
             + cache.k_scales.size * 4  # float32
@@ -875,7 +945,15 @@ class RFSNTurboQuantKVManager:
             raise ValueError(
                 f"keys/values shape mismatch: {keys.shape} vs {values.shape}"
             )
-        if keys.shape[-1] % 64 != 0:
+        if self.quant_mode == "hybrid_polar_cartesian":
+            self._ensure_polar_quantizers(keys.shape[-1])
+            base = 2 ** self._k_quant_polar.polar_levels  # type: ignore[union-attr]
+            if keys.shape[-1] % base != 0:
+                raise ValueError(
+                    f"Polar mode requires head_dim divisible by "
+                    f"2**levels={base}, got {keys.shape[-1]}"
+                )
+        elif keys.shape[-1] % 64 != 0:
             raise ValueError(
                 f"Head dimension must be a multiple of 64, got {keys.shape[-1]}"
             )
@@ -901,96 +979,124 @@ class RFSNTurboQuantKVManager:
             16,
         )
 
-        # Apply optional sign preconditioning and optional WHT before quantization.
-        if self.use_incoherent_signs:
-            k_pre = self._apply_signs_on_the_fly(keys, seed)
-            v_pre = self._apply_signs_on_the_fly(values, seed)
-        else:
-            k_pre = keys
-            v_pre = values
-
-        if self.use_wht:
-            k_pre = self._apply_wht_pretransform(k_pre)
-            v_pre = self._apply_wht_pretransform(v_pre)
-
-        # Per-block quantization along the token dimension
         _bsz, _num_h, t_len, _head_dim = keys.shape
         block_size = self.block_size
         num_blocks = max(1, (t_len + block_size - 1) // block_size)
 
-        def _quantize_blocks(pre: mx.array, bits: int) -> tuple:
-            """Quantize pre-transformed tensor block by block.
-
-            Returns (packed, scales, packed_offsets, scale_offsets,
-                     block_n_values, total_n).
-            """
-            packed_blocks: list[mx.array] = []
-            scale_blocks: list[mx.array] = []
-            packed_offsets = [0]
-            scale_offsets = [0]
-            block_n_values: list[int] = []
-
-            for blk in range(num_blocks):
-                start = blk * block_size
-                end = min((blk + 1) * block_size, t_len)
-                block = pre[:, :, start:end, :]
-                flat = block.reshape(-1)
-                codes, scales = self._quantize(flat, bits)
-                packed, n = BitPackedQuantizer.pack(codes, bits)
-                packed_blocks.append(packed)
-                scale_blocks.append(scales)
-                packed_offsets.append(
-                    packed_offsets[-1] + int(packed.size)
-                )
-                scale_offsets.append(
-                    scale_offsets[-1] + int(scales.size)
-                )
-                block_n_values.append(n)
-
-            return (
-                mx.concatenate(packed_blocks),
-                mx.concatenate(scale_blocks),
-                packed_offsets,
-                scale_offsets,
-                block_n_values,
-                sum(block_n_values),
+        if self.quant_mode == "hybrid_polar_cartesian":
+            assert self._k_quant_polar is not None
+            assert self._v_quant_polar is not None
+            k_hybrid = self._k_quant_polar.quantize(keys)
+            v_hybrid = self._v_quant_polar.quantize(values)
+            empty = mx.array([], dtype=mx.uint32)
+            empty_f = mx.array([], dtype=mx.float32)
+            cache = TurboQuantKVCache(
+                k_packed=empty,
+                k_scales=empty_f,
+                v_packed=empty,
+                v_scales=empty_f,
+                shape=tuple(keys.shape),
+                k_bits=k_bits,
+                v_bits=v_bits,
+                group_size=self.group_size,
+                use_wht=self.use_wht,
+                use_incoherent_signs=self.use_incoherent_signs,
+                format_version="rfsn_v10",
+                seed=seed,
+                token_count=token_count,
+                block_size=block_size,
+                num_blocks=0,
+                quant_mode=self.quant_mode,
+                k_hybrid=k_hybrid,
+                v_hybrid=v_hybrid,
             )
+        else:
+            # Apply optional sign preconditioning and optional WHT before quantization.
+            if self.use_incoherent_signs:
+                k_pre = self._apply_signs_on_the_fly(keys, seed)
+                v_pre = self._apply_signs_on_the_fly(values, seed)
+            else:
+                k_pre = keys
+                v_pre = values
 
-        (
-            k_packed, k_scales, k_poff, k_soff,
-            k_bnv, k_n,
-        ) = _quantize_blocks(k_pre, k_bits)
-        (
-            v_packed, v_scales, v_poff, v_soff,
-            v_bnv, v_n,
-        ) = _quantize_blocks(v_pre, v_bits)
+            if self.use_wht:
+                k_pre = self._apply_wht_pretransform(k_pre)
+                v_pre = self._apply_wht_pretransform(v_pre)
 
-        # Create cache entry
-        cache = TurboQuantKVCache(
-            k_packed=k_packed,
-            k_scales=k_scales,
-            v_packed=v_packed,
-            v_scales=v_scales,
-            shape=tuple(keys.shape),
-            k_bits=k_bits,
-            v_bits=v_bits,
-            group_size=self.group_size,
-            use_wht=self.use_wht,
-            use_incoherent_signs=self.use_incoherent_signs,
-            format_version="rfsn_v10",
-            seed=seed,
-            k_n_values=k_n,
-            v_n_values=v_n,
-            token_count=token_count,
-            block_size=block_size,
-            num_blocks=num_blocks,
-            k_block_packed_offsets=k_poff,
-            k_block_scale_offsets=k_soff,
-            k_block_n_values=k_bnv,
-            v_block_packed_offsets=v_poff,
-            v_block_scale_offsets=v_soff,
-            v_block_n_values=v_bnv,
-        )
+            def _quantize_blocks(pre: mx.array, bits: int) -> tuple:
+                """Quantize pre-transformed tensor block by block.
+
+                Returns (packed, scales, packed_offsets, scale_offsets,
+                         block_n_values, total_n).
+                """
+                packed_blocks: list[mx.array] = []
+                scale_blocks: list[mx.array] = []
+                packed_offsets = [0]
+                scale_offsets = [0]
+                block_n_values: list[int] = []
+
+                for blk in range(num_blocks):
+                    start = blk * block_size
+                    end = min((blk + 1) * block_size, t_len)
+                    block = pre[:, :, start:end, :]
+                    flat = block.reshape(-1)
+                    codes, scales = self._quantize(flat, bits)
+                    packed, n = BitPackedQuantizer.pack(codes, bits)
+                    packed_blocks.append(packed)
+                    scale_blocks.append(scales)
+                    packed_offsets.append(
+                        packed_offsets[-1] + int(packed.size)
+                    )
+                    scale_offsets.append(
+                        scale_offsets[-1] + int(scales.size)
+                    )
+                    block_n_values.append(n)
+
+                return (
+                    mx.concatenate(packed_blocks),
+                    mx.concatenate(scale_blocks),
+                    packed_offsets,
+                    scale_offsets,
+                    block_n_values,
+                    sum(block_n_values),
+                )
+
+            (
+                k_packed, k_scales, k_poff, k_soff,
+                k_bnv, k_n,
+            ) = _quantize_blocks(k_pre, k_bits)
+            (
+                v_packed, v_scales, v_poff, v_soff,
+                v_bnv, v_n,
+            ) = _quantize_blocks(v_pre, v_bits)
+
+            # Create cache entry
+            cache = TurboQuantKVCache(
+                k_packed=k_packed,
+                k_scales=k_scales,
+                v_packed=v_packed,
+                v_scales=v_scales,
+                shape=tuple(keys.shape),
+                k_bits=k_bits,
+                v_bits=v_bits,
+                group_size=self.group_size,
+                use_wht=self.use_wht,
+                use_incoherent_signs=self.use_incoherent_signs,
+                format_version="rfsn_v10",
+                seed=seed,
+                k_n_values=k_n,
+                v_n_values=v_n,
+                token_count=token_count,
+                block_size=block_size,
+                num_blocks=num_blocks,
+                k_block_packed_offsets=k_poff,
+                k_block_scale_offsets=k_soff,
+                k_block_n_values=k_bnv,
+                v_block_packed_offsets=v_poff,
+                v_block_scale_offsets=v_soff,
+                v_block_n_values=v_bnv,
+                quant_mode=self.quant_mode,
+            )
         # Set last_used timestamp for newly created cache
         cache.last_used = time.monotonic()
 
@@ -1053,6 +1159,17 @@ class RFSNTurboQuantKVManager:
                 f"metadata mismatch: stored group_size={cache.group_size} "
                 f"current group_size={self.group_size}"
             )
+
+        if cache.quant_mode == "hybrid_polar_cartesian":
+            if cache.k_hybrid is None or cache.v_hybrid is None:
+                raise ValueError(
+                    "polar cache missing k_hybrid or v_hybrid data"
+                )
+            assert self._k_quant_polar is not None
+            assert self._v_quant_polar is not None
+            k_rec = self._k_quant_polar.dequantize(cache.k_hybrid)
+            v_rec = self._v_quant_polar.dequantize(cache.v_hybrid)
+            return k_rec.astype(out_dtype), v_rec.astype(out_dtype)
 
         # Validate bits consistency against packed data shapes
         def _expected_packed_words(n_values: int, bits: int) -> int:

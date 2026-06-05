@@ -381,3 +381,74 @@ def test_retrieve_block_packed_size_validation(kv_manager):
     with pytest.raises(ValueError, match="metadata mismatch"):
         kv_manager.retrieve("block_validate", out_dtype=mx.float32)
     cache.v_block_packed_offsets = original_v_offsets
+
+
+# --- Polar quantization tests ---
+
+def test_polar_quantization_roundtrip(tmp_path):
+    manager = RFSNTurboQuantKVManager(
+        k_bits=6,
+        v_bits=4,
+        quant_mode="hybrid_polar_cartesian",
+        max_memory_gb=0.5,
+        max_pinned_memory_gb=0.1,
+        cache_dir=str(tmp_path),
+    )
+    shape = (1, 8, 128, 64)
+    k = mx.random.normal(shape)
+    v = mx.random.normal(shape)
+    manager.store("polar_test", k, v, 128)
+
+    k_rec, v_rec = manager.retrieve("polar_test", out_dtype=mx.float32)
+    mx.eval(k_rec, v_rec)
+    assert k_rec.shape == k.shape
+    assert v_rec.shape == v.shape
+    assert cosine_similarity(k, k_rec) > 0.90
+    assert cosine_similarity(v, v_rec) > 0.90
+
+
+def test_polar_quantization_retrieve_blocks(tmp_path):
+    manager = RFSNTurboQuantKVManager(
+        k_bits=6,
+        v_bits=4,
+        quant_mode="hybrid_polar_cartesian",
+        max_memory_gb=0.5,
+        max_pinned_memory_gb=0.1,
+        cache_dir=str(tmp_path),
+    )
+    shape = (1, 8, 256, 64)
+    k = mx.random.normal(shape)
+    v = mx.random.normal(shape)
+    manager.store("polar_blocks", k, v, 256)
+
+    k_rec, v_rec = manager.retrieve_blocks(
+        "polar_blocks", block_indices=[0, 2], block_size=64,
+    )
+    assert k_rec is not None and v_rec is not None
+    assert k_rec.shape[2] == 128  # 2 blocks * 64 tokens
+    assert v_rec.shape[2] == 128
+
+
+def test_polar_quantization_invalid_head_dim(tmp_path):
+    manager = RFSNTurboQuantKVManager(
+        quant_mode="hybrid_polar_cartesian",
+        max_memory_gb=0.5,
+        cache_dir=str(tmp_path),
+    )
+    # head_dim=24 passes quantizer init (24%4==0) but fails polar
+    # levels check (24%16==8)
+    k = mx.random.normal((1, 8, 64, 24))
+    v = mx.random.normal((1, 8, 64, 24))
+    with pytest.raises(ValueError, match="Polar mode requires"):
+        manager.store("polar_bad_dim", k, v, 64)
+
+
+def test_polar_estimate_bytes_is_positive(tmp_path):
+    manager = RFSNTurboQuantKVManager(
+        quant_mode="hybrid_polar_cartesian",
+        max_memory_gb=0.5,
+        cache_dir=str(tmp_path),
+    )
+    shape = (1, 8, 512, 64)
+    estimated = manager.estimate_compressed_bytes_for_shape(shape)
+    assert estimated > 0
