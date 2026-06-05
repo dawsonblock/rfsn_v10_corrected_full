@@ -443,6 +443,10 @@ def main() -> None:
             "larger codes (2,600,928 bytes).",
             "All configs now use mean_per_prompt_real_model_cache "
             "basis via validate_experimental_quant.py.",
+            "Bit-packing is real for 2-8 bit code buffers. "
+            "Code widths above 8 use raw uint32 fallback.",
+            "No Metal kernels exist for the experimental quantizer path.",
+            "No experimental throughput speedup is proven.",
         ],
     }
     json_path = out_dir / "comparison_summary.json"

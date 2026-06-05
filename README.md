@@ -239,7 +239,9 @@ This section is about the **experimental branch only**. The stable runtime defau
 
 - IsoQuant / Polar / TurboPolar reference modules exist in `rfsn_v10/quantization/`
 - Bit-packing is real for 2–8 bit code buffers
-- Code widths above 8 use raw `uint32` fallback and are excluded from memory-optimized recommendations
+- Code widths above 8 use raw uint32 fallback and are excluded from memory-optimized recommendations
+- No Metal kernels exist for the experimental quantizer path
+- No experimental throughput speedup is proven (decode TPS may be comparable, total time is not faster)
 - QJL is implemented as a reference module but **fails** the shipped attention-score benchmark
 - Comparison and memory proof are experimental
 - **Not** the stable runtime default
@@ -373,6 +375,9 @@ Sparse decode is **disabled by default**. Current sparse max cosine is below the
 ## Known Limitations
 
 - Polar quantization is not implemented in the stable runtime. Experimental reference modules exist in `rfsn_v10/quantization/` but are not validated or default.
+- Code widths above 8-bit fall back to raw uint32 storage (not truly bit-packed).
+- No Metal kernels exist for the experimental quantizer path.
+- No experimental throughput speedup is proven.
 - True arbitrary partial dequantization is not implemented (selected-block reconstruction via `retrieve_blocks()` exists; arbitrary token-level partial dequant remains unimplemented).
 - Production hardening and end-to-end real-model validation remain in progress.
 - RFSN is not production-ready.

@@ -3,42 +3,97 @@
 from __future__ import annotations
 
 import ast
+import fnmatch
 import json
 import subprocess
 import sys
 from pathlib import Path
 
 
+def _load_gitignore(root: Path) -> tuple[set[str], set[str], set[str]]:
+    # noqa: E501
+    """Parse .gitignore; return (exact, dir, wildcard) name sets."""
+    gitignore = root / ".gitignore"
+    exact_names: set[str] = set()
+    dir_names: set[str] = set()
+    wildcards: set[str] = set()
+    if not gitignore.exists():
+        return exact_names, dir_names, wildcards
+    for line in gitignore.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        # Strip trailing / to detect directory patterns
+        if line.endswith("/"):
+            dir_names.add(line[:-1])
+        elif "*" in line or "?" in line:
+            wildcards.add(line)
+        else:
+            exact_names.add(line)
+    return exact_names, dir_names, wildcards
+
+
 def check() -> list[str]:
     errors: list[str] = []
 
     root = Path(".").resolve()
+    exact_ign, dir_ign, wildcard_ign = _load_gitignore(root)
+
+    def _is_gitignored(path: Path) -> bool:
+        name = path.name
+        if name in exact_ign:
+            return True
+        if name in dir_ign and path.is_dir():
+            return True
+        for w in wildcard_ign:
+            if fnmatch.fnmatch(name, w):
+                return True
+        # Also check parent directory names for directory patterns
+        for part in path.parts:
+            if part in dir_ign:
+                return True
+        return False
 
     # --- Forbidden filesystem artefacts ---
     forbidden_dirs = [".tmp", "tmp", "temp", "release_tmp"]
     for bad in forbidden_dirs:
-        matches = [m for m in root.rglob(bad) if ".git" not in m.parts]
+        matches = [
+            m for m in root.rglob(bad)
+            if ".git" not in m.parts and not _is_gitignored(m)
+        ]
         if matches:
             errors.append(
                 f"forbidden path found: {bad} ({len(matches)} instances)"
             )
 
-    pycache = [m for m in root.rglob("__pycache__") if ".git" not in m.parts]
+    pycache = [
+        m for m in root.rglob("__pycache__")
+        if ".git" not in m.parts and not _is_gitignored(m)
+    ]
     if pycache:
         errors.append(
             f"__pycache__ directories found ({len(pycache)} instances)"
         )
 
-    pyc = [m for m in root.rglob("*.pyc") if ".git" not in m.parts]
+    pyc = [
+        m for m in root.rglob("*.pyc")
+        if ".git" not in m.parts and not _is_gitignored(m)
+    ]
     if pyc:
         errors.append(f"*.pyc files found ({len(pyc)} instances)")
 
-    ds_store = [m for m in root.rglob(".DS_Store") if ".git" not in m.parts]
+    ds_store = [
+        m for m in root.rglob(".DS_Store")
+        if ".git" not in m.parts and not _is_gitignored(m)
+    ]
     if ds_store:
         errors.append(f".DS_Store files found ({len(ds_store)} instances)")
 
     for pattern in ["*.zip", "*.tar", "*.tar.gz", "*.7z"]:
-        matches = list(root.rglob(pattern))
+        matches = [
+            m for m in root.rglob(pattern)
+            if not _is_gitignored(m)
+        ]
         if matches:
             errors.append(
                 f"nested archive(s) found: {[str(m) for m in matches[:10]]}"
@@ -152,6 +207,24 @@ def check() -> list[str]:
                     "stable vs experimental status"
                 )
 
+        # README must document >8-bit fallback caveat
+        if "raw uint32 fallback" not in readme_lower:
+            errors.append(
+                "README missing >8-bit raw uint32 fallback caveat"
+            )
+
+        # README must disclaim Metal kernels for experimental path
+        if "no metal kernels exist for the experimental" not in readme_lower:
+            errors.append(
+                "README missing 'No Metal kernels for experimental' caveat"
+            )
+
+        # README must disclaim experimental throughput speedup
+        if "no experimental throughput speedup is proven" not in readme_lower:
+            errors.append(
+                "README missing 'No experimental throughput speedup' caveat"
+            )
+
     # --- Pytest collection sanity check ---
     try:
         result = subprocess.run(
@@ -258,10 +331,14 @@ def check() -> list[str]:
                                             )
                                     # Candidate must have real model pass
                                     real_pass = row.get("pass_real_model")
-                                    if real_pass is not None and real_pass != "pass":
+                                    if (
+                                        real_pass is not None
+                                        and real_pass != "pass"
+                                    ):
                                         errors.append(
-                                            f"{config}: candidate has non-pass "
-                                            f"real_model: {real_pass}"
+                                            f"{config}: candidate "
+                                            f"has non-pass real_model: "
+                                            f"{real_pass}"
                                         )
                                     # Candidate must have memory data present
                                     mem_basis = row.get("memory_basis")
@@ -270,7 +347,10 @@ def check() -> list[str]:
                                             f"{config}: candidate missing "
                                             f"memory_basis"
                                         )
-                                    if row.get("total_compressed_bytes") is None:
+                                    if (
+                                        row.get("total_compressed_bytes")
+                                        is None
+                                    ):
                                         errors.append(
                                             f"{config}: candidate missing "
                                             f"total_compressed_bytes"
@@ -289,7 +369,8 @@ def check() -> list[str]:
                                             f"{config}: candidate "
                                             f"missing required field: {key}"
                                         )
-                            # QJL must not be claimed enabled if benchmark fails
+                            # QJL must not be claimed enabled if
+                            # benchmark fails
                             qjl_status = data.get("qjl_status", {})
                             if qjl_status.get("enabled_by_default") is True:
                                 if not qjl_status.get(
@@ -299,6 +380,25 @@ def check() -> list[str]:
                                         "QJL claimed enabled by default "
                                         "but attention score benchmark fails"
                                     )
+                            # memory_notes must contain caveats
+                            notes = (
+                                " ".join(data.get("memory_notes", []))
+                            ).lower()
+                            if "bit-packing is real for 2-8 bit" not in notes:
+                                errors.append(
+                                    "comparison_summary memory_notes missing "
+                                    ">8-bit fallback caveat"
+                                )
+                            if "no metal kernels" not in notes:
+                                errors.append(
+                                    "comparison_summary memory_notes missing "
+                                    "no Metal kernels caveat"
+                                )
+                            if "no experimental throughput" not in notes:
+                                errors.append(
+                                    "comparison_summary memory_notes missing "
+                                    "no throughput proof caveat"
+                                )
                     except (OSError, json.JSONDecodeError):
                         pass
 

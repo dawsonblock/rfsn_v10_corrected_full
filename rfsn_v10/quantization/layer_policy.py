@@ -29,6 +29,9 @@ KNOWN_MODES = frozenset(
     }
 )
 
+# Bit widths that genuinely use word-level bit-packing.
+_TRUE_BITPACK_BITS = frozenset(range(2, 9))
+
 
 class LayerPolicy:
     """Layer-wise quantization policy with default fallback."""
@@ -86,6 +89,8 @@ class LayerPolicy:
 
 def validate_layer_policy(policy: dict[str, Any]) -> list[str]:
     """Validate a layer policy dict and return a list of error messages."""
+    import warnings
+
     errors: list[str] = []
     if not isinstance(policy, dict):
         return ["Policy must be a dict"]
@@ -117,6 +122,18 @@ def validate_layer_policy(policy: dict[str, Any]) -> list[str]:
                 mode = cfg.get("mode", "")
                 if mode not in KNOWN_MODES:
                     errors.append(f"Layer {layer_id}: unknown mode {mode!r}")
+    # Warn about configs that claim bit-packing but use >8-bit widths
+    for cfg_name, cfg in [("default", default), *(layers or {}).items()]:
+        if not isinstance(cfg, dict):
+            continue
+        bits = cfg.get("bits") or cfg.get("cartesian_bits")
+        if bits is not None and bits not in _TRUE_BITPACK_BITS:
+            warnings.warn(
+                f"{cfg_name}: bits={bits} exceeds 8-bit pack limit; "
+                f"falls back to raw uint32 (not truly bit-packed)",
+                stacklevel=2,
+            )
+
     return errors
 
 

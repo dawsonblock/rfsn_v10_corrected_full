@@ -12,8 +12,8 @@ Important:
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
 import math
+from dataclasses import dataclass
 
 import mlx.core as mx
 
@@ -70,10 +70,18 @@ class PolarPacked:
 
 def _pack_code_buffer(codes: mx.array, bits: int) -> PackedCodeBuffer:
     """Pack codes; for bits > 8 store as uint32 without word packing."""
+    import warnings
+
     flat = codes.reshape(-1)
     if bits <= 8:
         packed, n_values = BitPackedQuantizer.pack(flat, bits)
     else:
+        warnings.warn(
+            f"Bit width {bits} exceeds 8-bit pack limit; "
+            f"falling back to raw uint32 storage. "
+            f"True bit-packing only applies to 2–8 bit widths.",
+            stacklevel=2,
+        )
         packed = flat.astype(mx.uint32)
         n_values = int(flat.size)
     return PackedCodeBuffer(

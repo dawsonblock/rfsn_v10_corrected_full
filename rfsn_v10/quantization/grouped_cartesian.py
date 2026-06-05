@@ -80,6 +80,14 @@ class GroupedCartesianQuantizer:
         if self.bits <= 8:
             packed, n_values = BitPackedQuantizer.pack(codes, self.bits)
         else:
+            import warnings
+
+            warnings.warn(
+                f"GroupedCartesianQuantizer bits={self.bits} exceeds 8-bit "
+                f"pack limit; falling back to raw uint32 storage. "
+                f"True bit-packing only applies to 2–8 bit widths.",
+                stacklevel=2,
+            )
             packed = codes.astype(mx.uint32)
             n_values = int(codes.size)
         packed_buf = PackedCodeBuffer(
@@ -105,7 +113,9 @@ class GroupedCartesianQuantizer:
             )
         buf = packed.packed_codes
         if buf.bits <= 8:
-            codes = BitPackedQuantizer.unpack(buf.packed, buf.n_values, buf.bits)
+            codes = BitPackedQuantizer.unpack(
+                buf.packed, buf.n_values, buf.bits
+            )
         else:
             codes = buf.packed[:buf.n_values]
         flat = codes.astype(mx.float32).reshape(-1)

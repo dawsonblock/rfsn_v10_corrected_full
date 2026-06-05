@@ -132,6 +132,9 @@
   "memory_notes": [
     "experimental_hybrid, turbo_polar, and adaptive use identical bit widths (8/8/7/8/5); memory differs only if cartesian_bits or group_size changes. adaptive differs only by adaptive_angle_range=True (quality tuning, not storage).",
     "turbo_k8r8v6 uses cartesian_bits=6, producing larger codes (2,600,928 bytes).",
-    "All configs now use mean_per_prompt_real_model_cache basis via validate_experimental_quant.py."
+    "All configs now use mean_per_prompt_real_model_cache basis via validate_experimental_quant.py.",
+    "Bit-packing is real for 2-8 bit code buffers. Code widths above 8 use raw uint32 fallback.",
+    "No Metal kernels exist for the experimental quantizer path.",
+    "No experimental throughput speedup is proven."
   ]
 }
