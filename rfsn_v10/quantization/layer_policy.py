@@ -116,6 +116,7 @@ def validate_layer_policy(policy: dict[str, Any]) -> list[str]:
                     continue
                 if layer_id < 0:
                     errors.append(f"Negative layer ID: {layer_id}")
+                    continue
                 if not isinstance(cfg, dict):
                     errors.append(f"Layer {layer_id}: config must be a dict")
                     continue
@@ -123,7 +124,10 @@ def validate_layer_policy(policy: dict[str, Any]) -> list[str]:
                 if mode not in KNOWN_MODES:
                     errors.append(f"Layer {layer_id}: unknown mode {mode!r}")
     # Warn about configs that claim bit-packing but use >8-bit widths
-    for cfg_name, cfg in [("default", default), *(layers or {}).items()]:
+    _layers_iter = (
+        layers.items() if isinstance(layers, dict) else []
+    )
+    for cfg_name, cfg in [("default", default), *_layers_iter]:
         if not isinstance(cfg, dict):
             continue
         bits = cfg.get("bits") or cfg.get("cartesian_bits")
