@@ -246,17 +246,35 @@ def check() -> list[str]:
                             for row in data.get("rows", []):
                                 status = row.get("recommended_status", "")
                                 if status == "candidate":
+                                    config = row.get("config", "unknown")
                                     # Candidate must have standard contexts
                                     for ctx in (512, 1024, 2048):
                                         val = row.get(f"pass_{ctx}")
                                         if val != "pass":
-                                            config = row.get(
-                                                "config", "unknown")
                                             errors.append(
                                                 f"{config}: candidate "
                                                 f"has non-pass context {ctx}: "
                                                 f"{val}"
                                             )
+                                    # Candidate must have real model pass
+                                    real_pass = row.get("pass_real_model")
+                                    if real_pass is not None and real_pass != "pass":
+                                        errors.append(
+                                            f"{config}: candidate has non-pass "
+                                            f"real_model: {real_pass}"
+                                        )
+                                    # Candidate must have memory data present
+                                    mem_basis = row.get("memory_basis")
+                                    if mem_basis is None:
+                                        errors.append(
+                                            f"{config}: candidate missing "
+                                            f"memory_basis"
+                                        )
+                                    if row.get("total_compressed_bytes") is None:
+                                        errors.append(
+                                            f"{config}: candidate missing "
+                                            f"total_compressed_bytes"
+                                        )
                                     # Candidate must have all required fields
                                     required = {
                                         "config",
@@ -267,11 +285,20 @@ def check() -> list[str]:
                                     }
                                     missing = required - set(row)
                                     for key in missing:
-                                        config = row.get("config", "unknown")
                                         errors.append(
                                             f"{config}: candidate "
                                             f"missing required field: {key}"
                                         )
+                            # QJL must not be claimed enabled if benchmark fails
+                            qjl_status = data.get("qjl_status", {})
+                            if qjl_status.get("enabled_by_default") is True:
+                                if not qjl_status.get(
+                                    "passes_attention_score_benchmark", False
+                                ):
+                                    errors.append(
+                                        "QJL claimed enabled by default "
+                                        "but attention score benchmark fails"
+                                    )
                     except (OSError, json.JSONDecodeError):
                         pass
 

@@ -253,6 +253,14 @@ This section is about the **experimental branch only**. The stable runtime defau
 - `qjl_score_correction.py` - QJL attention-score correction reference
 - `kv_quant_manager.py` - Experimental QuantizedKVManager
 - `turbo_polar_kv_manager.py` - TurboPolarKVManager wrapper
+- `block_unpack.py` - Block-level unpacking and partial dequantization
+- `layer_policy.py` - Per-layer adaptive quantization policy loader
+
+**Runtime modules** (in `rfsn_v10/runtime/`):
+
+- `scoring_modes.py` - Prepared vs packed scoring modes (fp16, reconstructed, prepared, packed_block)
+- `audit.py` - Runtime audit mode with drift detection and fallback rules
+- `experimental_quant_runtime.py` - Experimental quant runtime with telemetry and layer policies
 
 **QJL status**: QJL score correction is implemented as a reference module, but it currently fails the shipped attention-score benchmark and is disabled by default. It is not part of the validated model path.
 
@@ -275,16 +283,58 @@ python benchmarks/validate_qjl_attention_score.py \
 python scripts/generate_experimental_comparison.py \
     --experimental-dir artifacts/proof/experimental \
     --stable-dir artifacts/proof/main28
+
+# Experimental throughput benchmark (synthetic KV, no full model)
+python benchmarks/benchmark_experimental_throughput.py \
+    --out artifacts/proof/experimental/throughput.json
+
+# Per-layer sensitivity analysis
+python benchmarks/per_layer_sensitivity.py \
+    --out artifacts/proof/experimental/per_layer_sensitivity.json
+
+# Cache memory analyzer
+python benchmarks/cache_memory_analyzer.py \
+    --out artifacts/proof/experimental/cache_memory_analysis.json
+
+# Generate layer policy from sensitivity data
+python scripts/generate_layer_policy.py \
+    --input artifacts/proof/experimental/per_layer_sensitivity.json \
+    --output artifacts/proof/experimental/layer_policy.json
+
+# 1.5B model validation (longer runtime, ~30–60 min on Apple Silicon)
+python benchmarks/validate_experimental_quant.py \
+    --model Qwen/Qwen2.5-1.5B-Instruct \
+    --tokens 512 \
+    --positions 32 \
+    --contexts 512,1024 \
+    --configs baseline_fp16,stable_k8_v5_gs64,stable_k8_v5_gs32,adaptive,experimental_hybrid \
+    --out-dir artifacts/proof/experimental/qwen_1_5b
+
+# Config classification (Phase 15)
+python scripts/classify_experimental_configs.py
 ```
 
-**Experimental test**:
+**Experimental tests**:
 ```bash
 pytest tests/test_experimental_bitpacking.py -q -s
+pytest tests/test_block_unpack.py -q -s
+pytest tests/test_layer_policy.py -q -s
 ```
 
 **Status**: Experimental path is not validated as production-ready. No config is recommended after failing any context. Unknown context fields produce `needs_context_data`, never `candidate`. See `artifacts/proof/experimental/comparison_summary.md` for the latest fair ranking.
 
+**1.5B validation results** (`artifacts/proof/experimental/qwen_1_5b/`):
+
+- `baseline_fp16`: reference (cos_min=1.000000, ratio=1.00)
+- `stable_k8_v5_gs64`: pass (cos_min=0.999385, top5=0.9875, ratio=2.23)
+- `stable_k8_v5_gs32`: pass (cos_min=0.999588, top5=0.9900, ratio=2.08)
+- `adaptive`: pass (cos_min=0.999632, top5=0.9863, ratio=2.27)
+- `experimental_hybrid`: pass (cos_min=0.999607, top5=0.9850, ratio=2.27)
+
+All tested configs pass 1.5B at 512 tokens. However, the synthetic throughput benchmark shows significant speed regression for all quantized paths. Default remains `stable_k8_v5_gs64`.
+
 Policy:
+
 - Tune thresholds in `scripts/proof_regression_thresholds.json` only when benchmark noise or hardware/runtime variance is proven to cause false positives across repeated runs.
 - Refresh baseline files in `benchmarks/proof_baselines/<profile>/` when performance or quality changes are intentional and accepted after review.
 - Do not update thresholds and baseline in the same change unless explicitly documenting why both are necessary.

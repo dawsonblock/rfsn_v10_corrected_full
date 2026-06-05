@@ -40,6 +40,19 @@ from .kv_quant_manager import (
     QuantizedKVManager,
 )
 from .turbo_polar_kv_manager import TurboPolarKVManager
+from .block_unpack import (
+    unpack_code_blocks,
+    unpack_blocks,
+    dequantize_full,
+    dequantize_k_blocks,
+    dequantize_v_blocks,
+)
+from .layer_policy import (
+    LayerPolicy,
+    load_policy,
+    validate_layer_policy,
+    KNOWN_MODES,
+)
 
 __all__ = [
     "PackedCodeBuffer",
@@ -66,4 +79,13 @@ __all__ = [
     "dequantize_uniform_fixed_range",
     "quantize_group_unsigned",
     "dequantize_group_unsigned",
+    "unpack_code_blocks",
+    "unpack_blocks",
+    "dequantize_full",
+    "dequantize_k_blocks",
+    "dequantize_v_blocks",
+    "LayerPolicy",
+    "load_policy",
+    "validate_layer_policy",
+    "KNOWN_MODES",
 ]
