@@ -88,12 +88,14 @@ def _compute_top5_overlap(
     r_top5 = mx.argsort(-reference_logits, axis=-1)[..., :5]
 
     # For each position, count how many of c_top5 appear in r_top5.
-    c_top5_exp = mx.expand_dims(c_top5, axis=-1)  # [..., 5, 1]
-    r_top5_exp = mx.expand_dims(r_top5, axis=-2)  # [..., 1, 5]
-    in_ref = mx.any(c_top5_exp == r_top5_exp, axis=-1)  # [..., 5]
+    c_top5_exp = mx.expand_dims(c_top5, axis=-1)  # [..., K, 1]
+    r_top5_exp = mx.expand_dims(r_top5, axis=-2)  # [..., 1, R]
+    in_ref = mx.any(c_top5_exp == r_top5_exp, axis=-1)  # [..., K]
     intersection = mx.sum(in_ref, axis=-1)  # [...]
-    # Jaccard = intersection / union ; union = 5 + 5 - intersection
-    union = 10 - intersection
+    # Jaccard = intersection / union ; union = |A| + |B| - intersection
+    k_len = c_top5.shape[-1]
+    r_len = r_top5.shape[-1]
+    union = k_len + r_len - intersection
     jaccard = intersection / mx.maximum(union, 1)
     return mx.mean(jaccard).item()
 
@@ -123,6 +125,7 @@ def audit_decode_step(
     step_num: int,
     audit_interval: int = DEFAULT_AUDIT_INTERVAL,
     labels: Optional[mx.array] = None,
+    log_path: Optional[Path] = None,
 ) -> Optional[AuditMetrics]:
     """Compare compressed-path logits against a reference and log drift.
 
@@ -132,6 +135,8 @@ def audit_decode_step(
         step_num:           Current decode step index.
         audit_interval:     Only compute metrics when ``step_num % audit_interval == 0``.
         labels:             Optional ground-truth token ids for NLL delta.
+        log_path:           Optional destination for the audit JSONL event.
+                            Defaults to ``DEFAULT_AUDIT_LOG_PATH``.
 
     Returns:
         :class:`AuditMetrics` when an audit is performed, otherwise ``None``.
@@ -193,7 +198,7 @@ def audit_decode_step(
         },
         fallback_recommendation=fallback,
     )
-    log_audit_event(event)
+    log_audit_event(event, log_path=log_path)
     return metrics
 
 

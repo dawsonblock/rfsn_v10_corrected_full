@@ -61,7 +61,7 @@ def score_attention_reconstructed(
     queries: mx.array,
     keys_packet: Any,
     values_packet: Any,
-    dequant_fn: Callable[[Any], mx.array],
+    dequant_fn: Callable[[Any, Any], tuple[mx.array, mx.array]],
     scale: float | None = None,
 ) -> mx.array:
     """Full dequantization then score.

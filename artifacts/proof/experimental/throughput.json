@@ -127,23 +127,30 @@
     },
     "stable_k8_v5_gs64": {
       "verdict": "rejected_speed",
-      "notes": "compresses 2.23x; much slower (10282.5x baseline)"
+      "notes": "compresses 2.23x; synthetic overhead dominates total time. Not a runtime default."
     },
     "stable_k8_v5_gs32": {
       "verdict": "rejected_speed",
-      "notes": "compresses 2.09x; much slower (13273.9x baseline)"
+      "notes": "compresses 2.09x; synthetic overhead dominates total time. Not a runtime default."
     },
     "adaptive": {
       "verdict": "rejected_speed",
-      "notes": "compresses 2.32x; much slower (17081.5x baseline)"
+      "notes": "Best experimental quality candidate; compression overhead dominates. Not a default."
     },
     "experimental_hybrid": {
       "verdict": "rejected_speed",
-      "notes": "compresses 2.97x; much slower (13986.4x baseline)"
+      "notes": "Best synthetic compression candidate; overhead dominates. Not a default."
     },
     "turbo_polar": {
       "verdict": "rejected_speed",
-      "notes": "compresses 2.32x; much slower (3208.8x baseline)"
+      "notes": "Fastest compressed experimental path in this synthetic benchmark; still overhead-dominated. Study target, not default."
+    },
+    "ranking": {
+      "fastest_compressed": "turbo_polar",
+      "best_quality_compressed": "adaptive",
+      "best_stable_default": "stable_k8_v5_gs64",
+      "best_conservative_quality": "stable_k8_v5_gs32",
+      "caveat": "This benchmark uses a tiny synthetic KV shape [1,4,256,64] with 2 repeats. The FP16 baseline is unrealistically fast. The ratios reflect current implementation overhead, not theoretical limits. Do not conclude all compression is useless; conclude the current Python/MLX overhead dominates."
     }
   }
 }

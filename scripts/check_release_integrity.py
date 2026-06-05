@@ -191,8 +191,8 @@ def check() -> list[str]:
         polar_quant_path = (
             root / "rfsn_v10" / "quantization" / "polar_quant.py"
         )
+        readme_lower = readme.lower()
         if polar_quant_path.exists():
-            readme_lower = readme.lower()
             mentions_polar = (
                 "polar quantization" in readme_lower
                 or "polar quant" in readme_lower
@@ -234,6 +234,7 @@ def check() -> list[str]:
             text=True,
             timeout=60,
             cwd=str(root),
+            check=False,
         )
         if result.returncode != 0:
             stderr_snippet = result.stderr[:500]
@@ -434,9 +435,30 @@ def check() -> list[str]:
                             f"{cfg}: memory_basis is not real-model based: "
                             f"{basis}"
                         )
-            except Exception as exc:
+            except (
+                OSError, ValueError, TypeError, AttributeError
+            ) as exc:
                 errors.append(
                     f"memory_accounting.json parse error: {exc}"
+                )
+
+    # --- Stale artifact directories ---
+    proof_dir = root / "artifacts" / "proof"
+    if proof_dir.exists():
+        stale_releases = [
+            d.name for d in proof_dir.iterdir()
+            if d.is_dir() and d.name.startswith("main")
+            and d.name != "main28"
+            and d.name != "experimental"
+        ]
+        for stale in stale_releases:
+            errors.append(
+                f"stale artifact directory found: artifacts/proof/{stale}"
+            )
+        for stale_manifest in proof_dir.glob("main*_release_manifest.json"):
+            if stale_manifest.name != "main28_release_manifest.json":
+                errors.append(
+                    f"stale release manifest found: {stale_manifest.name}"
                 )
 
     # --- Main 28 artifact directory ---
@@ -476,7 +498,9 @@ def check() -> list[str]:
                             f"{artifact} release field is "
                             f"'{release_field}' (expected 'main28')"
                         )
-                except Exception:
+                except (
+                    OSError, ValueError, TypeError, AttributeError
+                ):
                     pass
 
         # Manifest must declare release = main28
@@ -491,7 +515,7 @@ def check() -> list[str]:
                         "main28_release_manifest.json release "
                         "field is not 'main28'"
                     )
-            except Exception:
+            except (OSError, ValueError, TypeError, AttributeError):
                 errors.append("main28_release_manifest.json is not valid JSON")
 
         # MLX summary must identify Main 28
@@ -542,7 +566,9 @@ def check() -> list[str]:
                         "real_model_validation.json release "
                         "field is not 'main28'"
                     )
-            except Exception as exc:
+            except (
+                OSError, ValueError, TypeError, AttributeError
+            ) as exc:
                 errors.append(f"real_model_validation.json parse error: {exc}")
 
         # long_context_validation.json: recommended config must
@@ -563,7 +589,9 @@ def check() -> list[str]:
                                         f"fails context "
                                         f"{ctx_entry.get('tokens')} tokens"
                                     )
-            except Exception as exc:
+            except (
+                OSError, ValueError, TypeError, AttributeError
+            ) as exc:
                 errors.append(
                     f"long_context_validation.json parse error: {exc}"
                 )

@@ -198,6 +198,8 @@ def _log_fallback_event(
 
 def _adaptive_bits(seq_len: int) -> tuple[int, int, int]:
     """Return (k_bits, v_bits, group_size) based on sequence length heuristic."""
+    if seq_len <= 0:
+        raise ValueError(f"seq_len must be positive, got {seq_len}")
     if seq_len <= 512:
         return 8, 5, 64
     elif seq_len <= 2048:
