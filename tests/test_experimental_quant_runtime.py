@@ -73,6 +73,22 @@ class TestAdaptiveBits:
         k, v, gs = _adaptive_bits(4096)
         assert k == 4 and v == 3 and gs == 64
 
+    def test_zero_seq_len_raises(self):
+        with pytest.raises(ValueError, match="seq_len must be positive"):
+            _adaptive_bits(0)
+
+    def test_negative_seq_len_raises(self):
+        with pytest.raises(ValueError, match="seq_len must be positive"):
+            _adaptive_bits(-1)
+
+    def test_boundary_2048(self):
+        k, v, gs = _adaptive_bits(2048)
+        assert k == 6 and v == 4 and gs == 64
+
+    def test_very_long_sequence_uses_4_3_64(self):
+        k, v, gs = _adaptive_bits(100_000)
+        assert k == 4 and v == 3 and gs == 64
+
 
 # ------------------------------------------------------------------
 # Layer policy loading tests

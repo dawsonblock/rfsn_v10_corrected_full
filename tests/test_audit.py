@@ -133,7 +133,9 @@ class TestLogAuditEvent:
         )
         log_audit_event(event, log_path=path)
         assert path.exists()
-        lines = path.read_text(encoding="utf-8").strip().split("\n")
+        text = path.read_text(encoding="utf-8")
+        assert text.strip() != ""
+        lines = text.strip().split("\n")
         assert len(lines) == 1
         record = json.loads(lines[0])
         assert record["event_type"] == "audit_decode_step"
@@ -150,5 +152,31 @@ class TestLogAuditEvent:
                 fallback_recommendation=None,
             )
             log_audit_event(event, log_path=path)
-        lines = path.read_text(encoding="utf-8").strip().split("\n")
+        text = path.read_text(encoding="utf-8")
+        assert text.strip() != ""
+        lines = text.strip().split("\n")
         assert len(lines) == 3
+
+
+class TestAuditDecodeStepExtras:
+    def test_step_num_included_in_metrics(self, tmp_path):
+        comp = mx.random.normal((1, 4, 1, 64))
+        ref = mx.random.normal((1, 4, 1, 64))
+        result = audit_decode_step(
+            comp, ref, step_num=20, audit_interval=10,
+            log_path=tmp_path / "audit.jsonl",
+        )
+        assert result is not None
+        assert result.step_num == 20
+
+    def test_labels_path_computes_nll_delta(self, tmp_path):
+        comp = mx.random.normal((1, 4, 1, 64))
+        ref = mx.random.normal((1, 4, 1, 64))
+        labels = mx.array([0])
+        result = audit_decode_step(
+            comp, ref, step_num=10, audit_interval=10,
+            labels=labels,
+            log_path=tmp_path / "audit.jsonl",
+        )
+        assert result is not None
+        assert result.nll_delta is not None

@@ -71,6 +71,29 @@ class TestScoringModesSmoke:
         out = score_attention_fp16(q, k, v, scale=0.5)
         assert out.shape == q.shape
 
+    def test_packed_block_with_array_indices(self):
+        q = mx.random.normal((1, 4, 1, 64))
+        k = mx.random.normal((1, 4, 128, 64))
+        v = mx.random.normal((1, 4, 128, 64))
+        indices = mx.array([0, 1])
+        out = score_attention_packed_block(
+            q, "packet", "packet",
+            block_indices=indices,
+            block_dequant_fn=lambda _kp, _vp, _bi: (k, v),
+        )
+        assert out.shape == q.shape
+
+    def test_reconstructed_with_scale(self):
+        q = mx.random.normal((1, 4, 1, 64))
+        k = mx.random.normal((1, 4, 128, 64))
+        v = mx.random.normal((1, 4, 128, 64))
+        out = score_attention_reconstructed(
+            q, "p", "p",
+            dequant_fn=lambda _kp, _vp: (k, v),
+            scale=0.5,
+        )
+        assert out.shape == q.shape
+
 
 # ------------------------------------------------------------------
 # Numerical sanity: fp16 baseline should be deterministic

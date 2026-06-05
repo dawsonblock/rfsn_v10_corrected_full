@@ -3,16 +3,19 @@
 Provides five quantization-aware attention scoring paths:
 
 * ``fp16``               — baseline without quantization.
-* ``reconstructed``      — fully unpack / dequant the entire KV cache before scoring.
-* ``prepared``           — reuse pre-computed dequantized (or transformed) cache blocks.
-* ``packed_block``       — unpack / dequant only the blocks selected for attention.
+* ``reconstructed``      — fully unpack / dequant the entire KV cache
+                           before scoring.
+* ``prepared``           — reuse pre-computed dequantized (or transformed)
+                           cache blocks.
+* ``packed_block``       — unpack / dequant only the selected blocks.
 * ``score_corrected``    — future QJL or residual score correction (stub).
 """
 
 from __future__ import annotations
 
 import math
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 # Optional MLX with pytest.importorskip fallback pattern
 try:
@@ -22,12 +25,13 @@ except ImportError:  # pragma: no cover
         import pytest
 
         mx = pytest.importorskip("mlx.core")
-    except Exception:
+    except Exception:  # pylint: disable=broad-except
 
         class _MissingMLX:
             def __getattr__(self, name: str) -> Any:
                 raise AttributeError(
-                    f"mlx.core is not installed; attribute '{name}' unavailable"
+                    f"mlx.core is not installed; "
+                    f"attribute '{name}' unavailable"
                 )
 
         mx = _MissingMLX()  # type: ignore[misc,assignment]
@@ -70,8 +74,9 @@ def score_attention_reconstructed(
         queries:      [B, H, T_q, D]
         keys_packet:  opaque packed key container.
         values_packet: opaque packed value container.
-        dequant_fn:   callable that takes ``(keys_packet, values_packet)`` and
-                      returns a tuple ``(keys, values)`` of shape ``[B, H, T_k, D]``.
+        dequant_fn:   callable that takes ``(keys_packet, values_packet)``
+                      and returns a tuple ``(keys, values)`` of shape
+                      ``[B, H, T_k, D]``.
         scale:        Optional manual attention scale.
 
     Returns:
@@ -106,7 +111,10 @@ def score_attention_packed_block(
     keys_packet: Any,
     values_packet: Any,
     block_indices: mx.array | list[int],
-    block_dequant_fn: Callable[[Any, mx.array | list[int]], tuple[mx.array, mx.array]],
+    block_dequant_fn: Callable[
+        [Any, Any, mx.array | list[int]],
+        tuple[mx.array, mx.array],
+    ],
     scale: float | None = None,
 ) -> mx.array:
     """Unpack / dequant only the selected blocks needed for attention.
@@ -115,9 +123,11 @@ def score_attention_packed_block(
         queries:          [B, H, T_q, D]
         keys_packet:      opaque packed key container.
         values_packet:    opaque packed value container.
-        block_indices:    1-D array or list of integer block indices to retrieve.
-        block_dequant_fn: callable ``(packet, block_indices) -> (keys, values)``
-                          where the returned tensors have shape ``[B, H, len(block_indices)*Bsz, D]``.
+        block_indices:    1-D array or list of block indices to retrieve.
+        block_dequant_fn: callable that takes
+                          ``(keys_packet, values_packet, block_indices)`` and
+                          returns ``(keys, values)`` of shape
+                          ``[B, H, len(block_indices)*Bsz, D]``.
         scale:            Optional manual attention scale.
 
     Returns:

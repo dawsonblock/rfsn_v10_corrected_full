@@ -449,7 +449,6 @@ def check() -> list[str]:
             d.name for d in proof_dir.iterdir()
             if d.is_dir() and d.name.startswith("main")
             and d.name != "main28"
-            and d.name != "experimental"
         ]
         for stale in stale_releases:
             errors.append(

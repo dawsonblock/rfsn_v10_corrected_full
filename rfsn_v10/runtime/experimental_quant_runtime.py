@@ -377,7 +377,10 @@ class ExperimentalQuantRuntime:
             effective_k_bits, effective_v_bits, effective_group_size = _adaptive_bits(
                 seq_len
             )
-            # Spawn a temporary manager with adaptive bits
+            # Spawn a temporary manager with adaptive bits.
+            # This overrides any layer-specific policy, so reflect that in
+            # telemetry.
+            policy_applied = False
             manager = RFSNTurboQuantKVManager(
                 k_bits=effective_k_bits,
                 v_bits=effective_v_bits,
