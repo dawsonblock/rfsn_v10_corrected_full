@@ -281,9 +281,11 @@ The real-generation benchmark is split into **teacher-forced** and **free-runnin
 **Current findings:**
 - Real-generation throughput testing exposed major drift in several compressed modes, especially at short prompts (128 tokens).
 - Static logit/cosine validation is not sufficient for promotion.
+- No experimental mode is promoted unless teacher-forced quality, free-running behavior, memory, and throughput all pass.
 - Experimental modes (`turbo_polar`, `adaptive`, `experimental_hybrid`) remain **research-only** until both modes pass defined gates.
 - `k8_v5_gs64` remains the stable runtime default but is under short-prompt investigation.
 - `k8_v5_gs32` is a quality candidate but also under short-prompt investigation.
+- QJL remains disabled because its attention-score benchmark fails.
 
 **New diagnostic artifacts:**
 - `artifacts/proof/experimental/real_generation_throughput.json` — teacher-forced + free-running results

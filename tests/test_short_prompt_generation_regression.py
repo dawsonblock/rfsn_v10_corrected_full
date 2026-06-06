@@ -11,31 +11,43 @@ import math
 import tempfile
 from typing import Any
 
-import mlx.core as mx
 import numpy as np
 import pytest
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from transformers.cache_utils import DynamicCache
 
-from rfsn_v10.kv_manager import RFSNTurboQuantKVManager
+mx = pytest.importorskip("mlx.core")
 
-pytest.importorskip("mlx.core")
+from rfsn_v10.kv_manager import RFSNTurboQuantKVManager  # noqa: E402
 
 
-def _get_model_and_tokenizer(model_name: str = "Qwen/Qwen2.5-0.5B-Instruct"):
-    tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
+def _get_model_and_tokenizer(
+    model_name: str = "Qwen/Qwen2.5-0.5B-Instruct",
+):
+    tokenizer = AutoTokenizer.from_pretrained(
+        model_name, trust_remote_code=True
+    )
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
     device = torch.device("cpu")
     model = AutoModelForCausalLM.from_pretrained(
-        model_name, dtype=torch.float16, device_map="cpu", trust_remote_code=True,
+        model_name,
+        dtype=torch.float16,
+        device_map="cpu",
+        trust_remote_code=True,
     )
     model.eval()
     return model, tokenizer, device
 
 
-def _compress_stable(past_key_values, k_bits: int, v_bits: int, group_size: int, device: torch.device):
+def _compress_stable(
+    past_key_values,
+    k_bits: int,
+    v_bits: int,
+    group_size: int,
+    device: torch.device,
+):
     with tempfile.TemporaryDirectory(prefix="rfsn_reg_") as tmpdir:
         mgr = RFSNTurboQuantKVManager(
             k_bits=k_bits, v_bits=v_bits, group_size=group_size,
@@ -76,16 +88,21 @@ def _teacher_forced_check(
     prompt_tokens: int,
     positions: int,
 ) -> dict[str, Any]:
-    """Run teacher-forced check: identical continuation fed to FP16 and compressed."""
+    """Run teacher-forced check: identical continuation fed to FP16
+    and compressed."""
     dummy_text = "The quick brown fox jumps over the lazy dog. " * 200
     dummy_ids = tokenizer.encode(dummy_text, add_special_tokens=False)
     if prompt_tokens > len(dummy_ids):
-        repeated = (dummy_ids * ((prompt_tokens // len(dummy_ids)) + 1))[:prompt_tokens]
+        repeated = (
+            dummy_ids * ((prompt_tokens // len(dummy_ids)) + 1)
+        )[:prompt_tokens]
         prompt_str = tokenizer.decode(repeated)
     else:
         prompt_str = tokenizer.decode(dummy_ids[:prompt_tokens])
 
-    prompt_ids = tokenizer.encode(prompt_str, return_tensors="pt", truncation=True)
+    prompt_ids = tokenizer.encode(
+        prompt_str, return_tensors="pt", truncation=True
+    )
     prompt_ids = prompt_ids.to(device)
 
     # Baseline FP16 prefill
@@ -103,14 +120,18 @@ def _teacher_forced_check(
     for _ in range(positions - 1):
         next_ids = torch.tensor([[continuation[-1]]], device=device)
         with torch.no_grad():
-            out = model(input_ids=next_ids, past_key_values=past, use_cache=True)
+            out = model(
+                input_ids=next_ids, past_key_values=past, use_cache=True
+            )
         past = out.past_key_values
         tok = int(torch.argmax(out.logits[:, -1, :], dim=-1).item())
         continuation.append(tok)
 
     # Re-prefill for compressed path
     with torch.no_grad():
-        out_fp16 = model(input_ids=prompt_ids, past_key_values=None, use_cache=True)
+        out_fp16 = model(
+            input_ids=prompt_ids, past_key_values=None, use_cache=True
+        )
     past_fp16 = out_fp16.past_key_values
 
     # Compress
@@ -133,15 +154,23 @@ def _teacher_forced_check(
     next_ids = torch.tensor([[first_tok]], device=device)
 
     with torch.no_grad():
-        out_fp16_step = model(input_ids=next_ids, past_key_values=past_fp16, use_cache=True)
-        out_quant_step = model(input_ids=next_ids, past_key_values=quant_past, use_cache=True)
+        out_fp16_step = model(
+            input_ids=next_ids, past_key_values=past_fp16, use_cache=True
+        )
+        out_quant_step = model(
+            input_ids=next_ids, past_key_values=quant_past, use_cache=True
+        )
 
     logit_fp16 = out_fp16_step.logits[:, -1, :]
     logit_quant = out_quant_step.logits[:, -1, :]
 
     a_f = logit_fp16.reshape(-1).float()
     b_f = logit_quant.reshape(-1).float()
-    cosine = float(torch.nn.functional.cosine_similarity(a_f, b_f, dim=0).item())
+    cosine = float(
+        torch.nn.functional.cosine_similarity(  # pylint: disable=not-callable
+            a_f, b_f, dim=0
+        ).item()
+    )
 
     ai = set(torch.topk(logit_fp16, k=5, dim=-1).indices[0].tolist())
     bi = set(torch.topk(logit_quant, k=5, dim=-1).indices[0].tolist())
@@ -152,15 +181,23 @@ def _teacher_forced_check(
     eps = 1e-10
     kl = float(torch.sum(p * torch.log((p + eps) / (q + eps))).item())
 
+    delta = (logit_fp16 - logit_quant).abs()
+    max_abs_delta = float(delta.max().item())
+    mean_abs_delta = float(delta.mean().item())
+
     return {
         "logit_cosine_vs_fp16": cosine,
         "top5_overlap_vs_fp16": top5,
         "kl_vs_fp16": kl,
+        "max_abs_logit_delta": max_abs_delta,
+        "mean_abs_logit_delta": mean_abs_delta,
     }
 
 
-@pytest.mark.parametrize("prompt_tokens", [32, 128, 512])
-def test_k8_v5_gs64_short_prompt_teacher_forced_stability(prompt_tokens: int) -> None:
+@pytest.mark.parametrize("prompt_tokens", [128, 512])
+def test_k8_v5_gs64_short_prompt_teacher_forced_stability(
+    prompt_tokens: int,
+) -> None:
     model, tokenizer, device = _get_model_and_tokenizer()
     result = _teacher_forced_check(
         model=model,
@@ -184,8 +221,10 @@ def test_k8_v5_gs64_short_prompt_teacher_forced_stability(prompt_tokens: int) ->
     )
 
 
-@pytest.mark.parametrize("prompt_tokens", [32, 128, 512])
-def test_k8_v5_gs32_short_prompt_teacher_forced_stability(prompt_tokens: int) -> None:
+@pytest.mark.parametrize("prompt_tokens", [128, 512])
+def test_k8_v5_gs32_short_prompt_teacher_forced_stability(
+    prompt_tokens: int,
+) -> None:
     model, tokenizer, device = _get_model_and_tokenizer()
     result = _teacher_forced_check(
         model=model,

@@ -651,6 +651,165 @@ def check() -> list[str]:
                     f"long_context_validation.json parse error: {exc}"
                 )
 
+    # --- Artifact manifest existence check ---
+    manifest_path = (
+        root
+        / "artifacts"
+        / "proof"
+        / "experimental"
+        / "artifact_manifest.json"
+    )
+    if manifest_path.exists():
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            for key, rel_path in manifest.get("artifacts", {}).items():
+                if isinstance(rel_path, str):
+                    artifact_file = manifest_path.parent / rel_path
+                    if not artifact_file.exists():
+                        errors.append(
+                            "artifact_manifest references missing "
+                            f"file: {rel_path}"
+                        )
+        except (OSError, json.JSONDecodeError):
+            errors.append("artifact_manifest.json is not valid JSON")
+
+    # --- ARTIFACT_INDEX.md missing-file check ---
+    index_path = root / "artifacts" / "ARTIFACT_INDEX.md"
+    if index_path.exists():
+        try:
+            index_text = index_path.read_text(encoding="utf-8")
+            for line in index_text.splitlines():
+                # Look for markdown table rows that reference .json files
+                if "|" in line and ".json" in line:
+                    parts = [p.strip() for p in line.split("|")]
+                    for part in parts:
+                        if part.endswith(".json"):
+                            # Normalize: strip backticks if any
+                            fname = part.strip("`").strip()
+                            if fname.endswith(".json"):
+                                fpath = index_path.parent / fname
+                                if not fpath.exists():
+                                    errors.append(
+                                        "ARTIFACT_INDEX.md lists missing "
+                                        f"artifact: {fname}"
+                                    )
+        except OSError:
+            pass
+
+    # --- real_generation_throughput.json schema and baseline checks ---
+    def check_real_generation_schema(errors):
+        path = Path(
+            "artifacts/proof/experimental/real_generation_throughput.json"
+        )
+        if not path.exists():
+            errors.append("missing real_generation_throughput.json")
+            return
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            errors.append("real_generation_throughput.json is not valid JSON")
+            return
+        for key in ("teacher_forced_logits", "free_running_generation"):
+            if key not in data:
+                errors.append(f"real_generation_throughput.json missing {key}")
+        rows = data.get("teacher_forced_logits", []) + data.get(
+            "free_running_generation", []
+        )
+        for row in rows:
+            if row.get("config") == "baseline_fp16":
+                cr = row.get("compression_ratio")
+                if cr is not None and cr != 1.0:
+                    errors.append(
+                        "baseline_fp16 compression_ratio must be 1.0"
+                    )
+                fp16_bytes = row.get("fp16_kv_bytes")
+                compressed = row.get("compressed_kv_bytes")
+                if fp16_bytes is not None and compressed != fp16_bytes:
+                    errors.append(
+                        "baseline_fp16 compressed_kv_bytes "
+                        "must equal fp16_kv_bytes"
+                    )
+
+    check_real_generation_schema(errors)
+
+    # --- QJL disabled check ---
+    qjl_path = (
+        root
+        / "artifacts"
+        / "proof"
+        / "experimental"
+        / "qjl_attention_score.json"
+    )
+    if qjl_path.exists():
+        try:
+            qjl_data = json.loads(qjl_path.read_text(encoding="utf-8"))
+            if qjl_data.get("passes_all") is False:
+                # QJL must be disabled; check manifest
+                manifest_path_2 = (
+                    root
+                    / "artifacts"
+                    / "proof"
+                    / "experimental"
+                    / "artifact_manifest.json"
+                )
+                if manifest_path_2.exists():
+                    manifest_2 = json.loads(
+                        manifest_path_2.read_text(encoding="utf-8")
+                    )
+                    if manifest_2.get("qjl_status") != "failed_disabled":
+                        errors.append(
+                            "QJL attention score fails but manifest "
+                            "does not mark qjl_status as failed_disabled"
+                        )
+        except (OSError, json.JSONDecodeError):
+            pass
+
+    # --- No candidate without real-generation data ---
+    classification_path = (
+        root
+        / "artifacts"
+        / "proof"
+        / "experimental"
+        / "config_classification.json"
+    )
+    real_gen_path = (
+        root
+        / "artifacts"
+        / "proof"
+        / "experimental"
+        / "real_generation_throughput.json"
+    )
+    if classification_path.exists() and real_gen_path.exists():
+        try:
+            class_data = json.loads(
+                classification_path.read_text(encoding="utf-8")
+            )
+            real_gen_data = json.loads(
+                real_gen_path.read_text(encoding="utf-8")
+            )
+            configs_with_real_gen = set()
+            for section in (
+                "teacher_forced_logits",
+                "free_running_generation",
+            ):
+                for row in real_gen_data.get(section, []):
+                    if "error" not in row:
+                        configs_with_real_gen.add(row.get("config"))
+            for cfg_name, status in class_data.get(
+                "classifications", {}
+            ).items():
+                normalized = cfg_name.replace("stable_", "")
+                if (
+                    "candidate" in status
+                    and normalized not in configs_with_real_gen
+                ):
+                    errors.append(
+                        f"{cfg_name} classified as candidate "
+                        f"but has no real-generation data"
+                    )
+        except (OSError, json.JSONDecodeError):
+            pass
+
     return errors
 
 

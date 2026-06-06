@@ -107,6 +107,16 @@ def _compute_fp16_kv_bytes(past_key_values) -> int:
     return sum(int(k.numel() + v.numel()) * 2 for k, v in past_key_values)
 
 
+def _clone_cache(cache):
+    """Deep-clone a KV cache (DynamicCache or tuple list)."""
+    if hasattr(cache, "to_legacy_cache"):
+        legacy = cache.to_legacy_cache()
+        return type(cache).from_legacy_cache(
+            tuple((k.clone(), v.clone()) for k, v in legacy)
+        )
+    return [(k.clone(), v.clone()) for k, v in cache]
+
+
 # ---------------------------------------------------------------------------
 # Config registry
 # ---------------------------------------------------------------------------
@@ -319,7 +329,9 @@ def _greedy_generate(
         # Full prefill + first token generation
         t_prefill = time.perf_counter()
         with torch.no_grad():
-            out = model(input_ids=prompt_ids, past_key_values=None, use_cache=True)
+            out = model(
+                input_ids=prompt_ids, past_key_values=None, use_cache=True
+            )
         t_prefill_end = time.perf_counter()
         past = out.past_key_values
         logits = out.logits[:, -1, :]
@@ -330,7 +342,9 @@ def _greedy_generate(
         for _ in range(new_tokens - 1):
             next_ids = torch.tensor([[next_tok]], device=device)
             with torch.no_grad():
-                out = model(input_ids=next_ids, past_key_values=past, use_cache=True)
+                out = model(
+                    input_ids=next_ids, past_key_values=past, use_cache=True
+                )
             past = out.past_key_values
             logits = out.logits[:, -1, :]
             next_tok = int(torch.argmax(logits, dim=-1).item())
@@ -348,7 +362,9 @@ def _greedy_generate(
     next_ids = prompt_ids
     for _ in range(new_tokens):
         with torch.no_grad():
-            out = model(input_ids=next_ids, past_key_values=past, use_cache=True)
+            out = model(
+                input_ids=next_ids, past_key_values=past, use_cache=True
+            )
         past = out.past_key_values
         logits = out.logits[:, -1, :]
         next_tok = int(torch.argmax(logits, dim=-1).item())
@@ -396,7 +412,9 @@ def benchmark_config(
     seed: int = 42,
 ) -> dict[str, Any]:
     cfg = _get_config(cfg_name)
-    tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
+    tokenizer = AutoTokenizer.from_pretrained(
+        model_name, trust_remote_code=True
+    )
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
@@ -425,8 +443,10 @@ def benchmark_config(
     # Baseline FP16 run — collect reference prefill cache and free-running
     # tokens for teacher-forced continuation.
     # -----------------------------------------------------------------------
+    t_baseline_prefill = time.perf_counter()
     with torch.no_grad():
         out = model(input_ids=prompt_ids, past_key_values=None, use_cache=True)
+    baseline_prefill_ms = (time.perf_counter() - t_baseline_prefill) * 1000.0
     baseline_past = out.past_key_values
     baseline_fp16_bytes = _compute_fp16_kv_bytes(baseline_past)
     baseline_first_logit = out.logits[:, -1, :]
@@ -453,9 +473,14 @@ def benchmark_config(
     continuation_ids = torch.tensor([baseline_tokens], device=effective_device)
 
     # Re-run prefill to get a fresh prompt-only cache for compression
+    t_prompt_prefill = time.perf_counter()
     with torch.no_grad():
         out = model(input_ids=prompt_ids, past_key_values=None, use_cache=True)
+    prompt_prefill_ms = (time.perf_counter() - t_prompt_prefill) * 1000.0
     prompt_past = out.past_key_values
+
+    # Keep original DynamicCache for teacher-forced baseline
+    original_prompt_past = prompt_past
 
     # Compress past for config run
     t_compress_start = time.perf_counter()
@@ -480,16 +505,22 @@ def benchmark_config(
         compressed_bytes = baseline_fp16_bytes
         compression_ratio = 1.0
     else:
-        compression_ratio = safe_compression_ratio(baseline_fp16_bytes, compressed_bytes)
+        compression_ratio = safe_compression_ratio(
+            baseline_fp16_bytes, compressed_bytes
+        )
 
     # -----------------------------------------------------------------------
     # Teacher-forced logits with compressed cache
     # -----------------------------------------------------------------------
+    # Clone caches before teacher-forced evaluation since it mutates them
+    original_prompt_past_tf = _clone_cache(original_prompt_past)
+    compressed_past_tf = _clone_cache(compressed_past)
+
     tf_baseline_logits = _teacher_forced_logits(
-        model, continuation_ids, baseline_past
+        model, continuation_ids, original_prompt_past_tf
     )
     tf_compressed_logits = _teacher_forced_logits(
-        model, continuation_ids, compressed_past
+        model, continuation_ids, compressed_past_tf
     )
 
     cosines_tf = []
@@ -587,11 +618,16 @@ def benchmark_config(
         else float("nan")
     )
 
-    total_ms = (
-        fr_timing["prefill_ms"]
-        + fr_timing["decode_loop_ms"]
-        + total_compress_ms
+    if cfg_name == "baseline_fp16":
+        e2e_prefill_ms = baseline_prefill_ms
+    else:
+        e2e_prefill_ms = prompt_prefill_ms
+    e2e_decode_ms = (
+        baseline_timing["decode_loop_ms"]
+        if cfg_name == "baseline_fp16"
+        else fr_timing["decode_loop_ms"]
     )
+    total_ms = e2e_prefill_ms + e2e_decode_ms + total_compress_ms
     tokens_per_sec = (new_tokens / total_ms) * 1000.0 if total_ms > 0 else 0.0
 
     # Validation assert for baseline
@@ -609,12 +645,12 @@ def benchmark_config(
         "config": cfg_name,
         "prompt_tokens": prompt_len,
         "new_tokens": new_tokens,
-        "prefill_ms": fr_timing["prefill_ms"],
+        "prefill_ms": e2e_prefill_ms,
         "kv_quantize_ms": quant_ms * 0.4,
         "kv_pack_ms": quant_ms * 0.6,
         "kv_unpack_ms": total_compress_ms * 0.35,
         "kv_dequantize_ms": total_compress_ms * 0.45,
-        "decode_loop_ms": fr_timing["decode_loop_ms"],
+        "decode_loop_ms": e2e_decode_ms,
         "total_end_to_end_ms": total_ms,
         "tokens_per_second": tokens_per_sec,
         "peak_memory_bytes": _peak_memory_bytes(),
@@ -681,7 +717,9 @@ def main() -> None:
     if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
         device = torch.device("mps")
 
-    tokenizer = AutoTokenizer.from_pretrained(args.model, trust_remote_code=True)
+    tokenizer = AutoTokenizer.from_pretrained(
+        args.model, trust_remote_code=True
+    )
     # Prepare prompts of target lengths
     dummy_text = "The quick brown fox jumps over the lazy dog. " * 200
     dummy_ids = tokenizer.encode(dummy_text, add_special_tokens=False)
@@ -701,7 +739,12 @@ def main() -> None:
             print(f"Benchmarking {cfg_name} @ {length} tokens ...")
             try:
                 result = benchmark_config(
-                    args.model, cfg_name, prompt, args.new_tokens, device, seed=args.seed
+                    args.model,
+                    cfg_name,
+                    prompt,
+                    args.new_tokens,
+                    device,
+                    seed=args.seed,
                 )
                 tf = {
                     "model_name": result["model_name"],
@@ -719,15 +762,20 @@ def main() -> None:
                     "total_end_to_end_ms": result["total_end_to_end_ms"],
                     "peak_memory_bytes": result["peak_memory_bytes"],
                     "compressed_kv_bytes": result["compressed_kv_bytes"],
+                    "fp16_kv_bytes": (
+                        result["compressed_kv_bytes"]
+                        if result["config"] == "baseline_fp16"
+                        else None
+                    ),
                     "compression_ratio": result["compression_ratio"],
                 }
                 teacher_forced_results.append(tf)
                 free_running_results.append(fr)
                 print(
-                    f"  TF cosine={result['teacher_forced']['logit_cosine_vs_fp16']:.4f}, "
-                    f"FR match={result['free_running']['exact_token_match_rate']:.2%}"
+                    f"  TF cosine={result['teacher_forced']['logit_cosine_vs_fp16']:.4f}, "  # noqa: E501
+                    f"FR match={result['free_running']['exact_token_match_rate']:.2%}"  # noqa: E501
                 )
-            except Exception as exc:
+            except Exception as exc:  # pylint: disable=broad-except
                 print(f"  FAILED: {exc}")
                 teacher_forced_results.append({
                     "model_name": args.model,
@@ -807,7 +855,8 @@ def main() -> None:
         lines.append(f"- **Total E2E ms:** {r['total_end_to_end_ms']:.2f}")
         lines.append(f"- **Compression ratio:** {r['compression_ratio']:.2f}x")
         lines.append(
-            f"- **First divergence position:** {r['first_divergence_position']}"
+            "- **First divergence position:** "
+            f"{r['first_divergence_position']}"
         )
         lines.append(
             f"- **Exact token match rate:** {r['exact_token_match_rate']:.2%}"

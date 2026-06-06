@@ -4,165 +4,331 @@
 **Seed:** 42  
 **Configs:** baseline_fp16, k8_v5_gs64, k8_v5_gs32, turbo_polar, adaptive, experimental_hybrid
 
-## baseline_fp16 @ 128 tokens
+## Teacher-Forced Logit Equivalence
 
-- **Tokens/sec:** 46.30
-- **Total E2E ms:** 2764.35
-- **Compression ratio:** 3145728.00x
-- **Logit cosine vs FP16:** 1.0000
-- **Top-5 overlap vs FP16:** 1.0000
-- **KL vs FP16:** 0.000000
+### baseline_fp16 @ 128 tokens
 
-## baseline_fp16 @ 512 tokens
+- **Positions checked:** 128
+- **Logit cosine vs FP16:** 0.9557
+- **Top-5 overlap vs FP16:** 0.7641
+- **KL vs FP16:** 0.124026
+- **Max abs logit delta:** 11.3750
+- **Mean abs logit delta:** 0.8738
 
-- **Tokens/sec:** 42.43
-- **Total E2E ms:** 3016.73
-- **Compression ratio:** 7864320.00x
-- **Logit cosine vs FP16:** 1.0000
-- **Top-5 overlap vs FP16:** 1.0000
-- **KL vs FP16:** 0.000000
+### baseline_fp16 @ 512 tokens
 
-## baseline_fp16 @ 1024 tokens
+- **Positions checked:** 128
+- **Logit cosine vs FP16:** 0.9635
+- **Top-5 overlap vs FP16:** 0.7297
+- **KL vs FP16:** 0.079448
+- **Max abs logit delta:** 15.0000
+- **Mean abs logit delta:** 0.6313
 
-- **Tokens/sec:** 8.22
-- **Total E2E ms:** 15581.21
-- **Compression ratio:** 14155776.00x
-- **Logit cosine vs FP16:** 1.0000
-- **Top-5 overlap vs FP16:** 1.0000
-- **KL vs FP16:** 0.000000
+### baseline_fp16 @ 1024 tokens
 
-## k8_v5_gs64 @ 128 tokens
+- **Positions checked:** 128
+- **Logit cosine vs FP16:** 0.9486
+- **Top-5 overlap vs FP16:** 0.7422
+- **KL vs FP16:** 0.034880
+- **Max abs logit delta:** 13.0156
+- **Mean abs logit delta:** 0.8177
 
-- **Tokens/sec:** 40.78
-- **Total E2E ms:** 3139.00
-- **Compression ratio:** 4.46x
-- **Logit cosine vs FP16:** 0.7938
-- **Top-5 overlap vs FP16:** 0.3094
-- **KL vs FP16:** 9.837869
+### k8_v5_gs64 @ 128 tokens
 
-## k8_v5_gs64 @ 512 tokens
+- **Positions checked:** 128
+- **Logit cosine vs FP16:** 0.9556
+- **Top-5 overlap vs FP16:** 0.7688
+- **KL vs FP16:** 0.123498
+- **Max abs logit delta:** 11.4453
+- **Mean abs logit delta:** 0.8855
 
-- **Tokens/sec:** 32.25
-- **Total E2E ms:** 3968.86
-- **Compression ratio:** 2.79x
-- **Logit cosine vs FP16:** 0.9998
-- **Top-5 overlap vs FP16:** 0.9797
-- **KL vs FP16:** 0.000034
+### k8_v5_gs64 @ 512 tokens
 
-## k8_v5_gs64 @ 1024 tokens
+- **Positions checked:** 128
+- **Logit cosine vs FP16:** 0.9634
+- **Top-5 overlap vs FP16:** 0.7328
+- **KL vs FP16:** 0.079445
+- **Max abs logit delta:** 15.0312
+- **Mean abs logit delta:** 0.6330
 
-- **Tokens/sec:** 10.50
-- **Total E2E ms:** 12194.52
-- **Compression ratio:** 2.51x
-- **Logit cosine vs FP16:** 0.9999
-- **Top-5 overlap vs FP16:** 0.9812
-- **KL vs FP16:** 0.000014
+### k8_v5_gs64 @ 1024 tokens
 
-## k8_v5_gs32 @ 128 tokens
+- **Positions checked:** 128
+- **Logit cosine vs FP16:** 0.9483
+- **Top-5 overlap vs FP16:** 0.7406
+- **KL vs FP16:** 0.034789
+- **Max abs logit delta:** 13.0781
+- **Mean abs logit delta:** 0.8210
 
-- **Tokens/sec:** 36.18
-- **Total E2E ms:** 3537.58
-- **Compression ratio:** 4.17x
-- **Logit cosine vs FP16:** 0.7943
-- **Top-5 overlap vs FP16:** 0.3109
-- **KL vs FP16:** 9.821530
+### k8_v5_gs32 @ 128 tokens
 
-## k8_v5_gs32 @ 512 tokens
+- **Positions checked:** 128
+- **Logit cosine vs FP16:** 0.9555
+- **Top-5 overlap vs FP16:** 0.7656
+- **KL vs FP16:** 0.125121
+- **Max abs logit delta:** 11.5781
+- **Mean abs logit delta:** 0.8807
 
-- **Tokens/sec:** 32.91
-- **Total E2E ms:** 3888.92
-- **Compression ratio:** 2.61x
-- **Logit cosine vs FP16:** 0.9998
-- **Top-5 overlap vs FP16:** 0.9844
-- **KL vs FP16:** 0.000031
+### k8_v5_gs32 @ 512 tokens
 
-## k8_v5_gs32 @ 1024 tokens
+- **Positions checked:** 128
+- **Logit cosine vs FP16:** 0.9635
+- **Top-5 overlap vs FP16:** 0.7313
+- **KL vs FP16:** 0.079418
+- **Max abs logit delta:** 14.9922
+- **Mean abs logit delta:** 0.6306
 
-- **Tokens/sec:** 8.51
-- **Total E2E ms:** 15041.71
-- **Compression ratio:** 2.35x
-- **Logit cosine vs FP16:** 0.9999
-- **Top-5 overlap vs FP16:** 0.9797
-- **KL vs FP16:** 0.000013
+### k8_v5_gs32 @ 1024 tokens
 
-## turbo_polar @ 128 tokens
+- **Positions checked:** 128
+- **Logit cosine vs FP16:** 0.9487
+- **Top-5 overlap vs FP16:** 0.7313
+- **KL vs FP16:** 0.034757
+- **Max abs logit delta:** 13.0078
+- **Mean abs logit delta:** 0.8163
 
-- **Tokens/sec:** 34.22
-- **Total E2E ms:** 3740.47
-- **Compression ratio:** 4.63x
-- **Logit cosine vs FP16:** 0.7372
-- **Top-5 overlap vs FP16:** 0.1641
-- **KL vs FP16:** 7.170052
+### turbo_polar @ 128 tokens
 
-## turbo_polar @ 512 tokens
+- **Positions checked:** 128
+- **Logit cosine vs FP16:** 0.9006
+- **Top-5 overlap vs FP16:** 0.5781
+- **KL vs FP16:** 0.096738
+- **Max abs logit delta:** 11.6094
+- **Mean abs logit delta:** 1.1456
 
-- **Tokens/sec:** 33.27
-- **Total E2E ms:** 3846.75
-- **Compression ratio:** 2.89x
-- **Logit cosine vs FP16:** 0.6933
-- **Top-5 overlap vs FP16:** 0.1438
-- **KL vs FP16:** 9.549608
+### turbo_polar @ 512 tokens
 
-## turbo_polar @ 1024 tokens
+- **Positions checked:** 128
+- **Logit cosine vs FP16:** 0.8638
+- **Top-5 overlap vs FP16:** 0.5750
+- **KL vs FP16:** 0.068500
+- **Max abs logit delta:** 13.1406
+- **Mean abs logit delta:** 1.5711
 
-- **Tokens/sec:** 11.16
-- **Total E2E ms:** 11469.91
-- **Compression ratio:** 2.61x
-- **Logit cosine vs FP16:** 0.9233
-- **Top-5 overlap vs FP16:** 0.6391
-- **KL vs FP16:** 0.021768
+### turbo_polar @ 1024 tokens
 
-## adaptive @ 128 tokens
+- **Positions checked:** 128
+- **Logit cosine vs FP16:** 0.8921
+- **Top-5 overlap vs FP16:** 0.6000
+- **KL vs FP16:** 0.038018
+- **Max abs logit delta:** 13.8203
+- **Mean abs logit delta:** 1.3028
 
-- **Tokens/sec:** 35.12
-- **Total E2E ms:** 3644.71
-- **Compression ratio:** 4.63x
-- **Logit cosine vs FP16:** 0.6932
-- **Top-5 overlap vs FP16:** 0.1078
-- **KL vs FP16:** 10.799811
+### adaptive @ 128 tokens
 
-## adaptive @ 512 tokens
+- **Positions checked:** 128
+- **Logit cosine vs FP16:** 0.8901
+- **Top-5 overlap vs FP16:** 0.5859
+- **KL vs FP16:** 0.126297
+- **Max abs logit delta:** 11.3828
+- **Mean abs logit delta:** 1.2032
 
-- **Tokens/sec:** 34.32
-- **Total E2E ms:** 3729.41
-- **Compression ratio:** 2.89x
-- **Logit cosine vs FP16:** 0.8700
-- **Top-5 overlap vs FP16:** 0.6141
-- **KL vs FP16:** 0.038245
+### adaptive @ 512 tokens
 
-## adaptive @ 1024 tokens
+- **Positions checked:** 128
+- **Logit cosine vs FP16:** 0.8532
+- **Top-5 overlap vs FP16:** 0.5891
+- **KL vs FP16:** 0.057872
+- **Max abs logit delta:** 13.8281
+- **Mean abs logit delta:** 1.5967
 
-- **Tokens/sec:** 11.51
-- **Total E2E ms:** 11120.14
-- **Compression ratio:** 2.61x
-- **Logit cosine vs FP16:** 0.9241
-- **Top-5 overlap vs FP16:** 0.6375
-- **KL vs FP16:** 0.021542
+### adaptive @ 1024 tokens
 
-## experimental_hybrid @ 128 tokens
+- **Positions checked:** 128
+- **Logit cosine vs FP16:** 0.8930
+- **Top-5 overlap vs FP16:** 0.6016
+- **KL vs FP16:** 0.038081
+- **Max abs logit delta:** 13.8125
+- **Mean abs logit delta:** 1.2974
 
-- **Tokens/sec:** 42.69
-- **Total E2E ms:** 2998.52
-- **Compression ratio:** 5.91x
-- **Logit cosine vs FP16:** 0.9455
-- **Top-5 overlap vs FP16:** 0.6766
-- **KL vs FP16:** 0.029672
+### experimental_hybrid @ 128 tokens
 
-## experimental_hybrid @ 512 tokens
+- **Positions checked:** 128
+- **Logit cosine vs FP16:** 0.9248
+- **Top-5 overlap vs FP16:** 0.6625
+- **KL vs FP16:** 0.130485
+- **Max abs logit delta:** 11.0625
+- **Mean abs logit delta:** 1.0596
 
-- **Tokens/sec:** 35.23
-- **Total E2E ms:** 3633.40
-- **Compression ratio:** 3.72x
-- **Logit cosine vs FP16:** 0.7518
-- **Top-5 overlap vs FP16:** 0.2953
-- **KL vs FP16:** 8.429742
+### experimental_hybrid @ 512 tokens
 
-## experimental_hybrid @ 1024 tokens
+- **Positions checked:** 128
+- **Logit cosine vs FP16:** 0.9490
+- **Top-5 overlap vs FP16:** 0.7172
+- **KL vs FP16:** 0.037331
+- **Max abs logit delta:** 10.5000
+- **Mean abs logit delta:** 1.0010
 
-- **Tokens/sec:** 8.72
-- **Total E2E ms:** 14679.08
-- **Compression ratio:** 3.35x
-- **Logit cosine vs FP16:** 0.9657
-- **Top-5 overlap vs FP16:** 0.7438
-- **KL vs FP16:** 0.011899
+### experimental_hybrid @ 1024 tokens
+
+- **Positions checked:** 128
+- **Logit cosine vs FP16:** 0.9497
+- **Top-5 overlap vs FP16:** 0.6813
+- **KL vs FP16:** 0.020494
+- **Max abs logit delta:** 11.1562
+- **Mean abs logit delta:** 0.8829
+
+## Free-Running Generation Divergence
+
+### baseline_fp16 @ 128 tokens
+
+- **Tokens/sec:** 54.89
+- **Total E2E ms:** 2332.08
+- **Compression ratio:** 1.00x
+- **First divergence position:** None
+- **Exact token match rate:** 100.00%
+- **Logit cosine vs FP16:** 0.9568
+
+### baseline_fp16 @ 512 tokens
+
+- **Tokens/sec:** 46.53
+- **Total E2E ms:** 2750.77
+- **Compression ratio:** 1.00x
+- **First divergence position:** None
+- **Exact token match rate:** 100.00%
+- **Logit cosine vs FP16:** 0.9624
+
+### baseline_fp16 @ 1024 tokens
+
+- **Tokens/sec:** 13.10
+- **Total E2E ms:** 9773.14
+- **Compression ratio:** 1.00x
+- **First divergence position:** None
+- **Exact token match rate:** 100.00%
+- **Logit cosine vs FP16:** 0.9484
+
+### k8_v5_gs64 @ 128 tokens
+
+- **Tokens/sec:** 41.43
+- **Total E2E ms:** 3089.31
+- **Compression ratio:** 2.23x
+- **First divergence position:** None
+- **Exact token match rate:** 100.00%
+- **Logit cosine vs FP16:** 0.9572
+
+### k8_v5_gs64 @ 512 tokens
+
+- **Tokens/sec:** 42.31
+- **Total E2E ms:** 3025.63
+- **Compression ratio:** 2.23x
+- **First divergence position:** None
+- **Exact token match rate:** 100.00%
+- **Logit cosine vs FP16:** 0.9616
+
+### k8_v5_gs64 @ 1024 tokens
+
+- **Tokens/sec:** 17.87
+- **Total E2E ms:** 7163.71
+- **Compression ratio:** 2.23x
+- **First divergence position:** None
+- **Exact token match rate:** 100.00%
+- **Logit cosine vs FP16:** 0.9488
+
+### k8_v5_gs32 @ 128 tokens
+
+- **Tokens/sec:** 55.87
+- **Total E2E ms:** 2290.98
+- **Compression ratio:** 2.09x
+- **First divergence position:** None
+- **Exact token match rate:** 100.00%
+- **Logit cosine vs FP16:** 0.9574
+
+### k8_v5_gs32 @ 512 tokens
+
+- **Tokens/sec:** 44.85
+- **Total E2E ms:** 2853.93
+- **Compression ratio:** 2.09x
+- **First divergence position:** None
+- **Exact token match rate:** 100.00%
+- **Logit cosine vs FP16:** 0.9621
+
+### k8_v5_gs32 @ 1024 tokens
+
+- **Tokens/sec:** 23.62
+- **Total E2E ms:** 5418.06
+- **Compression ratio:** 2.09x
+- **First divergence position:** None
+- **Exact token match rate:** 100.00%
+- **Logit cosine vs FP16:** 0.9483
+
+### turbo_polar @ 128 tokens
+
+- **Tokens/sec:** 56.48
+- **Total E2E ms:** 2266.13
+- **Compression ratio:** 2.31x
+- **First divergence position:** 9
+- **Exact token match rate:** 14.06%
+- **Logit cosine vs FP16:** 0.6537
+
+### turbo_polar @ 512 tokens
+
+- **Tokens/sec:** 48.38
+- **Total E2E ms:** 2645.57
+- **Compression ratio:** 2.32x
+- **First divergence position:** 58
+- **Exact token match rate:** 45.31%
+- **Logit cosine vs FP16:** 0.6196
+
+### turbo_polar @ 1024 tokens
+
+- **Tokens/sec:** 24.66
+- **Total E2E ms:** 5189.64
+- **Compression ratio:** 2.32x
+- **First divergence position:** None
+- **Exact token match rate:** 100.00%
+- **Logit cosine vs FP16:** 0.8006
+
+### adaptive @ 128 tokens
+
+- **Tokens/sec:** 55.53
+- **Total E2E ms:** 2305.21
+- **Compression ratio:** 2.31x
+- **First divergence position:** 9
+- **Exact token match rate:** 14.06%
+- **Logit cosine vs FP16:** 0.6500
+
+### adaptive @ 512 tokens
+
+- **Tokens/sec:** 49.82
+- **Total E2E ms:** 2569.10
+- **Compression ratio:** 2.32x
+- **First divergence position:** 28
+- **Exact token match rate:** 25.00%
+- **Logit cosine vs FP16:** 0.5093
+
+### adaptive @ 1024 tokens
+
+- **Tokens/sec:** 24.28
+- **Total E2E ms:** 5270.91
+- **Compression ratio:** 2.32x
+- **First divergence position:** None
+- **Exact token match rate:** 100.00%
+- **Logit cosine vs FP16:** 0.8005
+
+### experimental_hybrid @ 128 tokens
+
+- **Tokens/sec:** 54.07
+- **Total E2E ms:** 2367.32
+- **Compression ratio:** 2.95x
+- **First divergence position:** None
+- **Exact token match rate:** 100.00%
+- **Logit cosine vs FP16:** 0.8532
+
+### experimental_hybrid @ 512 tokens
+
+- **Tokens/sec:** 50.24
+- **Total E2E ms:** 2547.53
+- **Compression ratio:** 2.97x
+- **First divergence position:** None
+- **Exact token match rate:** 100.00%
+- **Logit cosine vs FP16:** 0.8631
+
+### experimental_hybrid @ 1024 tokens
+
+- **Tokens/sec:** 23.20
+- **Total E2E ms:** 5517.96
+- **Compression ratio:** 2.98x
+- **First divergence position:** None
+- **Exact token match rate:** 100.00%
+- **Logit cosine vs FP16:** 0.8903
 
