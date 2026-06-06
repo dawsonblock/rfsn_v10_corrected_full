@@ -36,17 +36,65 @@ def _cosine(a: torch.Tensor, b: torch.Tensor) -> float:
     return float(functional.cosine_similarity(a_f, b_f, dim=0).item())
 
 
-def _attention_score_kl(k_fp16, v_fp16, k_quant, v_quant) -> float:
-    """Compute KL between attention score distributions (simplified)."""
-    # Use a single query vector (mean of first head) for score comparison
+def _attention_score_metrics(k_fp16, v_fp16, k_quant, v_quant) -> dict[str, float]:
+    """Compute comprehensive attention score metrics between FP16 and quantized.
+
+    Returns raw score MAE/RMSE, stable softmax KL, cosine, and top-k overlap.
+    """
+    # Use a single query vector (last position of first head)
+    dim = k_fp16.shape[-1]
+    scale = float(dim) ** -0.5
     q = k_fp16[0, 0, -1:, :].float()
-    scores_fp16 = torch.matmul(q, k_fp16[0, 0, :, :].transpose(-2, -1).float())
-    scores_fp16 = functional.softmax(scores_fp16, dim=-1)
-    scores_quant = torch.matmul(q, k_quant[0, 0, :, :].transpose(-2, -1).float())
-    scores_quant = functional.softmax(scores_quant, dim=-1)
-    eps = 1e-10
-    kl = torch.sum(scores_fp16 * torch.log((scores_fp16 + eps) / (scores_quant + eps)))
-    return float(kl.item())
+
+    raw_scores_fp16 = torch.matmul(q, k_fp16[0, 0, :, :].transpose(-2, -1).float()) * scale
+    raw_scores_quant = torch.matmul(q, k_quant[0, 0, :, :].transpose(-2, -1).float()) * scale
+
+    # Raw score metrics
+    score_diff = (raw_scores_fp16 - raw_scores_quant).abs()
+    score_mae = float(score_diff.mean().item())
+    score_rmse = float(score_diff.pow(2).mean().sqrt().item())
+    score_cosine = float(functional.cosine_similarity(
+        raw_scores_fp16.reshape(-1), raw_scores_quant.reshape(-1), dim=0
+    ).item())
+
+    # Stable softmax KL
+    eps = 1e-8
+    p = functional.softmax(raw_scores_fp16, dim=-1)
+    q_dist = functional.softmax(raw_scores_quant, dim=-1)
+    p_clamped = p.clamp(min=eps)
+    q_clamped = q_dist.clamp(min=eps)
+    # Renormalize after clamping
+    p_clamped = p_clamped / p_clamped.sum(dim=-1, keepdim=True)
+    q_clamped = q_clamped / q_clamped.sum(dim=-1, keepdim=True)
+    softmax_kl = float(torch.sum(p_clamped * (p_clamped.log() - q_clamped.log())).item())
+
+    # Top-k attention overlap
+    seq_len = raw_scores_fp16.shape[-1]
+    k_val = min(5, seq_len)
+    topk_fp16 = set(torch.topk(raw_scores_fp16, k=k_val, dim=-1).indices[0].tolist())
+    topk_quant = set(torch.topk(raw_scores_quant, k=k_val, dim=-1).indices[0].tolist())
+    topk_overlap = float(len(topk_fp16 & topk_quant) / len(topk_fp16)) if topk_fp16 else 0.0
+
+    # Query and key norms for context
+    q_norm = float(q.norm().item())
+    k_norm_fp16 = float(k_fp16[0, 0, :, :].float().norm(dim=-1).mean().item())
+
+    return {
+        "score_mae": score_mae,
+        "score_rmse": score_rmse,
+        "score_cosine": score_cosine,
+        "softmax_kl": softmax_kl,
+        "topk_attention_overlap": topk_overlap,
+        "scale_used": scale,
+        "query_norm": q_norm,
+        "key_norm_mean": k_norm_fp16,
+    }
+
+
+def _attention_score_kl(k_fp16, v_fp16, k_quant, v_quant) -> float:
+    """Compute stable KL between attention score distributions."""
+    metrics = _attention_score_metrics(k_fp16, v_fp16, k_quant, v_quant)
+    return metrics["softmax_kl"]
 
 
 def _get_config(name: str) -> dict[str, Any]:

@@ -230,19 +230,19 @@ def check() -> list[str]:
         result = subprocess.run(
             [sys.executable, "-m", "pytest", "--collect-only", "-q",
              str(root / "tests")],
-            capture_output=True,
             text=True,
-            timeout=60,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            timeout=120,
             cwd=str(root),
             check=False,
         )
         if result.returncode != 0:
-            stderr_snippet = result.stderr[:500]
             errors.append(
-                f"pytest collection failed: {stderr_snippet}"
+                "pytest collection failed:\n" + result.stdout[-4000:]
             )
     except (OSError, subprocess.TimeoutExpired) as exc:
-        errors.append(f"pytest collection check could not run: {exc}")
+        errors.append(f"pytest collection check failed to run: {exc}")
 
     # --- Test file MLX import safety ---
     def _has_top_level_mlx_import(tree: ast.AST) -> bool:
@@ -764,6 +764,68 @@ def check() -> list[str]:
         except (OSError, json.JSONDecodeError):
             pass
 
+    # --- Teacher-forced baseline identity check ---
+    real_gen_path = (
+        root
+        / "artifacts"
+        / "proof"
+        / "experimental"
+        / "real_generation_throughput.json"
+    )
+    if real_gen_path.exists():
+        try:
+            rg_data = json.loads(real_gen_path.read_text(encoding="utf-8"))
+            tf_rows = rg_data.get("teacher_forced_logits", [])
+            if not tf_rows:
+                errors.append("teacher_forced_logits section is empty")
+            else:
+                baseline_rows = [
+                    r for r in tf_rows
+                    if r.get("config") == "baseline_fp16" and "error" not in r
+                ]
+                if not baseline_rows:
+                    errors.append("no baseline_fp16 teacher-forced rows")
+                else:
+                    for row in baseline_rows:
+                        c = float(row.get("logit_cosine_vs_fp16", 0.0))
+                        t = float(row.get("top5_overlap_vs_fp16", 0.0))
+                        k = float(row.get("kl_vs_fp16", 999.0))
+                        pt = row.get("prompt_tokens", "?")
+                        if abs(c - 1.0) > 1e-7:
+                            errors.append(
+                                f"baseline_fp16 teacher-forced cosine not "
+                                f"identity @ {pt} tokens: {c}"
+                            )
+                        if abs(t - 1.0) > 1e-7:
+                            errors.append(
+                                f"baseline_fp16 teacher-forced top5 not "
+                                f"identity @ {pt} tokens: {t}"
+                            )
+                        if abs(k) > 1e-7:
+                            errors.append(
+                                f"baseline_fp16 teacher-forced KL not "
+                                f"zero @ {pt} tokens: {k}"
+                            )
+            # Check free-running baseline
+            fr_rows = rg_data.get("free_running_generation", [])
+            fr_baseline = [
+                r for r in fr_rows
+                if r.get("config") == "baseline_fp16" and "error" not in r
+            ]
+            for row in fr_baseline:
+                emr = float(row.get("exact_token_match_rate", 0.0))
+                cr = float(row.get("compression_ratio", 0.0))
+                if abs(emr - 1.0) > 1e-7:
+                    errors.append(
+                        f"baseline_fp16 free-running exact match not 1.0: {emr}"
+                    )
+                if abs(cr - 1.0) > 1e-7:
+                    errors.append(
+                        f"baseline_fp16 free-running compression_ratio not 1.0: {cr}"
+                    )
+        except (OSError, json.JSONDecodeError):
+            pass
+
     # --- No candidate without real-generation data ---
     classification_path = (
         root
@@ -771,13 +833,6 @@ def check() -> list[str]:
         / "proof"
         / "experimental"
         / "config_classification.json"
-    )
-    real_gen_path = (
-        root
-        / "artifacts"
-        / "proof"
-        / "experimental"
-        / "real_generation_throughput.json"
     )
     if classification_path.exists() and real_gen_path.exists():
         try:

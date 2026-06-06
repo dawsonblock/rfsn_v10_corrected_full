@@ -1,0 +1,9 @@
+{
+  "release": "experimental",
+  "model": "Qwen/Qwen2.5-0.5B-Instruct",
+  "seed": 42,
+  "decode_steps_checked": [0, 1, 2, 4, 8, 16, 32],
+  "status": "awaiting_execution",
+  "note": "Run benchmarks/debug_decode_update_path.py to populate trace data",
+  "traces": []
+}

@@ -6,32 +6,32 @@
 
 ## Teacher-Forced Logit Equivalence
 
-### baseline_fp16 @ 128 tokens
+### baseline_fp16 @ 128 tokens (identity guard)
 
 - **Positions checked:** 128
-- **Logit cosine vs FP16:** 0.9557
-- **Top-5 overlap vs FP16:** 0.7641
-- **KL vs FP16:** 0.124026
-- **Max abs logit delta:** 11.3750
-- **Mean abs logit delta:** 0.8738
+- **Logit cosine vs FP16:** 1.0000
+- **Top-5 overlap vs FP16:** 1.0000
+- **KL vs FP16:** 0.000000
+- **Max abs logit delta:** 0.0000
+- **Mean abs logit delta:** 0.0000
 
-### baseline_fp16 @ 512 tokens
-
-- **Positions checked:** 128
-- **Logit cosine vs FP16:** 0.9635
-- **Top-5 overlap vs FP16:** 0.7297
-- **KL vs FP16:** 0.079448
-- **Max abs logit delta:** 15.0000
-- **Mean abs logit delta:** 0.6313
-
-### baseline_fp16 @ 1024 tokens
+### baseline_fp16 @ 512 tokens (identity guard)
 
 - **Positions checked:** 128
-- **Logit cosine vs FP16:** 0.9486
-- **Top-5 overlap vs FP16:** 0.7422
-- **KL vs FP16:** 0.034880
-- **Max abs logit delta:** 13.0156
-- **Mean abs logit delta:** 0.8177
+- **Logit cosine vs FP16:** 1.0000
+- **Top-5 overlap vs FP16:** 1.0000
+- **KL vs FP16:** 0.000000
+- **Max abs logit delta:** 0.0000
+- **Mean abs logit delta:** 0.0000
+
+### baseline_fp16 @ 1024 tokens (identity guard)
+
+- **Positions checked:** 128
+- **Logit cosine vs FP16:** 1.0000
+- **Top-5 overlap vs FP16:** 1.0000
+- **KL vs FP16:** 0.000000
+- **Max abs logit delta:** 0.0000
+- **Mean abs logit delta:** 0.0000
 
 ### k8_v5_gs64 @ 128 tokens
 
@@ -170,32 +170,32 @@
 
 ## Free-Running Generation Divergence
 
-### baseline_fp16 @ 128 tokens
+### baseline_fp16 @ 128 tokens (identity)
 
 - **Tokens/sec:** 54.89
 - **Total E2E ms:** 2332.08
 - **Compression ratio:** 1.00x
 - **First divergence position:** None
 - **Exact token match rate:** 100.00%
-- **Logit cosine vs FP16:** 0.9568
+- **Logit cosine vs FP16:** 1.0000
 
-### baseline_fp16 @ 512 tokens
+### baseline_fp16 @ 512 tokens (identity)
 
 - **Tokens/sec:** 46.53
 - **Total E2E ms:** 2750.77
 - **Compression ratio:** 1.00x
 - **First divergence position:** None
 - **Exact token match rate:** 100.00%
-- **Logit cosine vs FP16:** 0.9624
+- **Logit cosine vs FP16:** 1.0000
 
-### baseline_fp16 @ 1024 tokens
+### baseline_fp16 @ 1024 tokens (identity)
 
 - **Tokens/sec:** 13.10
 - **Total E2E ms:** 9773.14
 - **Compression ratio:** 1.00x
 - **First divergence position:** None
 - **Exact token match rate:** 100.00%
-- **Logit cosine vs FP16:** 0.9484
+- **Logit cosine vs FP16:** 1.0000
 
 ### k8_v5_gs64 @ 128 tokens
 

@@ -5,7 +5,8 @@
 **QJL Status:** failed, disabled  
 **Promoted to Default:** false  
 **Experimental Status:** research_only  
-**Promotion Blocked By:** real_generation_drift, short_prompt_drift, throughput_overhead, qjl_failed
+**Teacher-Forced Baseline Status:** valid (identity guard confirmed)  
+**Promotion Blocked By:** decode_quantization_weakness, throughput_overhead, qjl_failed
 
 ## Artifact Manifest
 
@@ -15,6 +16,8 @@
 | memory | `memory_accounting.json` | Per-config compressed memory with real-model basis |
 | throughput | `throughput.json` | Synthetic KV throughput benchmark |
 | real_generation_throughput | `real_generation_throughput.json` | Teacher-forced + free-running generation benchmark |
+| decode_update_trace | `decode_update_trace.json` | Step-by-step decode path quality trace |
+| decode_append_kv_diff | `decode_append_kv_diff.json` | Pre/post-append KV tensor comparison |
 | kv_roundtrip_by_context | `kv_roundtrip_by_context.json` | Direct KV quantizer roundtrip by prompt length |
 | prefill_decode_split | `prefill_decode_split.json` | Prefill-vs-decode isolation (A/B/C/D modes) |
 | short_prompt_drift_trace | `short_prompt_drift_trace.json` | Step-by-step short-prompt logit drift trace |
@@ -25,6 +28,8 @@
 ## Classification Rules
 
 - No experimental mode may be classified as a candidate without real-generation data.
+- Teacher-forced baseline must be exact identity (cosine=1.0, top5=1.0, KL=0.0).
+- If baseline identity fails, all configs are blocked as `needs_valid_teacher_forced_baseline`.
 - Teacher-forced real-generation failure is a hard reject (`rejected_generation_quality`).
 - Free-running divergence without teacher-forced failure is `generation_divergence_observed`.
 - No config using raw `uint32` fallback (>8-bit) may be called memory-optimized.

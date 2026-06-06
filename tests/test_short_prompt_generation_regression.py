@@ -11,13 +11,14 @@ import math
 import tempfile
 from typing import Any
 
-import numpy as np
 import pytest
-import torch
-from transformers import AutoModelForCausalLM, AutoTokenizer
-from transformers.cache_utils import DynamicCache
 
 mx = pytest.importorskip("mlx.core")
+np = pytest.importorskip("numpy")
+torch = pytest.importorskip("torch")
+transformers = pytest.importorskip("transformers")
+from transformers import AutoModelForCausalLM, AutoTokenizer  # noqa: E402
+from transformers.cache_utils import DynamicCache  # noqa: E402
 
 from rfsn_v10.kv_manager import RFSNTurboQuantKVManager  # noqa: E402
 

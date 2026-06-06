@@ -1,0 +1,8 @@
+{
+  "release": "experimental",
+  "model": "Qwen/Qwen2.5-0.5B-Instruct",
+  "seed": 42,
+  "status": "awaiting_execution",
+  "note": "Run benchmarks/debug_decode_update_path.py --mode kv-diff to populate",
+  "results": []
+}

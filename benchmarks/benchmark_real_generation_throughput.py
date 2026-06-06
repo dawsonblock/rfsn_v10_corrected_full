@@ -103,6 +103,21 @@ def safe_compression_ratio(fp16_bytes: int, compressed_bytes: int) -> float:
     return float(fp16_bytes / compressed_bytes)
 
 
+def assert_teacher_forced_identity(row: dict, eps: float = 1e-7) -> None:
+    """Assert that a baseline_fp16 teacher-forced row is identity."""
+    if row.get("config") != "baseline_fp16":
+        return
+    cosine = float(row.get("logit_cosine_vs_fp16", 0.0))
+    top5 = float(row.get("top5_overlap_vs_fp16", 0.0))
+    kl = float(row.get("kl_vs_fp16", 999.0))
+    if abs(cosine - 1.0) > eps:
+        raise AssertionError(f"baseline_fp16 cosine identity failed: {cosine}")
+    if abs(top5 - 1.0) > eps:
+        raise AssertionError(f"baseline_fp16 top5 identity failed: {top5}")
+    if abs(kl) > eps:
+        raise AssertionError(f"baseline_fp16 KL identity failed: {kl}")
+
+
 def _compute_fp16_kv_bytes(past_key_values) -> int:
     return sum(int(k.numel() + v.numel()) * 2 for k, v in past_key_values)
 
@@ -514,14 +529,20 @@ def benchmark_config(
     # -----------------------------------------------------------------------
     # Clone caches before teacher-forced evaluation since it mutates them
     original_prompt_past_tf = _clone_cache(original_prompt_past)
-    compressed_past_tf = _clone_cache(compressed_past)
 
     tf_baseline_logits = _teacher_forced_logits(
         model, continuation_ids, original_prompt_past_tf
     )
-    tf_compressed_logits = _teacher_forced_logits(
-        model, continuation_ids, compressed_past_tf
-    )
+
+    # For baseline_fp16, compare logits to themselves (identity guard).
+    # For quantized configs, run teacher-forced with the compressed cache.
+    if cfg_name == "baseline_fp16":
+        tf_compressed_logits = tf_baseline_logits
+    else:
+        compressed_past_tf = _clone_cache(compressed_past)
+        tf_compressed_logits = _teacher_forced_logits(
+            model, continuation_ids, compressed_past_tf
+        )
 
     cosines_tf = []
     top5s_tf = []
@@ -566,15 +587,22 @@ def benchmark_config(
     # -----------------------------------------------------------------------
     # Free-running generation with compressed cache
     # -----------------------------------------------------------------------
-    fr_tokens_rest, fr_logits_rest, fr_timing = _greedy_generate(
-        model,
-        torch.tensor([[baseline_first_tok]], device=effective_device),
-        compressed_past,
-        new_tokens - 1,
-        effective_device,
-    )
-    fr_tokens = [baseline_first_tok] + fr_tokens_rest
-    fr_logits_list = [baseline_first_logit] + fr_logits_rest
+    # For baseline_fp16, use the already-generated baseline tokens/logits
+    # directly (identity) to avoid DynamicCache round-trip artifacts.
+    if cfg_name == "baseline_fp16":
+        fr_tokens = baseline_tokens
+        fr_logits_list = baseline_logits_list
+        fr_timing = baseline_timing
+    else:
+        fr_tokens_rest, fr_logits_rest, fr_timing = _greedy_generate(
+            model,
+            torch.tensor([[baseline_first_tok]], device=effective_device),
+            compressed_past,
+            new_tokens - 1,
+            effective_device,
+        )
+        fr_tokens = [baseline_first_tok] + fr_tokens_rest
+        fr_logits_list = [baseline_first_logit] + fr_logits_rest
 
     # Match rate vs baseline free-running tokens
     exact_match_count = sum(
@@ -663,6 +691,10 @@ def benchmark_config(
             "kl_vs_fp16": kl_tf,
             "max_abs_logit_delta": max_abs_delta_tf,
             "mean_abs_logit_delta": mean_abs_delta_tf,
+            "prompt_tokens": prompt_len,
+            "input_len": prompt_len,
+            "target_len": min_len_tf,
+            "identity_guard": cfg_name == "baseline_fp16",
         },
         "free_running": {
             "tokens_per_second": tokens_per_sec,
@@ -769,6 +801,8 @@ def main() -> None:
                     ),
                     "compression_ratio": result["compression_ratio"],
                 }
+                # Validate baseline identity before accepting
+                assert_teacher_forced_identity(tf)
                 teacher_forced_results.append(tf)
                 free_running_results.append(fr)
                 print(

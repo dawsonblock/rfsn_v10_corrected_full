@@ -38,6 +38,22 @@ def _load_json(path: Path) -> dict[str, Any] | None:
         return None
 
 
+def teacher_forced_baseline_is_valid(real_gen: dict[str, Any]) -> bool:
+    """Check if baseline_fp16 teacher-forced rows are exact identity."""
+    rows = real_gen.get("teacher_forced_logits", [])
+    baseline = [r for r in rows if r.get("config") == "baseline_fp16" and "error" not in r]
+    if not baseline:
+        return False
+    for row in baseline:
+        if abs(float(row.get("logit_cosine_vs_fp16", 0.0)) - 1.0) > 1e-7:
+            return False
+        if abs(float(row.get("top5_overlap_vs_fp16", 0.0)) - 1.0) > 1e-7:
+            return False
+        if abs(float(row.get("kl_vs_fp16", 999.0))) > 1e-7:
+            return False
+    return True
+
+
 def _check_real_generation_teacher_forced(
     real_gen: dict[str, Any], cfg_name: str
 ) -> tuple[bool, bool]:
@@ -96,6 +112,9 @@ def classify_configs(exp_dir: Path) -> dict[str, Any]:
     has_real_gen_tp = bool(
         real_gen_tp.get("teacher_forced_logits") or real_gen_tp.get("results")
     )
+
+    # Global gate: teacher-forced baseline must be identity
+    baseline_valid = teacher_forced_baseline_is_valid(real_gen_tp)
 
     # Load 1.5B validation if available
     qwen_real = _load_json(qwen_dir / "real_model_validation.json") or {}
@@ -190,6 +209,12 @@ def classify_configs(exp_dir: Path) -> dict[str, Any]:
         elif not has_real_gen_tp:
             classifications[name] = "experimental_only"
             notes.append(f"{name}: experimental_only — awaiting real generation data")
+        elif has_real_gen_tp and not baseline_valid:
+            classifications[name] = "needs_valid_teacher_forced_baseline"
+            notes.append(
+                f"{name}: needs_valid_teacher_forced_baseline — "
+                "baseline_fp16 identity failed, cannot trust comparisons"
+            )
         elif tf_has and not tf_pass:
             classifications[name] = "rejected_generation_quality"
             notes.append(
@@ -271,9 +296,14 @@ def classify_configs(exp_dir: Path) -> dict[str, Any]:
         "release": "experimental",
         "stable_default": "k8_v5_gs64",
         "promoted_to_default": False,
+        "teacher_forced_baseline_valid": baseline_valid,
         "promotion_blocked_by": [
-            "real_generation_drift",
-            "short_prompt_drift",
+            "teacher_forced_identity_requires_validation",
+            "decode_quantization_weakness",
+            "throughput_overhead",
+            "qjl_failed",
+        ] if not baseline_valid else [
+            "decode_quantization_weakness",
             "throughput_overhead",
             "qjl_failed",
         ],
@@ -295,6 +325,7 @@ def classify_configs(exp_dir: Path) -> dict[str, Any]:
             "rejected_memory: missing compressed bytes or raw uint32 fallback",
             "rejected_speed: missing throughput or regression",
             "needs_throughput_data: missing throughput benchmark",
+            "needs_valid_teacher_forced_baseline: baseline_fp16 identity failed",
             "rejected_generation_quality: teacher-forced real-generation failed",
             "generation_divergence_observed: teacher-forced passes but free-running diverges",
             "experimental_pending_1_5b: awaiting 1.5B validation",

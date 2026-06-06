@@ -3,18 +3,23 @@
   "stable_default": "k8_v5_gs64",
   "qjl_status": "failed_disabled",
   "promoted_to_default": false,
-  "promotion_blocked_by": [
-    "real_generation_drift",
-    "short_prompt_drift",
+  "real_generation_teacher_forced_status": "valid",
+  "promotion_blockers": [
+    "decode_quantization_weakness",
     "throughput_overhead",
     "qjl_failed"
   ],
-  "experimental_status": "research_only",
+  "experimental_modes": "research_only",
   "artifacts": {
     "comparison": "comparison_summary.json",
     "memory": "memory_accounting.json",
     "throughput": "throughput.json",
     "real_generation_throughput": "real_generation_throughput.json",
+    "decode_update_trace": "decode_update_trace.json",
+    "decode_append_kv_diff": "decode_append_kv_diff.json",
+    "kv_roundtrip_by_context": "kv_roundtrip_by_context.json",
+    "prefill_decode_split": "prefill_decode_split.json",
+    "short_prompt_drift_trace": "short_prompt_drift_trace.json",
     "qjl": "qjl_attention_score.json",
     "layer_policy": "layer_policy.json",
     "qwen_1_5b": "qwen_1_5b/"
