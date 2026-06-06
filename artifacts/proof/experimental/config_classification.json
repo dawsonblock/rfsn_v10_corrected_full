@@ -22,7 +22,7 @@
   "evidence": {
     "has_0_5b_validation": true,
     "has_throughput": true,
-    "has_real_generation_throughput": false,
+    "has_real_generation_throughput": true,
     "has_1_5b_validation": true,
     "has_layer_policy": true,
     "has_sensitivity": true

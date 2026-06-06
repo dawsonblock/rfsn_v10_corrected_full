@@ -7,6 +7,7 @@
     "comparison": "comparison_summary.json",
     "memory": "memory_accounting.json",
     "throughput": "throughput.json",
+    "real_generation_throughput": "real_generation_throughput.json",
     "qjl": "qjl_attention_score.json",
     "layer_policy": "layer_policy.json",
     "qwen_1_5b": "qwen_1_5b/"

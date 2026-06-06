@@ -50,13 +50,13 @@ from typing import Any
 import mlx.core as mx
 import numpy as np
 import torch
-import torch.nn.functional as F
+import torch.nn.functional as functional
 from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers.cache_utils import DynamicCache
 
 from rfsn_v10.kv_manager import RFSNTurboQuantKVManager
 from rfsn_v10.quantization.kv_quant_manager import QuantizedKVManager
 from rfsn_v10.quantization.turbo_polar_kv_manager import TurboPolarKVManager
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -79,12 +79,12 @@ def _cosine(a: torch.Tensor, b: torch.Tensor) -> float:
         return float("nan")
     if torch.isnan(b_f).any() or torch.isinf(b_f).any():
         return float("nan")
-    return float(F.cosine_similarity(a_f, b_f, dim=0).item())
+    return float(functional.cosine_similarity(a_f, b_f, dim=0).item())
 
 
 def _kl_div(p_logits: torch.Tensor, q_logits: torch.Tensor) -> float:
-    p = F.softmax(p_logits.float(), dim=-1)
-    q = F.softmax(q_logits.float(), dim=-1)
+    p = functional.softmax(p_logits.float(), dim=-1)
+    q = functional.softmax(q_logits.float(), dim=-1)
     eps = 1e-10
     kl = torch.sum(p * torch.log((p + eps) / (q + eps)))
     return float(kl.item())
@@ -351,53 +351,71 @@ def benchmark_config(
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
+    prompt_ids = tokenizer.encode(prompt, return_tensors="pt", truncation=True)
+    prompt_ids = prompt_ids.to(device)
+    prompt_len = prompt_ids.shape[1]
+
+    # Work around MPS DynamicCache reconstruction bug at >=1024 tokens
+    effective_device = device
+    effective_device_map = "auto"
+    if device.type == "mps" and prompt_len >= 1024:
+        effective_device = torch.device("cpu")
+        effective_device_map = "cpu"
+        prompt_ids = prompt_ids.to(effective_device)
+
     model = AutoModelForCausalLM.from_pretrained(
         model_name,
         dtype=torch.float16,
-        device_map="auto",
+        device_map=effective_device_map,
         trust_remote_code=True,
     )
     model.eval()
     torch.manual_seed(seed)
 
-    prompt_ids = tokenizer.encode(prompt, return_tensors="pt", truncation=True)
-    prompt_ids = prompt_ids.to(device)
-    prompt_len = prompt_ids.shape[1]
-
     # Baseline FP16 run first to collect reference logits
-    baseline_past = None
-    baseline_logits_list: list[torch.Tensor] = []
     with torch.no_grad():
-        out = model(input_ids=prompt_ids, past_key_values=baseline_past, use_cache=True)
-        baseline_past = out.past_key_values
-        baseline_logits_list.append(out.logits[:, -1, :])
-        next_tok = int(torch.argmax(out.logits[:, -1, :], dim=-1).item())
-        for _ in range(new_tokens - 1):
-            out = model(
-                input_ids=torch.tensor([[next_tok]], device=device),
-                past_key_values=baseline_past,
-                use_cache=True,
-            )
-            baseline_past = out.past_key_values
-            baseline_logits_list.append(out.logits[:, -1, :])
-            next_tok = int(torch.argmax(out.logits[:, -1, :], dim=-1).item())
+        out = model(input_ids=prompt_ids, past_key_values=None, use_cache=True)
+    baseline_past = out.past_key_values
+    _, _, baseline_logits_list, _ = _timed_decode(
+        model,
+        tokenizer,
+        prompt_ids[:, -1:],
+        baseline_past,
+        new_tokens,
+        effective_device,
+    )
+
+    # Re-run prefill to get a fresh prompt-only cache for compression
+    with torch.no_grad():
+        out = model(input_ids=prompt_ids, past_key_values=None, use_cache=True)
+    prompt_past = out.past_key_values
 
     # Compress past for config run
     t_compress_start = time.perf_counter()
+    if hasattr(prompt_past, 'to_legacy_cache'):
+        prompt_past = list(prompt_past.to_legacy_cache())
+    else:
+        prompt_past = list(prompt_past)
     if cfg["family"] == "stable":
         compressed_past, compressed_bytes, quant_ms = _compress_stable(
-            list(baseline_past), cfg, device
+            prompt_past, cfg, effective_device
         )
     else:
         compressed_past, compressed_bytes, quant_ms = _compress_experimental(
-            list(baseline_past), cfg, device
+            prompt_past, cfg, effective_device
         )
+    compressed_past = DynamicCache.from_legacy_cache(tuple(compressed_past))
     t_compress_end = time.perf_counter()
     total_compress_ms = (t_compress_end - t_compress_start) * 1000.0
 
     # Run decode with compressed past
-    generated, _, compressed_logits_list, timing = _timed_decode(
-        model, tokenizer, prompt_ids[:, -1:], compressed_past, new_tokens, device
+    _, _, compressed_logits_list, timing = _timed_decode(
+        model,
+        tokenizer,
+        prompt_ids[:, -1:],
+        compressed_past,
+        new_tokens,
+        effective_device,
     )
 
     # Quality drift vs baseline

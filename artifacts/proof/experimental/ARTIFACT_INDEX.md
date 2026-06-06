@@ -12,6 +12,7 @@
 | comparison | `comparison_summary.json` | 0.5B model quality comparison across configs |
 | memory | `memory_accounting.json` | Per-config compressed memory with real-model basis |
 | throughput | `throughput.json` | Synthetic KV throughput benchmark |
+| real_generation_throughput | `real_generation_throughput.json` | End-to-end greedy decode throughput with compressed KV |
 | qjl | `qjl_attention_score.json` | QJL benchmark result (failed) |
 | layer_policy | `layer_policy.json` | Conservative per-layer policy |
 | qwen_1_5b | `qwen_1_5b/` | 1.5B model validation directory |
