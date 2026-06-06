@@ -8,3 +8,4 @@ build/
 .rfsn_cache/
 .kilo/
 .tmp/
+*.zip
