@@ -4,13 +4,18 @@
 Runs actual greedy decode on a causal LM with compressed KV caches,
 measuring full generation loop latency and quality drift vs FP16.
 
+This benchmark splits evaluation into two modes:
+  teacher_forced — identical token sequence fed to FP16 and compressed paths;
+                   logits are compared at the same positions.
+  free_running   — each config generates normally; divergence is measured
+                   as generation behavior, not direct logit equivalence.
+
 Configs tested:
   baseline_fp16, k8_v5_gs64, k8_v5_gs32, turbo_polar,
   adaptive, experimental_hybrid
 
 Models:
   Qwen/Qwen2.5-0.5B-Instruct (primary)
-  Qwen/Qwen2.5-1.5B-Instruct (repeat)
 
 Prompts:
   short:  128 tokens
@@ -21,15 +26,6 @@ Generation:
   new_tokens: 128
   temperature: 0.0 (greedy)
   seed: fixed (42)
-
-Metrics:
-  model_name, config, prompt_tokens, new_tokens,
-  prefill_ms, kv_quantize_ms, kv_pack_ms, kv_unpack_ms,
-  kv_dequantize_ms, decode_loop_ms, total_end_to_end_ms,
-  tokens_per_second, peak_memory_bytes, compressed_kv_bytes,
-  compression_ratio,
-  logit_cosine_vs_fp16, top5_overlap_vs_fp16, kl_vs_fp16,
-  fallback_count
 
 Outputs:
   artifacts/proof/experimental/real_generation_throughput.json
@@ -61,6 +57,7 @@ from rfsn_v10.quantization.turbo_polar_kv_manager import TurboPolarKVManager
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _peak_memory_bytes() -> int:
     try:
@@ -98,9 +95,22 @@ def _topk_overlap(a: torch.Tensor, b: torch.Tensor, k: int = 5) -> float:
     return float(len(ai & bi) / len(ai))
 
 
+def safe_compression_ratio(fp16_bytes: int, compressed_bytes: int) -> float:
+    if fp16_bytes <= 0:
+        return 0.0
+    if compressed_bytes <= 0:
+        return 1.0
+    return float(fp16_bytes / compressed_bytes)
+
+
+def _compute_fp16_kv_bytes(past_key_values) -> int:
+    return sum(int(k.numel() + v.numel()) * 2 for k, v in past_key_values)
+
+
 # ---------------------------------------------------------------------------
 # Config registry
 # ---------------------------------------------------------------------------
+
 
 def _get_config(name: str) -> dict[str, Any]:
     if name == "baseline_fp16":
@@ -166,15 +176,18 @@ def _get_config(name: str) -> dict[str, Any]:
 # Compression helpers
 # ---------------------------------------------------------------------------
 
+
 def _compress_stable(
     past_key_values,
     cfg: dict[str, Any],
     device: torch.device,
 ):
     if cfg["name"] == "baseline_fp16":
-        return past_key_values, 0, 0.0
+        fp16_bytes = _compute_fp16_kv_bytes(past_key_values)
+        return past_key_values, fp16_bytes, 0.0
 
     t_quant_start = time.perf_counter()
+    compressed_past = []
     with tempfile.TemporaryDirectory(prefix="rfsn_real_") as tmpdir:
         mgr = RFSNTurboQuantKVManager(
             k_bits=cfg["k_bits"],
@@ -209,7 +222,7 @@ def _compress_stable(
             rv = torch.from_numpy(np.array(rv_mx))[:, :, :, :dim]
             rk = rk.to(device=device, dtype=k_t.dtype)
             rv = rv.to(device=device, dtype=v_t.dtype)
-            past_key_values[layer_idx] = (rk, rv)
+            compressed_past.append((rk, rv))
             cache = mgr.active_caches[key]
             total_compressed += int(
                 (cache.k_packed.size + cache.v_packed.size) * 4
@@ -217,7 +230,7 @@ def _compress_stable(
             )
     t_quant_end = time.perf_counter()
     quant_ms = (t_quant_end - t_quant_start) * 1000.0
-    return past_key_values, total_compressed, quant_ms
+    return compressed_past, total_compressed, quant_ms
 
 
 def _compress_experimental(
@@ -226,7 +239,8 @@ def _compress_experimental(
     device: torch.device,
 ):
     if cfg["name"] == "baseline_fp16":
-        return past_key_values, 0, 0.0
+        fp16_bytes = _compute_fp16_kv_bytes(past_key_values)
+        return past_key_values, fp16_bytes, 0.0
 
     t_quant_start = time.perf_counter()
     mode = cfg.get("mode", "hybrid_polar_cartesian")
@@ -252,13 +266,13 @@ def _compress_experimental(
             cartesian_bits=cfg.get("cartesian_bits", 6),
             group_size=cfg.get("group_size", 64),
         )
-
+    compressed_past = []
     total_compressed = 0
     for layer_idx, (k_t, v_t) in enumerate(past_key_values):
         k_np = k_t.detach().to("cpu", dtype=torch.float32).numpy()
         v_np = v_t.detach().to("cpu", dtype=torch.float32).numpy()
         bsz, heads, seq, dim = k_np.shape
-        dim_padded = int(math.ceil(dim / 4.0) * 4)
+        dim_padded = int(math.ceil(dim / 64.0) * 64)
         if dim_padded != dim:
             pad = dim_padded - dim
             k_np = np.pad(k_np, ((0, 0), (0, 0), (0, 0), (0, pad)))
@@ -271,72 +285,107 @@ def _compress_experimental(
         rv = torch.from_numpy(np.array(rv_mx))[:, :, :, :dim]
         rk = rk.to(device=device, dtype=k_t.dtype)
         rv = rv.to(device=device, dtype=v_t.dtype)
-        past_key_values[layer_idx] = (rk, rv)
-        total_compressed += mgr.estimate_bytes(packet)
+        compressed_past.append((rk, rv))
+        total_compressed += int(mgr.estimate_bytes(packet))
     t_quant_end = time.perf_counter()
     quant_ms = (t_quant_end - t_quant_start) * 1000.0
-    return past_key_values, total_compressed, quant_ms
+    return compressed_past, total_compressed, quant_ms
 
 
 # ---------------------------------------------------------------------------
-# Decode loop with timing
+# Decode helpers
 # ---------------------------------------------------------------------------
 
-def _timed_decode(
+
+def _greedy_generate(
     model,
-    tokenizer,
     prompt_ids: torch.Tensor,
     past_key_values,
     new_tokens: int,
     device: torch.device,
-) -> tuple[list[int], list[torch.Tensor], list[torch.Tensor], dict[str, float]]:
-    """Greedy decode with per-step timing.
+) -> tuple[list[int], list[torch.Tensor], dict[str, float]]:
+    """Greedy decode returning tokens and per-step logits.
 
-    Returns:
-        (generated_token_ids, baseline_logits_list, compressed_logits_list, timing)
+    If ``past_key_values`` is None, runs a prefill step with ``prompt_ids``
+    and generates ``new_tokens`` from the resulting cache.
+    If ``past_key_values`` is provided, ``prompt_ids`` is the first decode
+    input token (not a prompt token); generates ``new_tokens`` via decode.
     """
     past = past_key_values
     generated: list[int] = []
-    baseline_logits: list[torch.Tensor] = []
-    compressed_logits: list[torch.Tensor] = []
+    logits_list: list[torch.Tensor] = []
 
-    # Prefill
-    t_prefill = time.perf_counter()
-    with torch.no_grad():
-        out = model(input_ids=prompt_ids, past_key_values=past, use_cache=True)
-    t_prefill_end = time.perf_counter()
-    past = out.past_key_values
-    logits = out.logits[:, -1, :]
-    next_tok = int(torch.argmax(logits, dim=-1).item())
-    generated.append(next_tok)
-    compressed_logits.append(logits)
+    if past is None:
+        # Full prefill + first token generation
+        t_prefill = time.perf_counter()
+        with torch.no_grad():
+            out = model(input_ids=prompt_ids, past_key_values=None, use_cache=True)
+        t_prefill_end = time.perf_counter()
+        past = out.past_key_values
+        logits = out.logits[:, -1, :]
+        next_tok = int(torch.argmax(logits, dim=-1).item())
+        generated.append(next_tok)
+        logits_list.append(logits)
+        t_decode_start = time.perf_counter()
+        for _ in range(new_tokens - 1):
+            next_ids = torch.tensor([[next_tok]], device=device)
+            with torch.no_grad():
+                out = model(input_ids=next_ids, past_key_values=past, use_cache=True)
+            past = out.past_key_values
+            logits = out.logits[:, -1, :]
+            next_tok = int(torch.argmax(logits, dim=-1).item())
+            generated.append(next_tok)
+            logits_list.append(logits)
+        t_decode_end = time.perf_counter()
+        timing = {
+            "prefill_ms": (t_prefill_end - t_prefill) * 1000.0,
+            "decode_loop_ms": (t_decode_end - t_decode_start) * 1000.0,
+        }
+        return generated, logits_list, timing
 
-    # Decode
+    # past already contains prefill; prompt_ids is the first decode input
     t_decode_start = time.perf_counter()
-    for _ in range(new_tokens - 1):
-        next_ids = torch.tensor([[next_tok]], device=device)
+    next_ids = prompt_ids
+    for _ in range(new_tokens):
         with torch.no_grad():
             out = model(input_ids=next_ids, past_key_values=past, use_cache=True)
         past = out.past_key_values
         logits = out.logits[:, -1, :]
         next_tok = int(torch.argmax(logits, dim=-1).item())
         generated.append(next_tok)
-        compressed_logits.append(logits)
+        logits_list.append(logits)
+        next_ids = torch.tensor([[next_tok]], device=device)
     t_decode_end = time.perf_counter()
 
-    # Baseline logits for drift (re-run without KV compression is too expensive;
-    # we compare compressed logits against themselves at prefill as proxy)
-    # For real drift measurement we re-run the prefill step with FP16 past.
     timing = {
-        "prefill_ms": (t_prefill_end - t_prefill) * 1000.0,
+        "prefill_ms": 0.0,
         "decode_loop_ms": (t_decode_end - t_decode_start) * 1000.0,
     }
-    return generated, baseline_logits, compressed_logits, timing
+    return generated, logits_list, timing
+
+
+def _teacher_forced_logits(
+    model,
+    continuation_ids: torch.Tensor,
+    past_key_values,
+) -> list[torch.Tensor]:
+    """Feed an identical continuation to a model and return per-step logits."""
+    logits_list: list[torch.Tensor] = []
+    past = past_key_values
+    seq = continuation_ids.shape[1]
+    for i in range(seq):
+        token = continuation_ids[:, i:i + 1]
+        with torch.no_grad():
+            out = model(input_ids=token, past_key_values=past, use_cache=True)
+        past = out.past_key_values
+        logits_list.append(out.logits[:, -1, :])
+    return logits_list
 
 
 # ---------------------------------------------------------------------------
 # Benchmark runner
 # ---------------------------------------------------------------------------
+
 
 def benchmark_config(
     model_name: str,
@@ -372,18 +421,36 @@ def benchmark_config(
     model.eval()
     torch.manual_seed(seed)
 
-    # Baseline FP16 run first to collect reference logits
+    # -----------------------------------------------------------------------
+    # Baseline FP16 run — collect reference prefill cache and free-running
+    # tokens for teacher-forced continuation.
+    # -----------------------------------------------------------------------
     with torch.no_grad():
         out = model(input_ids=prompt_ids, past_key_values=None, use_cache=True)
     baseline_past = out.past_key_values
-    _, _, baseline_logits_list, _ = _timed_decode(
-        model,
-        tokenizer,
-        prompt_ids[:, -1:],
-        baseline_past,
-        new_tokens,
-        effective_device,
+    baseline_fp16_bytes = _compute_fp16_kv_bytes(baseline_past)
+    baseline_first_logit = out.logits[:, -1, :]
+    baseline_first_tok = int(
+        torch.argmax(baseline_first_logit, dim=-1).item()
     )
+
+    # Free-running baseline generation
+    baseline_tokens_rest, baseline_logits_rest, baseline_timing = (
+        _greedy_generate(
+            model,
+            torch.tensor([[baseline_first_tok]], device=effective_device),
+            baseline_past,
+            new_tokens - 1,
+            effective_device,
+        )
+    )
+    baseline_tokens = [baseline_first_tok] + baseline_tokens_rest
+    baseline_logits_list = [baseline_first_logit] + baseline_logits_rest
+
+    # -----------------------------------------------------------------------
+    # Teacher-forced: use baseline_tokens as the forced continuation
+    # -----------------------------------------------------------------------
+    continuation_ids = torch.tensor([baseline_tokens], device=effective_device)
 
     # Re-run prefill to get a fresh prompt-only cache for compression
     with torch.no_grad():
@@ -392,7 +459,7 @@ def benchmark_config(
 
     # Compress past for config run
     t_compress_start = time.perf_counter()
-    if hasattr(prompt_past, 'to_legacy_cache'):
+    if hasattr(prompt_past, "to_legacy_cache"):
         prompt_past = list(prompt_past.to_legacy_cache())
     else:
         prompt_past = list(prompt_past)
@@ -408,59 +475,167 @@ def benchmark_config(
     t_compress_end = time.perf_counter()
     total_compress_ms = (t_compress_end - t_compress_start) * 1000.0
 
-    # Run decode with compressed past
-    _, _, compressed_logits_list, timing = _timed_decode(
+    # Baseline accounting fix
+    if cfg_name == "baseline_fp16":
+        compressed_bytes = baseline_fp16_bytes
+        compression_ratio = 1.0
+    else:
+        compression_ratio = safe_compression_ratio(baseline_fp16_bytes, compressed_bytes)
+
+    # -----------------------------------------------------------------------
+    # Teacher-forced logits with compressed cache
+    # -----------------------------------------------------------------------
+    tf_baseline_logits = _teacher_forced_logits(
+        model, continuation_ids, baseline_past
+    )
+    tf_compressed_logits = _teacher_forced_logits(
+        model, continuation_ids, compressed_past
+    )
+
+    cosines_tf = []
+    top5s_tf = []
+    kls_tf = []
+    max_abs_deltas_tf = []
+    mean_abs_deltas_tf = []
+    min_len_tf = min(len(tf_baseline_logits), len(tf_compressed_logits))
+    for i in range(min_len_tf):
+        b = tf_baseline_logits[i]
+        c = tf_compressed_logits[i]
+        cosines_tf.append(_cosine(b, c))
+        top5s_tf.append(_topk_overlap(b, c, k=5))
+        kls_tf.append(_kl_div(b, c))
+        delta = (b - c).abs()
+        max_abs_deltas_tf.append(float(delta.max().item()))
+        mean_abs_deltas_tf.append(float(delta.mean().item()))
+
+    logit_cosine_tf = (
+        float(sum(c for c in cosines_tf if math.isfinite(c)) / len(cosines_tf))
+        if cosines_tf
+        else float("nan")
+    )
+    top5_overlap_tf = (
+        float(sum(t for t in top5s_tf if math.isfinite(t)) / len(top5s_tf))
+        if top5s_tf
+        else float("nan")
+    )
+    kl_tf = (
+        float(sum(k for k in kls_tf if math.isfinite(k)) / len(kls_tf))
+        if kls_tf
+        else float("nan")
+    )
+    max_abs_delta_tf = (
+        float(max(max_abs_deltas_tf)) if max_abs_deltas_tf else float("nan")
+    )
+    mean_abs_delta_tf = (
+        float(sum(mean_abs_deltas_tf) / len(mean_abs_deltas_tf))
+        if mean_abs_deltas_tf
+        else float("nan")
+    )
+
+    # -----------------------------------------------------------------------
+    # Free-running generation with compressed cache
+    # -----------------------------------------------------------------------
+    fr_tokens_rest, fr_logits_rest, fr_timing = _greedy_generate(
         model,
-        tokenizer,
-        prompt_ids[:, -1:],
+        torch.tensor([[baseline_first_tok]], device=effective_device),
         compressed_past,
-        new_tokens,
+        new_tokens - 1,
         effective_device,
     )
+    fr_tokens = [baseline_first_tok] + fr_tokens_rest
+    fr_logits_list = [baseline_first_logit] + fr_logits_rest
 
-    # Quality drift vs baseline
-    cosines = []
-    top5s = []
-    kls = []
-    min_len = min(len(baseline_logits_list), len(compressed_logits_list))
-    for i in range(min_len):
-        b = baseline_logits_list[i]
-        c = compressed_logits_list[i]
-        cosines.append(_cosine(b, c))
-        top5s.append(_topk_overlap(b, c, k=5))
-        kls.append(_kl_div(b, c))
-
-    logit_cosine = float(sum(c for c in cosines if math.isfinite(c)) / len(cosines)) if cosines else float("nan")
-    top5_overlap = float(sum(t for t in top5s if math.isfinite(t)) / len(top5s)) if top5s else float("nan")
-    kl = float(sum(k for k in kls if math.isfinite(k)) / len(kls)) if kls else float("nan")
-
-    fp16_bytes = sum(
-        int(k.numel() + v.numel()) * 2 for k, v in baseline_past
+    # Match rate vs baseline free-running tokens
+    exact_match_count = sum(
+        1 for a, b in zip(baseline_tokens, fr_tokens) if a == b
     )
-    compression_ratio = fp16_bytes / max(compressed_bytes, 1)
+    exact_match_rate = (
+        exact_match_count / len(baseline_tokens) if baseline_tokens else 0.0
+    )
 
-    total_ms = timing["prefill_ms"] + timing["decode_loop_ms"] + total_compress_ms
+    first_divergence = None
+    for i, (a, b) in enumerate(zip(baseline_tokens, fr_tokens)):
+        if a != b:
+            first_divergence = i
+            break
+
+    # Compute free-running logit drift against baseline (where positions align)
+    cosines_fr = []
+    top5s_fr = []
+    kls_fr = []
+    min_len_fr = min(len(baseline_logits_list), len(fr_logits_list))
+    for i in range(min_len_fr):
+        b = baseline_logits_list[i]
+        c = fr_logits_list[i]
+        cosines_fr.append(_cosine(b, c))
+        top5s_fr.append(_topk_overlap(b, c, k=5))
+        kls_fr.append(_kl_div(b, c))
+
+    logit_cosine_fr = (
+        float(sum(c for c in cosines_fr if math.isfinite(c)) / len(cosines_fr))
+        if cosines_fr
+        else float("nan")
+    )
+    top5_overlap_fr = (
+        float(sum(t for t in top5s_fr if math.isfinite(t)) / len(top5s_fr))
+        if top5s_fr
+        else float("nan")
+    )
+    kl_fr = (
+        float(sum(k for k in kls_fr if math.isfinite(k)) / len(kls_fr))
+        if kls_fr
+        else float("nan")
+    )
+
+    total_ms = (
+        fr_timing["prefill_ms"]
+        + fr_timing["decode_loop_ms"]
+        + total_compress_ms
+    )
     tokens_per_sec = (new_tokens / total_ms) * 1000.0 if total_ms > 0 else 0.0
+
+    # Validation assert for baseline
+    if cfg_name == "baseline_fp16":
+        assert compressed_bytes == baseline_fp16_bytes, (
+            f"baseline_fp16 compressed_bytes {compressed_bytes} != "
+            f"fp16_bytes {baseline_fp16_bytes}"
+        )
+        assert abs(compression_ratio - 1.0) < 1e-9, (
+            f"baseline_fp16 compression_ratio {compression_ratio} != 1.0"
+        )
 
     return {
         "model_name": model_name,
         "config": cfg_name,
         "prompt_tokens": prompt_len,
         "new_tokens": new_tokens,
-        "prefill_ms": timing["prefill_ms"],
+        "prefill_ms": fr_timing["prefill_ms"],
         "kv_quantize_ms": quant_ms * 0.4,
         "kv_pack_ms": quant_ms * 0.6,
         "kv_unpack_ms": total_compress_ms * 0.35,
         "kv_dequantize_ms": total_compress_ms * 0.45,
-        "decode_loop_ms": timing["decode_loop_ms"],
+        "decode_loop_ms": fr_timing["decode_loop_ms"],
         "total_end_to_end_ms": total_ms,
         "tokens_per_second": tokens_per_sec,
         "peak_memory_bytes": _peak_memory_bytes(),
         "compressed_kv_bytes": compressed_bytes,
         "compression_ratio": compression_ratio,
-        "logit_cosine_vs_fp16": logit_cosine,
-        "top5_overlap_vs_fp16": top5_overlap,
-        "kl_vs_fp16": kl,
+        "teacher_forced": {
+            "positions_checked": min_len_tf,
+            "logit_cosine_vs_fp16": logit_cosine_tf,
+            "top5_overlap_vs_fp16": top5_overlap_tf,
+            "kl_vs_fp16": kl_tf,
+            "max_abs_logit_delta": max_abs_delta_tf,
+            "mean_abs_logit_delta": mean_abs_delta_tf,
+        },
+        "free_running": {
+            "tokens_per_second": tokens_per_sec,
+            "first_divergence_position": first_divergence,
+            "exact_token_match_rate": exact_match_rate,
+            "logit_cosine_vs_fp16": logit_cosine_fr,
+            "top5_overlap_vs_fp16": top5_overlap_fr,
+            "kl_vs_fp16": kl_fr,
+        },
         "fallback_count": 0,
     }
 
@@ -469,14 +644,27 @@ def benchmark_config(
 # CLI
 # ---------------------------------------------------------------------------
 
+
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Real generation throughput benchmark")
+    parser = argparse.ArgumentParser(
+        description="Real generation throughput benchmark"
+    )
     parser.add_argument("--model", default="Qwen/Qwen2.5-0.5B-Instruct")
-    parser.add_argument("--configs", nargs="+", default=[
-        "baseline_fp16", "k8_v5_gs64", "k8_v5_gs32",
-        "turbo_polar", "adaptive", "experimental_hybrid",
-    ])
-    parser.add_argument("--prompt-lengths", nargs="+", type=int, default=[128, 512, 1024])
+    parser.add_argument(
+        "--configs",
+        nargs="+",
+        default=[
+            "baseline_fp16",
+            "k8_v5_gs64",
+            "k8_v5_gs32",
+            "turbo_polar",
+            "adaptive",
+            "experimental_hybrid",
+        ],
+    )
+    parser.add_argument(
+        "--prompt-lengths", nargs="+", type=int, default=[128, 512, 1024]
+    )
     parser.add_argument("--new-tokens", type=int, default=128)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument(
@@ -506,7 +694,8 @@ def main() -> None:
         else:
             prompts[length] = tokenizer.decode(dummy_ids[:length])
 
-    results: list[dict[str, Any]] = []
+    teacher_forced_results: list[dict[str, Any]] = []
+    free_running_results: list[dict[str, Any]] = []
     for cfg_name in args.configs:
         for length, prompt in prompts.items():
             print(f"Benchmarking {cfg_name} @ {length} tokens ...")
@@ -514,14 +703,40 @@ def main() -> None:
                 result = benchmark_config(
                     args.model, cfg_name, prompt, args.new_tokens, device, seed=args.seed
                 )
-                results.append(result)
+                tf = {
+                    "model_name": result["model_name"],
+                    "config": result["config"],
+                    "prompt_tokens": result["prompt_tokens"],
+                    "new_tokens": result["new_tokens"],
+                    **result["teacher_forced"],
+                }
+                fr = {
+                    "model_name": result["model_name"],
+                    "config": result["config"],
+                    "prompt_tokens": result["prompt_tokens"],
+                    "new_tokens": result["new_tokens"],
+                    **result["free_running"],
+                    "total_end_to_end_ms": result["total_end_to_end_ms"],
+                    "peak_memory_bytes": result["peak_memory_bytes"],
+                    "compressed_kv_bytes": result["compressed_kv_bytes"],
+                    "compression_ratio": result["compression_ratio"],
+                }
+                teacher_forced_results.append(tf)
+                free_running_results.append(fr)
                 print(
-                    f"  {result['tokens_per_second']:.1f} tok/s, "
-                    f"cosine={result['logit_cosine_vs_fp16']:.4f}"
+                    f"  TF cosine={result['teacher_forced']['logit_cosine_vs_fp16']:.4f}, "
+                    f"FR match={result['free_running']['exact_token_match_rate']:.2%}"
                 )
             except Exception as exc:
                 print(f"  FAILED: {exc}")
-                results.append({
+                teacher_forced_results.append({
+                    "model_name": args.model,
+                    "config": cfg_name,
+                    "prompt_tokens": length,
+                    "new_tokens": args.new_tokens,
+                    "error": str(exc),
+                })
+                free_running_results.append({
                     "model_name": args.model,
                     "config": cfg_name,
                     "prompt_tokens": length,
@@ -532,12 +747,17 @@ def main() -> None:
     out_json = Path(args.out_json)
     out_json.parent.mkdir(parents=True, exist_ok=True)
     out_json.write_text(
-        json.dumps({
-            "release": "experimental",
-            "model": args.model,
-            "seed": args.seed,
-            "results": results,
-        }, indent=2) + "\n",
+        json.dumps(
+            {
+                "release": "experimental",
+                "model": args.model,
+                "seed": args.seed,
+                "teacher_forced_logits": teacher_forced_results,
+                "free_running_generation": free_running_results,
+            },
+            indent=2,
+        )
+        + "\n",
         encoding="utf-8",
     )
     print(f"Wrote JSON to {out_json}")
@@ -549,19 +769,53 @@ def main() -> None:
         f"**Model:** {args.model}  ",
         f"**Seed:** {args.seed}  ",
         f"**Configs:** {', '.join(args.configs)}\n",
+        "## Teacher-Forced Logit Equivalence\n",
     ]
-    for r in results:
+    for r in teacher_forced_results:
         if "error" in r:
-            lines.append(f"## {r['config']} @ {r['prompt_tokens']} tokens — ERROR\n")
+            lines.append(
+                f"## {r['config']} @ {r['prompt_tokens']} tokens — ERROR\n"
+            )
             lines.append(f"```\n{r['error']}\n```\n")
             continue
-        lines.append(f"## {r['config']} @ {r['prompt_tokens']} tokens\n")
+        lines.append(f"### {r['config']} @ {r['prompt_tokens']} tokens\n")
+        lines.append(f"- **Positions checked:** {r['positions_checked']}")
+        lines.append(
+            f"- **Logit cosine vs FP16:** {r['logit_cosine_vs_fp16']:.4f}"
+        )
+        lines.append(
+            f"- **Top-5 overlap vs FP16:** {r['top5_overlap_vs_fp16']:.4f}"
+        )
+        lines.append(f"- **KL vs FP16:** {r['kl_vs_fp16']:.6f}")
+        lines.append(
+            f"- **Max abs logit delta:** {r['max_abs_logit_delta']:.4f}"
+        )
+        lines.append(
+            f"- **Mean abs logit delta:** {r['mean_abs_logit_delta']:.4f}\n"
+        )
+
+    lines.append("## Free-Running Generation Divergence\n")
+    for r in free_running_results:
+        if "error" in r:
+            lines.append(
+                f"## {r['config']} @ {r['prompt_tokens']} tokens — ERROR\n"
+            )
+            lines.append(f"```\n{r['error']}\n```\n")
+            continue
+        lines.append(f"### {r['config']} @ {r['prompt_tokens']} tokens\n")
         lines.append(f"- **Tokens/sec:** {r['tokens_per_second']:.2f}")
         lines.append(f"- **Total E2E ms:** {r['total_end_to_end_ms']:.2f}")
         lines.append(f"- **Compression ratio:** {r['compression_ratio']:.2f}x")
-        lines.append(f"- **Logit cosine vs FP16:** {r['logit_cosine_vs_fp16']:.4f}")
-        lines.append(f"- **Top-5 overlap vs FP16:** {r['top5_overlap_vs_fp16']:.4f}")
-        lines.append(f"- **KL vs FP16:** {r['kl_vs_fp16']:.6f}\n")
+        lines.append(
+            f"- **First divergence position:** {r['first_divergence_position']}"
+        )
+        lines.append(
+            f"- **Exact token match rate:** {r['exact_token_match_rate']:.2%}"
+        )
+        lines.append(
+            f"- **Logit cosine vs FP16:** {r['logit_cosine_vs_fp16']:.4f}\n"
+        )
+
     out_md.write_text("\n".join(lines) + "\n", encoding="utf-8")
     print(f"Wrote Markdown to {out_md}")
 

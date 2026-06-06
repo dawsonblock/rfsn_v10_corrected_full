@@ -3,6 +3,13 @@
   "stable_default": "k8_v5_gs64",
   "qjl_status": "failed_disabled",
   "promoted_to_default": false,
+  "promotion_blocked_by": [
+    "real_generation_drift",
+    "short_prompt_drift",
+    "throughput_overhead",
+    "qjl_failed"
+  ],
+  "experimental_status": "research_only",
   "artifacts": {
     "comparison": "comparison_summary.json",
     "memory": "memory_accounting.json",

@@ -2,21 +2,29 @@
   "release": "experimental",
   "stable_default": "k8_v5_gs64",
   "promoted_to_default": false,
+  "promotion_blocked_by": [
+    "real_generation_drift",
+    "short_prompt_drift",
+    "throughput_overhead",
+    "qjl_failed"
+  ],
+  "experimental_status": "research_only",
   "classifications": {
     "baseline_fp16": "reference",
-    "stable_k8_v5_gs64": "stable_default",
-    "stable_k8_v5_gs32": "stable_baseline",
+    "stable_k8_v5_gs64": "stable_default_but_short_prompt_investigate",
+    "stable_k8_v5_gs32": "quality_candidate_but_short_prompt_investigate",
     "experimental_hybrid": "rejected_speed",
     "turbo_polar": "rejected_speed",
     "adaptive": "rejected_speed",
     "turbo_k8r8v6": "needs_throughput_data"
   },
   "notes": [
-    "stable_k8_v5_gs64: stable_default \u2014 locked default runtime",
-    "stable_k8_v5_gs32: stable_baseline \u2014 proven at 0.5B",
-    "experimental_hybrid: rejected_speed \u2014 throughput regression unacceptable",
-    "turbo_polar: rejected_speed \u2014 throughput regression unacceptable",
-    "adaptive: rejected_speed \u2014 throughput regression unacceptable",
+    "baseline_fp16: reference \u2014 FP16 baseline",
+    "stable_k8_v5_gs64: stable_default_but_short_prompt_investigate \u2014 locked default runtime, short-prompt drift under investigation",
+    "stable_k8_v5_gs32: quality_candidate_but_short_prompt_investigate \u2014 proven at 0.5B, short-prompt drift under investigation",
+    "experimental_hybrid: rejected_speed \u2014 throughput regression",
+    "turbo_polar: rejected_speed \u2014 throughput regression",
+    "adaptive: rejected_speed \u2014 throughput regression",
     "turbo_k8r8v6: needs_throughput_data \u2014 missing throughput benchmark"
   ],
   "evidence": {
@@ -28,17 +36,20 @@
     "has_sensitivity": true
   },
   "promotion_rules": [
-    "stable_default: locked production default (k8_v5_gs64)",
+    "stable_default_but_short_prompt_investigate: locked default runtime, short-prompt drift under investigation",
     "stable_baseline: proven stable config",
     "rejected_quality: fails 512/1024/2048",
-    "rejected_memory: missing compressed bytes or uses raw uint32 fallback",
-    "rejected_speed: missing throughput benchmark or throughput regression unacceptable",
+    "rejected_memory: missing compressed bytes or raw uint32 fallback",
+    "rejected_speed: missing throughput or regression",
     "needs_throughput_data: missing throughput benchmark",
-    "experimental_pending_1_5b: 0.5B passes, 1.5B not yet run",
+    "rejected_generation_quality: teacher-forced real-generation failed",
+    "generation_divergence_observed: teacher-forced passes but free-running diverges",
+    "experimental_pending_1_5b: awaiting 1.5B validation",
     "rejected_1_5b: fails 1.5B validation",
-    "experimental_only: passes all gates but no clear win vs baseline",
-    "speed_candidate: fastest compressed path, beats baseline throughput",
+    "experimental_only: passes all gates but no clear win",
+    "speed_candidate: fastest compressed path",
     "quality_candidate: better quality, acceptable throughput",
-    "memory_candidate: better memory, comparable quality"
+    "memory_candidate: better memory, comparable quality",
+    "disabled: QJL or hard-blocked config"
   ]
 }

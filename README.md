@@ -29,6 +29,10 @@ Not claimed:
 - end-to-end speedup (decode TPS comparable, total time slower due to compression overhead)
 - polar quantization in stable runtime (experimental reference exists)
 - true arbitrary partial dequantization
+- compressed generation safety for short prompts without additional validation
+
+**WARNING — Real-generation drift is under active investigation.**
+Real-generation throughput testing exposed major drift in several compressed modes at short prompts (128 tokens). Static logit/cosine validation is not sufficient for promotion. Experimental modes (`turbo_polar`, `adaptive`, `experimental_hybrid`) remain **research-only** until teacher-forced and free-running generation tests agree with FP16/stable baselines. The stable runtime default remains `k8_v5_gs64`, and even that config is under short-prompt investigation.
 
 ## Overview
 RFSN v10 is an alpha quantized KV-cache + decode-time sparse-attention runtime for MLX/Apple Silicon. This build focuses on proving numerical equivalence and quality-safe sparse behavior before any production claim.
@@ -263,8 +267,29 @@ This section is about the **experimental branch only**. The stable runtime defau
 - `scoring_modes.py` - Prepared vs packed scoring modes (fp16, reconstructed, prepared, packed_block)
 - `audit.py` - Runtime audit mode with drift detection and fallback rules
 - `experimental_quant_runtime.py` - Experimental quant runtime with telemetry and layer policies
+- `cache_debug.py` - Cache alignment and invariant validation utilities
 
 **QJL status**: QJL score correction is implemented as a reference module, but it currently fails the shipped attention-score benchmark and is disabled by default. It is not part of the validated model path.
+
+### Real-Generation Status
+
+The real-generation benchmark is split into **teacher-forced** and **free-running** modes:
+
+- **Teacher-forced**: Every config receives the exact same input token sequence. No generated token divergence is allowed to contaminate the comparison. Used to validate cache/logit equivalence.
+- **Free-running**: Each config generates normally. Divergence is measured as generation behavior, not direct logit equivalence after divergence.
+
+**Current findings:**
+- Real-generation throughput testing exposed major drift in several compressed modes, especially at short prompts (128 tokens).
+- Static logit/cosine validation is not sufficient for promotion.
+- Experimental modes (`turbo_polar`, `adaptive`, `experimental_hybrid`) remain **research-only** until both modes pass defined gates.
+- `k8_v5_gs64` remains the stable runtime default but is under short-prompt investigation.
+- `k8_v5_gs32` is a quality candidate but also under short-prompt investigation.
+
+**New diagnostic artifacts:**
+- `artifacts/proof/experimental/real_generation_throughput.json` — teacher-forced + free-running results
+- `artifacts/proof/experimental/kv_roundtrip_by_context.json` — direct quantizer roundtrip by prompt length
+- `artifacts/proof/experimental/prefill_decode_split.json` — prefill-vs-decode isolation (A/B/C/D)
+- `artifacts/proof/experimental/short_prompt_drift_trace.json` — step-by-step short-prompt drift trace
 
 **Running experimental benchmarks**:
 ```bash
