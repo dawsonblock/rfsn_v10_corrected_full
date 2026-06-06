@@ -59,10 +59,24 @@ class TestScoringModesSmoke:
         )
         assert out.shape == q.shape
 
-    def test_score_corrected_raises_not_implemented(self):
+    def test_score_corrected_raises_without_fn(self):
         q = mx.random.normal((1, 4, 1, 64))
-        with pytest.raises(NotImplementedError):
+        with pytest.raises(ValueError, match="requires correction_fn"):
             score_attention_score_corrected(q, None, None)
+
+    def test_score_corrected_runs_with_fn(self):
+        q = mx.random.normal((1, 4, 1, 64))
+        k = mx.random.normal((1, 4, 128, 64))
+        v = mx.random.normal((1, 4, 128, 64))
+        out = score_attention_score_corrected(
+            q, k, v,
+            correction_fn=lambda _q, _k, **_kw: (
+                q.astype(mx.float32) @ k.astype(mx.float32).transpose(
+                    0, 1, 3, 2
+                )
+            ) / 8.0,
+        )
+        assert out.shape == q.shape
 
     def test_fp16_scale_override(self):
         q = mx.random.normal((1, 4, 1, 64))

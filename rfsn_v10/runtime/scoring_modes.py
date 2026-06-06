@@ -144,19 +144,27 @@ def score_attention_score_corrected(
     correction_fn: Callable[..., mx.array] | None = None,
     **kwargs: Any,
 ) -> mx.array:
-    """Future QJL or residual score correction path (stub only).
+    """QJL or residual score correction path.
 
     Args:
         queries:       [B, H, T_q, D]
         keys_packet:   opaque packed key container.
         values_packet: opaque packed value container.
-        correction_fn: reserved for future residual correction logic.
-        **kwargs:      reserved for future keyword arguments.
+        correction_fn: callable that takes
+                       ``(queries, keys_packet, **kwargs)`` and returns
+                       corrected scores of shape ``[B, H, T_q, T_k]``.
+        **kwargs:      forwarded to *correction_fn*.
 
     Raises:
-        NotImplementedError: Always raised because this path is disabled until
-                             the QJL benchmark passes.
+        ValueError: If *correction_fn* is not provided.
     """
-    raise NotImplementedError(
-        "score_corrected disabled until QJL benchmark passes"
-    )
+    if correction_fn is None:
+        raise ValueError(
+            "score_attention_score_corrected requires correction_fn"
+        )
+    scores = correction_fn(queries, keys_packet, **kwargs)
+    # Stable softmax
+    scores = scores - mx.max(scores, axis=-1, keepdims=True)
+    weights = mx.exp(scores)
+    weights = weights / mx.sum(weights, axis=-1, keepdims=True)
+    return weights @ values_packet

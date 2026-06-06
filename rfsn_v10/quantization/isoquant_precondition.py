@@ -127,12 +127,10 @@ class IsoQuantPreconditioner:
         if meta is None:
             q_l = self.q_l
             q_r = self.q_r
-            original_shape = tuple(y.shape)
             feature_dim = self.feature_dim
         else:
             q_l = meta.q_l
             q_r = meta.q_r
-            original_shape = meta.original_shape
             feature_dim = meta.feature_dim
         if y.shape[-1] != feature_dim:
             raise ValueError(
@@ -142,4 +140,4 @@ class IsoQuantPreconditioner:
         q_l_conj = quat_conjugate(q_l).reshape(1, 1, 4)
         q_r = q_r.reshape(1, 1, 4)
         restored = quat_multiply(quat_multiply(q_l_conj, blocks), q_r)
-        return restored.reshape(original_shape)
+        return restored.reshape(y.shape)

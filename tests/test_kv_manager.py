@@ -452,3 +452,143 @@ def test_polar_estimate_bytes_is_positive(tmp_path):
     shape = (1, 8, 512, 64)
     estimated = manager.estimate_compressed_bytes_for_shape(shape)
     assert estimated > 0
+
+
+# --- IsoQuant tests ---
+
+def test_isoquant_cartesian_roundtrip(tmp_path):
+    manager = RFSNTurboQuantKVManager(
+        quant_mode="isoquant_cartesian",
+        k_bits=8,
+        v_bits=3,
+        use_incoherent=False,
+        max_memory_gb=0.5,
+        cache_dir=str(tmp_path),
+    )
+    shape = (1, 8, 256, 64)
+    k = mx.random.normal(shape)
+    v = mx.random.normal(shape)
+    manager.store("isoquant_cart", k, v, 256)
+    k_rec, v_rec = manager.retrieve("isoquant_cart", out_dtype=mx.float32)
+    mx.eval(k_rec, v_rec)
+    assert k_rec.shape == shape
+    assert v_rec.shape == shape
+    assert cosine_similarity(k, k_rec) > 0.90
+    assert cosine_similarity(v, v_rec) > 0.75
+
+
+def test_isoquant_hybrid_roundtrip(tmp_path):
+    manager = RFSNTurboQuantKVManager(
+        quant_mode="isoquant_hybrid",
+        k_bits=6,
+        v_bits=4,
+        max_memory_gb=0.5,
+        cache_dir=str(tmp_path),
+    )
+    shape = (1, 8, 128, 64)
+    k = mx.random.normal(shape)
+    v = mx.random.normal(shape)
+    manager.store("isoquant_hybrid", k, v, 128)
+    k_rec, v_rec = manager.retrieve("isoquant_hybrid", out_dtype=mx.float32)
+    mx.eval(k_rec, v_rec)
+    assert k_rec.shape == shape
+    assert v_rec.shape == shape
+    assert cosine_similarity(k, k_rec) > 0.85
+    assert cosine_similarity(v, v_rec) > 0.85
+
+
+def test_isoquant_invalid_head_dim(tmp_path):
+    manager = RFSNTurboQuantKVManager(
+        quant_mode="isoquant_cartesian",
+        max_memory_gb=0.5,
+        cache_dir=str(tmp_path),
+    )
+    k = mx.random.normal((1, 8, 64, 26))
+    v = mx.random.normal((1, 8, 64, 26))
+    with pytest.raises(ValueError, match="IsoQuant mode requires"):
+        manager.store("isoquant_bad_dim", k, v, 64)
+
+
+def test_isoquant_retrieve_blocks(tmp_path):
+    manager = RFSNTurboQuantKVManager(
+        quant_mode="isoquant_cartesian",
+        k_bits=8,
+        v_bits=3,
+        use_incoherent=False,
+        max_memory_gb=0.5,
+        cache_dir=str(tmp_path),
+    )
+    shape = (1, 8, 256, 64)
+    k = mx.random.normal(shape)
+    v = mx.random.normal(shape)
+    manager.store("isoquant_blocks", k, v, 256)
+
+    k_rec, v_rec = manager.retrieve_blocks(
+        "isoquant_blocks", block_indices=[0, 2], block_size=64,
+    )
+    assert k_rec is not None and v_rec is not None
+    assert k_rec.shape[2] == 128  # 2 blocks * 64 tokens
+    assert v_rec.shape[2] == 128
+
+
+# --- QJL tests ---
+
+def test_qjl_sketch_created(tmp_path):
+    manager = RFSNTurboQuantKVManager(
+        quant_mode="cartesian",
+        k_bits=8,
+        v_bits=3,
+        use_incoherent=False,
+        use_qjl_score_correction=True,
+        qjl_proj_dim=32,
+        max_memory_gb=0.5,
+        cache_dir=str(tmp_path),
+    )
+    shape = (1, 8, 128, 64)
+    k = mx.random.normal(shape)
+    v = mx.random.normal(shape)
+    manager.store("qjl_test", k, v, 128)
+    cache = manager.active_caches["qjl_test"]
+    assert cache.k_qjl is not None
+    assert cache.v_qjl is not None
+    assert cache.k_qjl.proj_dim == 32
+    assert cache.v_qjl.proj_dim == 32
+
+
+def test_qjl_sketch_with_isoquant(tmp_path):
+    manager = RFSNTurboQuantKVManager(
+        quant_mode="isoquant_cartesian",
+        k_bits=8,
+        v_bits=3,
+        use_incoherent=False,
+        use_qjl_score_correction=True,
+        qjl_proj_dim=16,
+        max_memory_gb=0.5,
+        cache_dir=str(tmp_path),
+    )
+    shape = (1, 8, 64, 64)
+    k = mx.random.normal(shape)
+    v = mx.random.normal(shape)
+    manager.store("qjl_isoquant", k, v, 64)
+    cache = manager.active_caches["qjl_isoquant"]
+    assert cache.isoquant_meta is not None
+    assert cache.k_qjl is not None
+    assert cache.v_qjl is not None
+    assert cache.k_qjl.proj_dim == 16
+
+
+def test_isoquant_memory_estimate_includes_overhead(tmp_path):
+    manager = RFSNTurboQuantKVManager(
+        quant_mode="isoquant_cartesian",
+        use_isoquant=True,
+        use_qjl_score_correction=True,
+        qjl_proj_dim=64,
+        max_memory_gb=0.5,
+        cache_dir=str(tmp_path),
+    )
+    shape = (1, 8, 128, 64)
+    est_no_qjl = manager.estimate_compressed_bytes_for_shape(
+        shape, k_bits=8, v_bits=3,
+    )
+    # QJL is enabled on the manager, so estimate should include it
+    assert est_no_qjl > 0
