@@ -1,0 +1,133 @@
+{
+  "release": "experimental",
+  "model": "Qwen/Qwen2.5-0.5B-Instruct",
+  "seed": 42,
+  "results": [
+    {
+      "model_name": "Qwen/Qwen2.5-0.5B-Instruct",
+      "config": "baseline_fp16",
+      "prompt_tokens": 128,
+      "new_tokens": 128,
+      "error": "Using a `device_map`, `tp_plan`, `torch.device` context manager or setting `torch.set_default_device(device)` requires `accelerate`. You can install it with `pip install accelerate`"
+    },
+    {
+      "model_name": "Qwen/Qwen2.5-0.5B-Instruct",
+      "config": "baseline_fp16",
+      "prompt_tokens": 512,
+      "new_tokens": 128,
+      "error": "Using a `device_map`, `tp_plan`, `torch.device` context manager or setting `torch.set_default_device(device)` requires `accelerate`. You can install it with `pip install accelerate`"
+    },
+    {
+      "model_name": "Qwen/Qwen2.5-0.5B-Instruct",
+      "config": "baseline_fp16",
+      "prompt_tokens": 1024,
+      "new_tokens": 128,
+      "error": "Using a `device_map`, `tp_plan`, `torch.device` context manager or setting `torch.set_default_device(device)` requires `accelerate`. You can install it with `pip install accelerate`"
+    },
+    {
+      "model_name": "Qwen/Qwen2.5-0.5B-Instruct",
+      "config": "k8_v5_gs64",
+      "prompt_tokens": 128,
+      "new_tokens": 128,
+      "error": "Using a `device_map`, `tp_plan`, `torch.device` context manager or setting `torch.set_default_device(device)` requires `accelerate`. You can install it with `pip install accelerate`"
+    },
+    {
+      "model_name": "Qwen/Qwen2.5-0.5B-Instruct",
+      "config": "k8_v5_gs64",
+      "prompt_tokens": 512,
+      "new_tokens": 128,
+      "error": "Using a `device_map`, `tp_plan`, `torch.device` context manager or setting `torch.set_default_device(device)` requires `accelerate`. You can install it with `pip install accelerate`"
+    },
+    {
+      "model_name": "Qwen/Qwen2.5-0.5B-Instruct",
+      "config": "k8_v5_gs64",
+      "prompt_tokens": 1024,
+      "new_tokens": 128,
+      "error": "Using a `device_map`, `tp_plan`, `torch.device` context manager or setting `torch.set_default_device(device)` requires `accelerate`. You can install it with `pip install accelerate`"
+    },
+    {
+      "model_name": "Qwen/Qwen2.5-0.5B-Instruct",
+      "config": "k8_v5_gs32",
+      "prompt_tokens": 128,
+      "new_tokens": 128,
+      "error": "Using a `device_map`, `tp_plan`, `torch.device` context manager or setting `torch.set_default_device(device)` requires `accelerate`. You can install it with `pip install accelerate`"
+    },
+    {
+      "model_name": "Qwen/Qwen2.5-0.5B-Instruct",
+      "config": "k8_v5_gs32",
+      "prompt_tokens": 512,
+      "new_tokens": 128,
+      "error": "Using a `device_map`, `tp_plan`, `torch.device` context manager or setting `torch.set_default_device(device)` requires `accelerate`. You can install it with `pip install accelerate`"
+    },
+    {
+      "model_name": "Qwen/Qwen2.5-0.5B-Instruct",
+      "config": "k8_v5_gs32",
+      "prompt_tokens": 1024,
+      "new_tokens": 128,
+      "error": "Using a `device_map`, `tp_plan`, `torch.device` context manager or setting `torch.set_default_device(device)` requires `accelerate`. You can install it with `pip install accelerate`"
+    },
+    {
+      "model_name": "Qwen/Qwen2.5-0.5B-Instruct",
+      "config": "turbo_polar",
+      "prompt_tokens": 128,
+      "new_tokens": 128,
+      "error": "Using a `device_map`, `tp_plan`, `torch.device` context manager or setting `torch.set_default_device(device)` requires `accelerate`. You can install it with `pip install accelerate`"
+    },
+    {
+      "model_name": "Qwen/Qwen2.5-0.5B-Instruct",
+      "config": "turbo_polar",
+      "prompt_tokens": 512,
+      "new_tokens": 128,
+      "error": "Using a `device_map`, `tp_plan`, `torch.device` context manager or setting `torch.set_default_device(device)` requires `accelerate`. You can install it with `pip install accelerate`"
+    },
+    {
+      "model_name": "Qwen/Qwen2.5-0.5B-Instruct",
+      "config": "turbo_polar",
+      "prompt_tokens": 1024,
+      "new_tokens": 128,
+      "error": "Using a `device_map`, `tp_plan`, `torch.device` context manager or setting `torch.set_default_device(device)` requires `accelerate`. You can install it with `pip install accelerate`"
+    },
+    {
+      "model_name": "Qwen/Qwen2.5-0.5B-Instruct",
+      "config": "adaptive",
+      "prompt_tokens": 128,
+      "new_tokens": 128,
+      "error": "Using a `device_map`, `tp_plan`, `torch.device` context manager or setting `torch.set_default_device(device)` requires `accelerate`. You can install it with `pip install accelerate`"
+    },
+    {
+      "model_name": "Qwen/Qwen2.5-0.5B-Instruct",
+      "config": "adaptive",
+      "prompt_tokens": 512,
+      "new_tokens": 128,
+      "error": "Using a `device_map`, `tp_plan`, `torch.device` context manager or setting `torch.set_default_device(device)` requires `accelerate`. You can install it with `pip install accelerate`"
+    },
+    {
+      "model_name": "Qwen/Qwen2.5-0.5B-Instruct",
+      "config": "adaptive",
+      "prompt_tokens": 1024,
+      "new_tokens": 128,
+      "error": "Using a `device_map`, `tp_plan`, `torch.device` context manager or setting `torch.set_default_device(device)` requires `accelerate`. You can install it with `pip install accelerate`"
+    },
+    {
+      "model_name": "Qwen/Qwen2.5-0.5B-Instruct",
+      "config": "experimental_hybrid",
+      "prompt_tokens": 128,
+      "new_tokens": 128,
+      "error": "Using a `device_map`, `tp_plan`, `torch.device` context manager or setting `torch.set_default_device(device)` requires `accelerate`. You can install it with `pip install accelerate`"
+    },
+    {
+      "model_name": "Qwen/Qwen2.5-0.5B-Instruct",
+      "config": "experimental_hybrid",
+      "prompt_tokens": 512,
+      "new_tokens": 128,
+      "error": "Using a `device_map`, `tp_plan`, `torch.device` context manager or setting `torch.set_default_device(device)` requires `accelerate`. You can install it with `pip install accelerate`"
+    },
+    {
+      "model_name": "Qwen/Qwen2.5-0.5B-Instruct",
+      "config": "experimental_hybrid",
+      "prompt_tokens": 1024,
+      "new_tokens": 128,
+      "error": "Using a `device_map`, `tp_plan`, `torch.device` context manager or setting `torch.set_default_device(device)` requires `accelerate`. You can install it with `pip install accelerate`"
+    }
+  ]
+}
