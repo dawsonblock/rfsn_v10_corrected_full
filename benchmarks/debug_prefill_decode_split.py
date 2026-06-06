@@ -160,6 +160,8 @@ def main() -> None:
                     "prompt_tokens": length,
                     "new_tokens": args.new_tokens,
                     "mode": "A",
+                    "continuation_mode": "free_running_greedy",
+                    "token_sequence_source": "mode_A_greedy",
                     "quant_prefill": run_a["quant_prefill"],
                     "quant_decode": run_a["quant_decode"],
                     "logits_count": run_a["logits_count"],
@@ -203,6 +205,8 @@ def main() -> None:
                         "prompt_tokens": length,
                         "new_tokens": args.new_tokens,
                         "mode": mode,
+                        "continuation_mode": "free_running_greedy",
+                        "token_sequence_source": f"mode_{mode}_greedy",
                         "quant_prefill": run["quant_prefill"],
                         "quant_decode": run["quant_decode"],
                         "logits_count": run["logits_count"],
@@ -228,7 +232,18 @@ def main() -> None:
     out_path = Path(args.out)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(
-        json.dumps({"model": args.model, "results": results}, indent=2) + "\n",
+        json.dumps({
+            "model": args.model,
+            "methodology_note": (
+                "Each mode (A/B/C/D) uses its own independent greedy "
+                "decode (free_running_greedy). Logits are averaged across "
+                "all decode steps, not teacher-forced. "
+                "Modes share the same prompt but diverge after the first "
+                "decode token. Compare with teacher_forced_step_trace.json "
+                "for teacher-forced per-step quality."
+            ),
+            "results": results,
+        }, indent=2) + "\n",
         encoding="utf-8",
     )
     print(f"Wrote {out_path}")

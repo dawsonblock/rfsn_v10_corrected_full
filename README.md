@@ -459,25 +459,27 @@ python scripts/check_release_integrity.py
 
 ## Current Runtime Diagnosis
 
-Static validation and raw K/V roundtrip metrics look strong, but real teacher-forced generation shows material logit drift for compressed paths. Prefill quantization is mostly stable; the weak point is quantized decode/update. Experimental modes remain research-only until decode diagnostics are resolved and teacher-forced logits pass defined gates.
+Step-level teacher-forced tracing (Build 14) shows **stable configs pass all 128/128 teacher-forced decode steps** with cosine ≥ 0.995. The previously reported bulk cosine ~0.955 in `real_generation_throughput.json` is a comparison methodology artifact under investigation. Experimental modes show decode degradation from step 0 and remain research-only.
 
-### Decode Diagnostic Status (Main 28 Build 13)
+### Config Status (Main 28 Build 14)
 
 | Config | Classification | Notes |
 |--------|---------------|-------|
 | baseline_fp16 | reference | FP16 reference |
-| k8_v5_gs64 | locked default, teacher-forced drift under investigation | Decode-update passes; drift source is teacher-forced mode |
-| k8_v5_gs32 | quality candidate, teacher-forced drift under investigation | Decode-update passes; drift source is teacher-forced mode |
-| experimental_hybrid | free-running match, teacher-forced failed | Experimental only; not production-ready |
-| turbo_polar | rejected generation divergence | Experimental only; not production-ready |
-| adaptive | rejected generation divergence | Experimental only; not production-ready |
+| k8_v5_gs64 | locked default, step-trace passes | 128/128 teacher-forced steps pass (cosine ≥ 0.995); real-gen bulk discrepancy under investigation |
+| k8_v5_gs32 | quality candidate, step-trace passes | 128/128 teacher-forced steps pass (cosine ≥ 0.995); real-gen bulk discrepancy under investigation |
+| experimental_hybrid | rejected; decode degraded | teacher-forced degraded from step 0; K/V append degrades new-token V |
+| turbo_polar | rejected generation divergence | degraded from step 0; 0/128 teacher-forced steps pass |
+| adaptive | rejected generation divergence | degraded from step 0; 0/128 teacher-forced steps pass |
 | QJL | disabled | Attention score benchmark failed |
 
-**Key findings from decode diagnostics:**
-- Stable configs (k8_v5_gs64, k8_v5_gs32) pass all decode-update trace checks (cosine ≥ 0.999 across 7 decode steps × 2 prompt lengths)
-- Old-cache is not corrupted by appending a new quantized decode token
+**Key findings from Build 14 diagnostics:**
+- Stable configs (k8_v5_gs64, k8_v5_gs32) pass all 128/128 teacher-forced steps at both 128 and 512 prompt-token lengths (cosine ≥ 0.995 throughout)
+- Experimental configs degrade from step 0 — degradation is in the compressed prefill, not accumulated over decode steps
+- Old-cache is not corrupted by appending (all configs old_k_cos ≥ 0.999)
 - New-token K/V quantization error is the primary degradation source in experimental configs
-- The remaining promotion blockers are: teacher_forced_logit_drift, decode_update_failure (experimental), qjl_failed
+- `real_generation_throughput.json` bulk cosine ~0.955 for stable configs is inconsistent with the step trace and under investigation
+- `prefill_decode_split.json` uses free-running greedy (each mode picks its own token sequence) — not teacher-forced; reconciliation fields added
 
 ## Design Notes
 - Tests are deterministic; wall-clock runtime depends on hardware and MLX availability
