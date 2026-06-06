@@ -22,7 +22,6 @@ import argparse
 import json
 import math
 import tempfile
-import time
 from pathlib import Path
 from typing import Any
 
@@ -75,7 +74,11 @@ def _topk_overlap(a: torch.Tensor, b: torch.Tensor, k: int = 5) -> float:
 
 
 def _compress_cache_stable(
-    past_key_values, k_bits: int, v_bits: int, group_size: int, device: torch.device,
+    past_key_values,
+    k_bits: int,
+    v_bits: int,
+    group_size: int,
+    device: torch.device,
 ):
     """Compress via stable RFSN quantization and return DynamicCache."""
     compressed = []
@@ -165,8 +168,14 @@ def _compress_cache_experimental(
 # ---------------------------------------------------------------------------
 
 CONFIGS: dict[str, dict[str, Any]] = {
-    "k8_v5_gs64": {"family": "stable", "k_bits": 8, "v_bits": 5, "group_size": 64},
-    "k8_v5_gs32": {"family": "stable", "k_bits": 8, "v_bits": 5, "group_size": 32},
+    "k8_v5_gs64": {
+        "family": "stable", "k_bits": 8, "v_bits": 5,
+        "group_size": 64,
+    },
+    "k8_v5_gs32": {
+        "family": "stable", "k_bits": 8, "v_bits": 5,
+        "group_size": 32,
+    },
     "turbo_polar": {
         "family": "experimental", "mode": "turbo_polar",
         "feature_dim": 64, "k_angle_bits": 5, "k_radius_bits": 8,
@@ -192,6 +201,35 @@ CONFIGS: dict[str, dict[str, Any]] = {
 # ---------------------------------------------------------------------------
 
 
+def _kv_cache_diff(
+    fp16_legacy: list[tuple[torch.Tensor, torch.Tensor]],
+    quant_legacy: list[tuple[torch.Tensor, torch.Tensor]],
+) -> list[dict[str, Any]]:
+    """Compute per-layer K/V differences between FP16 and quantized caches."""
+    diffs: list[dict[str, Any]] = []
+    for layer_idx, ((k_fp16, v_fp16), (k_quant, v_quant)) in enumerate(
+        zip(fp16_legacy, quant_legacy)
+    ):
+        k_cos = _cosine(k_fp16, k_quant)
+        v_cos = _cosine(v_fp16, v_quant)
+        k_mae = float(torch.mean(torch.abs(k_fp16 - k_quant)).item())
+        v_mae = float(torch.mean(torch.abs(v_fp16 - v_quant)).item())
+        k_max = float(torch.max(torch.abs(k_fp16 - k_quant)).item())
+        v_max = float(torch.max(torch.abs(v_fp16 - v_quant)).item())
+        diffs.append({
+            "layer": layer_idx,
+            "k_shape": list(k_fp16.shape),
+            "v_shape": list(v_fp16.shape),
+            "k_cosine": k_cos,
+            "v_cosine": v_cos,
+            "k_mae": k_mae,
+            "v_mae": v_mae,
+            "k_max_abs_error": k_max,
+            "v_max_abs_error": v_max,
+        })
+    return diffs
+
+
 def trace_decode_steps(
     model_name: str,
     cfg_name: str,
@@ -199,16 +237,26 @@ def trace_decode_steps(
     decode_steps: list[int],
     device: torch.device,
     seed: int = 42,
+    mode: str = "trace",
 ) -> list[dict[str, Any]]:
-    """Run decode steps and trace KV cache state at each checkpoint."""
+    """Run decode steps and trace KV cache state at each checkpoint.
+
+    mode="trace" compares logits at each step.
+    mode="kv-diff" compares K/V cache content per layer.
+    """
     cfg = CONFIGS[cfg_name]
 
-    tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
+    tokenizer = AutoTokenizer.from_pretrained(
+        model_name, trust_remote_code=True,
+    )
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
     model = AutoModelForCausalLM.from_pretrained(
-        model_name, dtype=torch.float16, device_map="cpu", trust_remote_code=True,
+        model_name,
+        dtype=torch.float16,
+        device_map="cpu",
+        trust_remote_code=True,
     )
     model.eval()
     torch.manual_seed(seed)
@@ -217,18 +265,27 @@ def trace_decode_steps(
     dummy_text = "The quick brown fox jumps over the lazy dog. " * 200
     dummy_ids = tokenizer.encode(dummy_text, add_special_tokens=False)
     if prompt_tokens > len(dummy_ids):
-        repeated = (dummy_ids * ((prompt_tokens // len(dummy_ids)) + 1))[:prompt_tokens]
+        repeated = (
+            dummy_ids
+            * ((prompt_tokens // len(dummy_ids)) + 1)
+        )[:prompt_tokens]
         prompt_str = tokenizer.decode(repeated)
     else:
         prompt_str = tokenizer.decode(dummy_ids[:prompt_tokens])
 
-    prompt_ids = tokenizer.encode(prompt_str, return_tensors="pt", truncation=True)
+    prompt_ids = tokenizer.encode(
+        prompt_str, return_tensors="pt", truncation=True,
+    )
     prompt_ids = prompt_ids.to(device)
     actual_prompt_len = prompt_ids.shape[1]
 
     # FP16 prefill
     with torch.no_grad():
-        out_fp16 = model(input_ids=prompt_ids, past_key_values=None, use_cache=True)
+        out_fp16 = model(
+            input_ids=prompt_ids,
+            past_key_values=None,
+            use_cache=True,
+        )
     fp16_past = out_fp16.past_key_values
     first_tok = int(torch.argmax(out_fp16.logits[:, -1, :], dim=-1).item())
 
@@ -273,50 +330,71 @@ def trace_decode_steps(
             v_shape = list(fp16_legacy[0][1].shape) if fp16_legacy else []
             kv_len = k_shape[2] if len(k_shape) > 2 else 0
 
-            # Compare logits at this step
-            next_ids_fp16 = torch.tensor([[next_tok_fp16]], device=device)
-            next_ids_quant = torch.tensor([[next_tok_quant]], device=device)
-
-            with torch.no_grad():
-                out_fp16_step = model(
-                    input_ids=next_ids_fp16,
-                    past_key_values=fp16_decode_past, use_cache=True,
+            if mode == "kv-diff":
+                # Compare K/V cache content per layer
+                layer_diffs = _kv_cache_diff(fp16_legacy, quant_legacy)
+                results.append({
+                    "config": cfg_name,
+                    "prompt_tokens": actual_prompt_len,
+                    "decode_step": step,
+                    "kv_len": kv_len,
+                    "position_id": actual_prompt_len + step,
+                    "cache_position": actual_prompt_len + step,
+                    "layer_diffs": layer_diffs,
+                })
+            else:
+                # Compare logits at this step
+                next_ids_fp16 = torch.tensor(
+                    [[next_tok_fp16]], device=device,
                 )
-                out_quant_step = model(
-                    input_ids=next_ids_quant,
-                    past_key_values=quant_decode_past, use_cache=True,
+                next_ids_quant = torch.tensor(
+                    [[next_tok_quant]], device=device,
                 )
 
-            logit_fp16 = out_fp16_step.logits[:, -1, :]
-            logit_quant = out_quant_step.logits[:, -1, :]
+                with torch.no_grad():
+                    out_fp16_step = model(
+                        input_ids=next_ids_fp16,
+                        past_key_values=fp16_decode_past, use_cache=True,
+                    )
+                    out_quant_step = model(
+                        input_ids=next_ids_quant,
+                        past_key_values=quant_decode_past, use_cache=True,
+                    )
 
-            cosine = _cosine(logit_fp16, logit_quant)
-            top5 = _topk_overlap(logit_fp16, logit_quant, k=5)
-            kl = _kl_div(logit_fp16, logit_quant)
+                logit_fp16 = out_fp16_step.logits[:, -1, :]
+                logit_quant = out_quant_step.logits[:, -1, :]
 
-            status = "pass" if cosine >= 0.99 and top5 >= 0.8 else "degraded"
+                cosine = _cosine(logit_fp16, logit_quant)
+                top5 = _topk_overlap(logit_fp16, logit_quant, k=5)
+                kl = _kl_div(logit_fp16, logit_quant)
 
-            results.append({
-                "config": cfg_name,
-                "prompt_tokens": actual_prompt_len,
-                "decode_step": step,
-                "kv_len_before": kv_len,
-                "kv_len_after": kv_len + 1,
-                "position_id": actual_prompt_len + step,
-                "cache_position": actual_prompt_len + step,
-                "k_shape": k_shape,
-                "v_shape": v_shape,
-                "logit_cosine": cosine,
-                "top5_overlap": top5,
-                "kl": kl,
-                "status": status,
-            })
+                status = (
+                    "pass"
+                    if cosine >= 0.99 and top5 >= 0.8
+                    else "degraded"
+                )
 
-            # Update past for continuation
-            fp16_decode_past = out_fp16_step.past_key_values
-            quant_decode_past = out_quant_step.past_key_values
-            next_tok_fp16 = int(torch.argmax(logit_fp16, dim=-1).item())
-            next_tok_quant = int(torch.argmax(logit_quant, dim=-1).item())
+                results.append({
+                    "config": cfg_name,
+                    "prompt_tokens": actual_prompt_len,
+                    "decode_step": step,
+                    "kv_len_before": kv_len,
+                    "kv_len_after": kv_len + 1,
+                    "position_id": actual_prompt_len + step,
+                    "cache_position": actual_prompt_len + step,
+                    "k_shape": k_shape,
+                    "v_shape": v_shape,
+                    "logit_cosine": cosine,
+                    "top5_overlap": top5,
+                    "kl": kl,
+                    "status": status,
+                })
+
+                # Update past for continuation
+                fp16_decode_past = out_fp16_step.past_key_values
+                quant_decode_past = out_quant_step.past_key_values
+                next_tok_fp16 = int(torch.argmax(logit_fp16, dim=-1).item())
+                next_tok_quant = int(torch.argmax(logit_quant, dim=-1).item())
         else:
             # Non-checkpoint step: just advance both
             next_ids_fp16 = torch.tensor([[next_tok_fp16]], device=device)
@@ -352,40 +430,72 @@ def main() -> None:
     parser.add_argument("--model", default="Qwen/Qwen2.5-0.5B-Instruct")
     parser.add_argument(
         "--configs", nargs="+",
-        default=["k8_v5_gs64", "k8_v5_gs32", "turbo_polar", "adaptive", "experimental_hybrid"],
+        default=[
+            "k8_v5_gs64", "k8_v5_gs32", "turbo_polar",
+            "adaptive", "experimental_hybrid",
+        ],
     )
-    parser.add_argument("--prompt-lengths", nargs="+", type=int, default=[128, 512])
+    parser.add_argument(
+        "--prompt-lengths", nargs="+", type=int, default=[128, 512],
+    )
     parser.add_argument(
         "--decode-steps", nargs="+", type=int, default=[0, 1, 2, 4, 8, 16, 32],
     )
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument(
-        "--out", default="artifacts/proof/experimental/decode_update_trace.json",
+        "--mode", choices=["trace", "kv-diff"], default="trace",
+    )
+    parser.add_argument(
+        "--out", default=None,
     )
     args = parser.parse_args()
 
+    if args.out is None:
+        if args.mode == "kv-diff":
+            args.out = (
+                "artifacts/proof/experimental/"
+                "decode_append_kv_diff.json"
+            )
+        else:
+            args.out = (
+                "artifacts/proof/experimental/"
+                "decode_update_trace.json"
+            )
+
     device = torch.device("cpu")
 
-    all_traces: list[dict[str, Any]] = []
+    all_results: list[dict[str, Any]] = []
     for cfg_name in args.configs:
         for length in args.prompt_lengths:
-            print(f"Tracing {cfg_name} @ {length} tokens ...")
+            print(
+                f"Tracing {cfg_name} @ {length} tokens "
+                f"(mode={args.mode}) ..."
+            )
             try:
                 traces = trace_decode_steps(
                     args.model, cfg_name, length,
-                    args.decode_steps, device, args.seed,
+                    args.decode_steps, device, args.seed, mode=args.mode,
                 )
-                all_traces.extend(traces)
+                all_results.extend(traces)
                 for t in traces:
-                    print(
-                        f"  step={t['decode_step']:2d} "
-                        f"cosine={t['logit_cosine']:.4f} "
-                        f"top5={t['top5_overlap']:.2f} "
-                        f"status={t['status']}"
-                    )
+                    if args.mode == "kv-diff":
+                        diffs = t.get("layer_diffs", [])
+                        k_cos = diffs[0].get("k_cosine", 0.0) if diffs else 0.0
+                        v_cos = diffs[0].get("v_cosine", 0.0) if diffs else 0.0
+                        print(
+                            f"  step={t['decode_step']:2d} "
+                            f"k_cos={k_cos:.6f} v_cos={v_cos:.6f}"
+                        )
+                    else:
+                        print(
+                            f"  step={t['decode_step']:2d} "
+                            f"cosine={t['logit_cosine']:.4f} "
+                            f"top5={t['top5_overlap']:.2f} "
+                            f"status={t['status']}"
+                        )
             except Exception as exc:
                 print(f"  FAILED: {exc}")
-                all_traces.append({
+                all_results.append({
                     "config": cfg_name,
                     "prompt_tokens": length,
                     "error": str(exc),
@@ -393,20 +503,24 @@ def main() -> None:
 
     out_path = Path(args.out)
     out_path.parent.mkdir(parents=True, exist_ok=True)
+
+    payload: dict[str, Any] = {
+        "release": "experimental",
+        "model": args.model,
+        "seed": args.seed,
+        "mode": args.mode,
+        "decode_steps_checked": args.decode_steps,
+    }
+    if args.mode == "kv-diff":
+        payload["results"] = all_results
+    else:
+        payload["traces"] = all_results
+
     out_path.write_text(
-        json.dumps(
-            {
-                "release": "experimental",
-                "model": args.model,
-                "seed": args.seed,
-                "decode_steps_checked": args.decode_steps,
-                "traces": all_traces,
-            },
-            indent=2,
-        ) + "\n",
+        json.dumps(payload, indent=2) + "\n",
         encoding="utf-8",
     )
-    print(f"\nWrote trace to {out_path}")
+    print(f"\nWrote {args.mode} output to {out_path}")
 
 
 if __name__ == "__main__":

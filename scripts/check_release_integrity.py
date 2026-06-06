@@ -5,6 +5,7 @@ from __future__ import annotations
 import ast
 import fnmatch
 import json
+import math
 import subprocess
 import sys
 from pathlib import Path
@@ -764,6 +765,23 @@ def check() -> list[str]:
         except (OSError, json.JSONDecodeError):
             pass
 
+    # --- Reject placeholder diagnostic files ---
+    for diag_name in ("decode_update_trace.json", "decode_append_kv_diff.json"):
+        diag_path = root / "artifacts" / "proof" / "experimental" / diag_name
+        if diag_path.exists():
+            try:
+                diag_data = json.loads(diag_path.read_text(encoding="utf-8"))
+                if diag_data.get("status") == "awaiting_execution":
+                    errors.append(
+                        f"{diag_name} is a placeholder (status=awaiting_execution)"
+                    )
+                if not diag_data.get("traces") and not diag_data.get("results"):
+                    errors.append(
+                        f"{diag_name} has empty traces/results"
+                    )
+            except (OSError, json.JSONDecodeError):
+                pass
+
     # --- Teacher-forced baseline identity check ---
     real_gen_path = (
         root
@@ -850,6 +868,27 @@ def check() -> list[str]:
                 for row in real_gen_data.get(section, []):
                     if "error" not in row:
                         configs_with_real_gen.add(row.get("config"))
+
+            # Build teacher-forced pass/fail map
+            tf_rows = real_gen_data.get("teacher_forced_logits", [])
+            tf_status: dict[str, bool] = {}
+            for row in tf_rows:
+                cfg = row.get("config")
+                if not cfg or "error" in row:
+                    continue
+                cosine = row.get("logit_cosine_vs_fp16", float("nan"))
+                top5 = row.get("top5_overlap_vs_fp16", float("nan"))
+                kl = row.get("kl_vs_fp16", float("nan"))
+                passes = (
+                    math.isfinite(cosine) and cosine >= 0.99
+                    and math.isfinite(top5) and top5 >= 0.95
+                    and (not math.isfinite(kl) or kl <= 0.001)
+                )
+                if cfg not in tf_status:
+                    tf_status[cfg] = passes
+                else:
+                    tf_status[cfg] = tf_status[cfg] and passes
+
             for cfg_name, status in class_data.get(
                 "classifications", {}
             ).items():
@@ -862,6 +901,24 @@ def check() -> list[str]:
                         f"{cfg_name} classified as candidate "
                         f"but has no real-generation data"
                     )
+                # Teacher-forced failure must be reflected in classification
+                if normalized in tf_status and not tf_status[normalized]:
+                    pessimistic_markers = (
+                        "drift",
+                        "divergence",
+                        "rejected",
+                        "failed",
+                        "disabled",
+                        "needs_",
+                    )
+                    has_pessimistic = any(
+                        marker in status for marker in pessimistic_markers
+                    )
+                    if not has_pessimistic:
+                        errors.append(
+                            f"{cfg_name} teacher-forced fails but "
+                            f"classified optimistically as '{status}'"
+                        )
         except (OSError, json.JSONDecodeError):
             pass
 
