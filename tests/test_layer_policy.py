@@ -271,81 +271,59 @@ class TestValidateLayerPolicy:
         assert len(mode_errors) == 0
 
     def test_bits_zero_skipped(self):
-        """bits=0 is falsy; implementation silently skips the warning."""
-        import warnings
-
+        """bits=0 is falsy; implementation silently skips the check."""
         policy = {
             "default": {"mode": "k8_v5_gs64", "bits": 0},
         }
-        with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
-            validate_layer_policy(policy)
-            assert len(w) == 0  # bits=0 silently ignored
+        errors = validate_layer_policy(policy)
+        bit_errors = [e for e in errors if "8-bit pack limit" in e]
+        assert len(bit_errors) == 0  # bits=0 silently ignored
 
-    def test_bits_nine_warns(self):
-        """bits >= 9 should trigger a warning about bit-packing."""
-        import warnings
-
+    def test_bits_nine_rejected(self):
+        """bits >= 9 should trigger an error about bit-packing."""
         policy = {
             "default": {"mode": "k8_v5_gs64", "bits": 9},
         }
-        with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
-            validate_layer_policy(policy)
-            assert len(w) == 1
-            assert "exceeds 8-bit pack limit" in str(w[0].message)
+        errors = validate_layer_policy(policy)
+        assert any("exceeds 8-bit pack limit" in e for e in errors)
+        assert any("cannot be memory-optimized" in e for e in errors)
 
-    def test_bits_eight_no_warning(self):
-        """bits=8 is inside the true bitpack range; no warning expected."""
-        import warnings
-
+    def test_bits_eight_ok(self):
+        """bits=8 is inside the true bitpack range; no error expected."""
         policy = {
             "default": {"mode": "k8_v5_gs64", "bits": 8},
         }
-        with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
-            validate_layer_policy(policy)
-            assert len(w) == 0
+        errors = validate_layer_policy(policy)
+        bit_errors = [e for e in errors if "8-bit pack limit" in e]
+        assert len(bit_errors) == 0
 
-    def test_cartesian_bits_warns(self):
-        """cartesian_bits key should also trigger bit-packing warning."""
-        import warnings
-
+    def test_cartesian_bits_rejected(self):
+        """cartesian_bits > 8 should trigger bit-packing error."""
         policy = {
             "default": {
                 "mode": "k8_v5_gs64",
                 "cartesian_bits": 10,
             },
         }
-        with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
-            validate_layer_policy(policy)
-            assert len(w) == 1
-            assert "exceeds 8-bit pack limit" in str(w[0].message)
+        errors = validate_layer_policy(policy)
+        assert any("exceeds 8-bit pack limit" in e for e in errors)
 
-    def test_bits_one_warns(self):
+    def test_bits_one_rejected(self):
         """bits=1 is below 2-bit pack threshold."""
-        import warnings
-
         policy = {
             "default": {"mode": "k8_v5_gs64", "bits": 1},
         }
-        with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
-            validate_layer_policy(policy)
-            assert len(w) == 1
+        errors = validate_layer_policy(policy)
+        assert any("exceeds 8-bit pack limit" in e for e in errors)
 
-    def test_bits_two_no_warning(self):
+    def test_bits_two_ok(self):
         """bits=2 is the lower bound of true bit-packing."""
-        import warnings
-
         policy = {
             "default": {"mode": "k8_v5_gs64", "bits": 2},
         }
-        with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
-            validate_layer_policy(policy)
-            assert len(w) == 0
+        errors = validate_layer_policy(policy)
+        bit_errors = [e for e in errors if "8-bit pack limit" in e]
+        assert len(bit_errors) == 0
 
 
 # ------------------------------------------------------------------

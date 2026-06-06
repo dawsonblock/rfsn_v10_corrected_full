@@ -8,11 +8,10 @@ logits, logging drift, and recommending fallbacks when quality degrades.
 from __future__ import annotations
 
 import json
-import math
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 # Optional MLX with pytest.importorskip fallback pattern
 try:
@@ -27,13 +26,21 @@ except ImportError:  # pragma: no cover
         class _MissingMLX:
             def __getattr__(self, name: str) -> Any:
                 raise AttributeError(
-                    f"mlx.core is not installed; attribute '{name}' unavailable"
+                    "mlx.core is not installed; "
+                    f"attribute '{name}' unavailable"
                 )
 
         mx = _MissingMLX()  # type: ignore[misc,assignment]
 
-DEFAULT_AUDIT_INTERVAL: int = 10
+DEFAULT_AUDIT_INTERVAL: int = 32
 DEFAULT_AUDIT_LOG_PATH: Path = Path("artifacts/runtime_logs/audit.jsonl")
+
+# Hardened thresholds per Phase 8 — experimental modes must not
+# drift silently
+DEFAULT_MIN_LOGIT_COSINE: float = 0.999
+DEFAULT_MAX_KL: float = 0.001
+DEFAULT_MIN_TOP5_OVERLAP: float = 0.95
+DEFAULT_FALLBACK_MODE: str = "k8_v5_gs64"
 
 
 @dataclass
@@ -133,7 +140,8 @@ def audit_decode_step(
         compressed_logits:  Logits from the compressed / quantized path.
         reference_logits:   Logits from the FP16 or stable reference path.
         step_num:           Current decode step index.
-        audit_interval:     Only compute metrics when ``step_num % audit_interval == 0``.
+        audit_interval:     Only compute metrics when
+                            ``step_num % audit_interval == 0``.
         labels:             Optional ground-truth token ids for NLL delta.
         log_path:           Optional destination for the audit JSONL event.
                             Defaults to ``DEFAULT_AUDIT_LOG_PATH``.
@@ -171,7 +179,9 @@ def audit_decode_step(
         else:
             log_probs_comp = mx.log(mx.maximum(p_comp, 1e-10))
         nll_ref = -mx.mean(log_probs_ref[mx.arange(lbl.shape[0]), lbl]).item()
-        nll_comp = -mx.mean(log_probs_comp[mx.arange(lbl.shape[0]), lbl]).item()
+        nll_comp = -mx.mean(
+            log_probs_comp[mx.arange(lbl.shape[0]), lbl]
+        ).item()
         nll_delta = nll_comp - nll_ref
 
     metrics = AuditMetrics(
@@ -202,31 +212,47 @@ def audit_decode_step(
     return metrics
 
 
-def check_drift(metrics: AuditMetrics) -> Optional[str]:
+def check_drift(
+    metrics: AuditMetrics,
+    min_logit_cosine: float = DEFAULT_MIN_LOGIT_COSINE,
+    max_kl: float = DEFAULT_MAX_KL,
+    min_top5_overlap: float = DEFAULT_MIN_TOP5_OVERLAP,
+    fallback_mode: str = DEFAULT_FALLBACK_MODE,
+) -> Optional[str]:
     """Return a fallback recommendation based on drift thresholds.
 
     Rules (in priority order):
 
     1. **NaN / Inf** → switch to ``FP16``
-    2. **logit_cosine < 0.98** → switch to ``k8_v5_gs64``
-    3. **KL > 0.05** → switch to ``stable``
+    2. **logit_cosine < min_logit_cosine** → switch to *fallback_mode*
+    3. **top5_overlap < min_top5_overlap** → switch to *fallback_mode*
+    4. **KL > max_kl** → switch to *fallback_mode*
 
     Args:
         metrics: Computed drift metrics.
+        min_logit_cosine: Minimum cosine similarity (default 0.999).
+        max_kl: Maximum KL divergence (default 0.001).
+        min_top5_overlap: Minimum top-5 overlap (default 0.95).
+        fallback_mode: Mode to fall back to (default ``k8_v5_gs64``).
 
     Returns:
-        Fallback mode string or ``None`` when no action is required.
+        Fallback mode string or ``None``
+        when no action is required.
     """
     if metrics.has_nan_inf:
         return "FP16"
-    if metrics.logit_cosine < 0.98:
-        return "k8_v5_gs64"
-    if metrics.kl_divergence > 0.05:
-        return "stable"
+    if metrics.logit_cosine < min_logit_cosine:
+        return fallback_mode
+    if metrics.top5_overlap < min_top5_overlap:
+        return fallback_mode
+    if metrics.kl_divergence > max_kl:
+        return fallback_mode
     return None
 
 
-def log_audit_event(event: AuditEvent, log_path: Optional[Path] = None) -> None:
+def log_audit_event(
+    event: AuditEvent, log_path: Optional[Path] = None
+) -> None:
     """Append an audit event to the JSONL audit log.
 
     Args:

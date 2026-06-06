@@ -28,39 +28,48 @@ from rfsn_v10.runtime.audit import (  # noqa: E402, I001
 class TestCheckDrift:
     def test_no_drift_returns_none(self):
         m = AuditMetrics(
-            logit_cosine=0.999,
-            top5_overlap=0.99,
-            kl_divergence=0.001,
+            logit_cosine=0.9995,
+            top5_overlap=0.96,
+            kl_divergence=0.0005,
             has_nan_inf=False,
         )
         assert check_drift(m) is None
 
     def test_nan_inf_triggers_fp16(self):
         m = AuditMetrics(
-            logit_cosine=0.999,
-            top5_overlap=0.99,
-            kl_divergence=0.001,
+            logit_cosine=0.9995,
+            top5_overlap=0.96,
+            kl_divergence=0.0005,
             has_nan_inf=True,
         )
         assert check_drift(m) == "FP16"
 
-    def test_low_cosine_triggers_k8_v5_gs64(self):
+    def test_low_cosine_triggers_fallback(self):
         m = AuditMetrics(
             logit_cosine=0.970,
             top5_overlap=0.80,
-            kl_divergence=0.001,
+            kl_divergence=0.0005,
             has_nan_inf=False,
         )
         assert check_drift(m) == "k8_v5_gs64"
 
-    def test_high_kl_triggers_stable(self):
+    def test_low_top5_triggers_fallback(self):
         m = AuditMetrics(
-            logit_cosine=0.990,
-            top5_overlap=0.95,
+            logit_cosine=0.9995,
+            top5_overlap=0.90,
+            kl_divergence=0.0005,
+            has_nan_inf=False,
+        )
+        assert check_drift(m) == "k8_v5_gs64"
+
+    def test_high_kl_triggers_fallback(self):
+        m = AuditMetrics(
+            logit_cosine=0.9995,
+            top5_overlap=0.96,
             kl_divergence=0.10,
             has_nan_inf=False,
         )
-        assert check_drift(m) == "stable"
+        assert check_drift(m) == "k8_v5_gs64"
 
     def test_priority_nan_over_cosine(self):
         """NaN/Inf has highest priority."""

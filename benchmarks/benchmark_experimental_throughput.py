@@ -406,9 +406,38 @@ def _benchmark_baseline(
 
 def _build_conclusion(results: list[dict[str, Any]]) -> dict[str, Any]:
     baseline = next((r for r in results if r["config"] == "baseline_fp16"), None)
+    stable_baseline = next((r for r in results if r["config"] == "stable_k8_v5_gs64"), None)
     conclusions: dict[str, Any] = {}
+
+    # Add derived comparison fields to each result row
+    baseline_ms = baseline.get("total_end_to_end_ms", 0.0) if baseline else 0.0
+    baseline_bytes = baseline.get("fp16_kv_bytes", 0) if baseline else 0
+    stable_ms = stable_baseline.get("total_end_to_end_ms", 0.0) if stable_baseline else 0.0
+    stable_bytes = stable_baseline.get("compressed_kv_bytes", 0) if stable_baseline else 0
+
     for r in results:
         name = r["config"]
+        total_ms = r.get("total_end_to_end_ms", 0.0)
+        compressed_bytes = r.get("compressed_kv_bytes", 0)
+
+        # Absolute vs FP16
+        r["slowdown_vs_fp16"] = (total_ms / baseline_ms) if baseline_ms else float("nan")
+        r["memory_savings_vs_fp16"] = (
+            (baseline_bytes - compressed_bytes) / baseline_bytes
+            if baseline_bytes else 0.0
+        )
+
+        # Compressed path vs stable k8_v5_gs64
+        if stable_ms and name != "stable_k8_v5_gs64":
+            r["speedup_vs_k8_v5_gs64"] = stable_ms / total_ms if total_ms else float("nan")
+            r["memory_savings_vs_k8_v5_gs64"] = (
+                (stable_bytes - compressed_bytes) / stable_bytes
+                if stable_bytes else 0.0
+            )
+        else:
+            r["speedup_vs_k8_v5_gs64"] = 1.0
+            r["memory_savings_vs_k8_v5_gs64"] = 0.0
+
         if name == "baseline_fp16":
             conclusions[name] = {
                 "verdict": "reference",
@@ -426,24 +455,54 @@ def _build_conclusion(results: list[dict[str, Any]]) -> dict[str, Any]:
         else:
             notes.append("negligible compression; not worth overhead")
 
-        # Speed must not be unacceptably slower
-        total_ms = r.get("total_end_to_end_ms", float("inf"))
-        baseline_ms = baseline.get("total_end_to_end_ms", 0.0) if baseline else 0.0
+        # Speed must not be unacceptably slower (absolute vs FP16)
         if baseline_ms and total_ms > baseline_ms * 3.0:
-            notes.append(f"much slower ({total_ms / baseline_ms:.1f}x baseline)")
+            notes.append(f"much slower vs FP16 ({r['slowdown_vs_fp16']:.1f}x)")
             verdict = "rejected_speed"
         elif baseline_ms and total_ms > baseline_ms * 1.5:
-            notes.append(f"slower ({total_ms / baseline_ms:.1f}x baseline)")
+            notes.append(f"slower vs FP16 ({r['slowdown_vs_fp16']:.1f}x)")
             verdict = "candidate_slow"
         else:
-            notes.append(f"speed acceptable ({total_ms / baseline_ms:.1f}x baseline)")
+            notes.append(f"speed acceptable vs FP16 ({r['slowdown_vs_fp16']:.1f}x)")
             if ratio is not None and ratio > 1.05:
                 verdict = "candidate"
 
         conclusions[name] = {
             "verdict": verdict,
             "notes": "; ".join(notes),
+            "absolute_vs_fp16": {
+                "slowdown": r["slowdown_vs_fp16"],
+                "memory_savings": r["memory_savings_vs_fp16"],
+            },
+            "compressed_vs_stable_k8_v5_gs64": {
+                "speedup": r.get("speedup_vs_k8_v5_gs64", float("nan")),
+                "memory_savings": r.get("memory_savings_vs_k8_v5_gs64", 0.0),
+            },
         }
+
+    # Ranking section
+    compressed_results = [r for r in results if r.get("config") != "baseline_fp16"]
+    if compressed_results and stable_baseline:
+        fastest = min(
+            compressed_results,
+            key=lambda r: r.get("total_end_to_end_ms", float("inf")),
+        )
+        best_memory = max(
+            compressed_results,
+            key=lambda r: r.get("compression_ratio", 0.0),
+        )
+        conclusions["ranking"] = {
+            "fastest_compressed": fastest["config"],
+            "best_memory_compressed": best_memory["config"],
+            "stable_default": "stable_k8_v5_gs64",
+            "best_conservative_quality": "stable_k8_v5_gs32",
+            "caveat": (
+                "This benchmark uses a tiny synthetic KV shape. "
+                "The ratios reflect current implementation overhead, not theoretical limits. "
+                "Do not conclude all compression is useless; conclude the current Python/MLX overhead dominates."
+            ),
+        }
+
     return conclusions
 
 

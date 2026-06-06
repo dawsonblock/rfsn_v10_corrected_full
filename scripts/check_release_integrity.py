@@ -442,6 +442,62 @@ def check() -> list[str]:
                     f"memory_accounting.json parse error: {exc}"
                 )
 
+    # --- Experimental artifact manifest ---
+    exp_dir = root / "artifacts" / "proof" / "experimental"
+    manifest_path = exp_dir / "artifact_manifest.json"
+    if not manifest_path.exists():
+        errors.append(
+            "artifacts/proof/experimental/artifact_manifest.json missing"
+        )
+    else:
+        try:
+            manifest = json.loads(
+                manifest_path.read_text(encoding="utf-8")
+            )
+            if manifest.get("release") != "experimental":
+                errors.append(
+                    "artifact_manifest.json release "
+                    "field is not 'experimental'"
+                )
+            if manifest.get("stable_default") != "k8_v5_gs64":
+                errors.append(
+                    "artifact_manifest.json stable_default is not 'k8_v5_gs64'"
+                )
+            if manifest.get("qjl_status") != "failed_disabled":
+                errors.append(
+                    "artifact_manifest.json qjl_status "
+                    "is not 'failed_disabled'"
+                )
+            if manifest.get("promoted_to_default") is not False:
+                errors.append(
+                    "artifact_manifest.json promoted_to_default must be false"
+                )
+            expected_artifacts = {
+                "comparison": "comparison_summary.json",
+                "memory": "memory_accounting.json",
+                "throughput": "throughput.json",
+                "qjl": "qjl_attention_score.json",
+                "layer_policy": "layer_policy.json",
+                "qwen_1_5b": "qwen_1_5b/",
+            }
+            actual_artifacts = manifest.get("artifacts", {})
+            for key, expected_path in expected_artifacts.items():
+                actual = actual_artifacts.get(key)
+                if actual != expected_path:
+                    errors.append(
+                        f"artifact_manifest.json artifact '{key}' expected "
+                        f"'{expected_path}', got '{actual}'"
+                    )
+                # Also verify the file/directory exists
+                artifact_path = exp_dir / expected_path
+                if not artifact_path.exists():
+                    errors.append(
+                        f"artifact_manifest.json missing artifact on disk: "
+                        f"{expected_path}"
+                    )
+        except (OSError, json.JSONDecodeError) as exc:
+            errors.append(f"artifact_manifest.json parse error: {exc}")
+
     # --- Stale artifact directories ---
     proof_dir = root / "artifacts" / "proof"
     if proof_dir.exists():

@@ -12,7 +12,7 @@ import pytest
 
 mx = pytest.importorskip("mlx.core")
 
-from rfsn_v10.quantization.block_unpack import unpack_blocks, dequantize_full
+from rfsn_v10.quantization.block_unpack import unpack_blocks, dequantize_full, dequantize_kv_blocks
 
 
 # ------------------------------------------------------------------
@@ -152,3 +152,37 @@ class TestBlockUnpack:
             bits=bits, group_size=group_size, shape=shape,
         )
         assert all_blocks.shape == (1, 4, 256, 64)
+
+    def test_dequantize_kv_blocks_runs(self):
+        """dequantize_kv_blocks should delegate to k and v block paths."""
+        shape = (1, 4, 256, 64)
+        bits = 4
+        block_size = 64
+        group_size = 64
+        packed, scales = _make_test_packed(shape, bits, block_size, group_size)
+        num_blocks = shape[2] // block_size
+
+        # Build minimal packet objects with 1D per-block scales
+        class FakePacket:
+            def __init__(self, packed, bits, num_blocks):
+                self.k_packed = packed
+                # dequantize_k_blocks expects scalar or 1D scale slices
+                self.k_scales = mx.ones((num_blocks,), dtype=mx.float32)
+                self.k_bits = bits
+                self.v_packed = packed
+                self.v_scales = mx.ones((num_blocks,), dtype=mx.float32)
+                self.v_bits = bits
+                self.block_size = block_size
+                self.num_blocks = num_blocks
+                self.k_block_packed_offsets = [0] * num_blocks
+                self.k_block_scale_offsets = list(range(num_blocks))
+                self.k_block_n_values = [block_size * 4 * 64] * num_blocks
+                self.v_block_packed_offsets = [0] * num_blocks
+                self.v_block_scale_offsets = list(range(num_blocks))
+                self.v_block_n_values = [block_size * 4 * 64] * num_blocks
+
+        k_pkt = FakePacket(packed, bits, num_blocks)
+        v_pkt = FakePacket(packed, bits, num_blocks)
+        k_out, v_out = dequantize_kv_blocks(k_pkt, v_pkt, [0, 1])
+        assert k_out is not None
+        assert v_out is not None

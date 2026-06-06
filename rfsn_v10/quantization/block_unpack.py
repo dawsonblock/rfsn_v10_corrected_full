@@ -215,6 +215,26 @@ def dequantize_v_blocks(
     return mx.concatenate(out_blocks)
 
 
+def dequantize_kv_blocks(
+    k_packet: Any,
+    v_packet: Any,
+    block_indices: mx.array | list[int],
+) -> tuple[mx.array, mx.array]:
+    """Dequantize selected K and V blocks from packet-like objects.
+
+    Args:
+        k_packet: Object with fields required by ``dequantize_k_blocks``.
+        v_packet: Object with fields required by ``dequantize_v_blocks``.
+        block_indices: Block IDs to reconstruct for both K and V.
+
+    Returns:
+        Tuple of reconstructed (K, V) tensors for selected blocks.
+    """
+    k_blocks = dequantize_k_blocks(k_packet, block_indices)
+    v_blocks = dequantize_v_blocks(v_packet, block_indices)
+    return k_blocks, v_blocks
+
+
 def dequantize_full(
     packed: mx.array,
     scales: mx.array,

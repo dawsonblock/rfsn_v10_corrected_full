@@ -98,6 +98,29 @@ class ExperimentalQuantState:
     audit_samples: list[Dict[str, Any]] = field(default_factory=list)
 
 
+@dataclass
+class PreparedCache:
+    """Prepared cache mode storage.
+
+    Caches scales, packed buffers, block offsets, and dequantized scratch
+    blocks to avoid repeated decode overhead.
+    """
+
+    skill_pattern: str = ""
+    k_packed: Any = None
+    v_packed: Any = None
+    k_scales: Any = None
+    v_scales: Any = None
+    block_offsets: list[int] = field(default_factory=list)
+    dequantized_k: Optional[mx.array] = None
+    dequantized_v: Optional[mx.array] = None
+    hits: int = 0
+    misses: int = 0
+
+    def is_valid_for(self, skill_pattern: str) -> bool:
+        return self.skill_pattern == skill_pattern and self.k_packed is not None
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -256,6 +279,7 @@ class ExperimentalQuantRuntime:
         # Runtime state
         self.state = ExperimentalQuantState()
         self._step_num = 0
+        self._prepared_cache: Dict[str, PreparedCache] = {}
 
         # Log startup
         self._log_startup()
@@ -426,13 +450,29 @@ class ExperimentalQuantRuntime:
             )
 
         elif scoring_mode == "prepared":
-            # Pre-compute dequantized blocks once and reuse
-            t_deq = time.monotonic()
-            retrieved = manager.retrieve(skill_pattern)
-            dequant_time_ms = (time.monotonic() - t_deq) * 1000.0
-            if retrieved is None:
-                raise RuntimeError("retrieve() returned None after store()")
-            k_prep, v_prep = retrieved
+            # Prepared cache mode: reuse dequantized blocks across decode steps
+            cache_key = f"{layer_id}:{skill_pattern}"
+            prep = self._prepared_cache.get(cache_key)
+            if prep is None or not prep.is_valid_for(skill_pattern):
+                t_deq = time.monotonic()
+                retrieved = manager.retrieve(skill_pattern)
+                dequant_time_ms = (time.monotonic() - t_deq) * 1000.0
+                if retrieved is None:
+                    raise RuntimeError("retrieve() returned None after store()")
+                k_prep, v_prep = retrieved
+                prep = PreparedCache(
+                    skill_pattern=skill_pattern,
+                    dequantized_k=k_prep,
+                    dequantized_v=v_prep,
+                    misses=1,
+                )
+                self._prepared_cache[cache_key] = prep
+            else:
+                k_prep = prep.dequantized_k
+                v_prep = prep.dequantized_v
+                prep.hits += 1
+                if k_prep is None or v_prep is None:
+                    raise RuntimeError("PreparedCache has stale dequantized blocks")
             attn_output = score_attention_prepared(queries, k_prep, v_prep)
 
         elif scoring_mode == "packed_block":
