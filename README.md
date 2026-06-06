@@ -457,6 +457,28 @@ python benchmarks/benchmark_generation_throughput.py \
 python scripts/check_release_integrity.py
 ```
 
+## Current Runtime Diagnosis
+
+Static validation and raw K/V roundtrip metrics look strong, but real teacher-forced generation shows material logit drift for compressed paths. Prefill quantization is mostly stable; the weak point is quantized decode/update. Experimental modes remain research-only until decode diagnostics are resolved and teacher-forced logits pass defined gates.
+
+### Decode Diagnostic Status (Main 28 Build 13)
+
+| Config | Classification | Notes |
+|--------|---------------|-------|
+| baseline_fp16 | reference | FP16 reference |
+| k8_v5_gs64 | locked default, teacher-forced drift under investigation | Decode-update passes; drift source is teacher-forced mode |
+| k8_v5_gs32 | quality candidate, teacher-forced drift under investigation | Decode-update passes; drift source is teacher-forced mode |
+| experimental_hybrid | free-running match, teacher-forced failed | Experimental only; not production-ready |
+| turbo_polar | rejected generation divergence | Experimental only; not production-ready |
+| adaptive | rejected generation divergence | Experimental only; not production-ready |
+| QJL | disabled | Attention score benchmark failed |
+
+**Key findings from decode diagnostics:**
+- Stable configs (k8_v5_gs64, k8_v5_gs32) pass all decode-update trace checks (cosine ≥ 0.999 across 7 decode steps × 2 prompt lengths)
+- Old-cache is not corrupted by appending a new quantized decode token
+- New-token K/V quantization error is the primary degradation source in experimental configs
+- The remaining promotion blockers are: teacher_forced_logit_drift, decode_update_failure (experimental), qjl_failed
+
 ## Design Notes
 - Tests are deterministic; wall-clock runtime depends on hardware and MLX availability
 - Sparse attention is decode-only (T_q=1) with prefill dense fallback

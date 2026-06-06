@@ -4,11 +4,9 @@
   "promoted_to_default": false,
   "teacher_forced_baseline_valid": true,
   "promotion_blocked_by": [
-    "teacher_forced_drift_unresolved",
-    "decode_quantization_weakness",
-    "throughput_overhead",
+    "teacher_forced_logit_drift",
     "qjl_failed",
-    "placeholder_diagnostics"
+    "decode_update_failure"
   ],
   "experimental_status": "research_only",
   "classifications": {
@@ -33,6 +31,7 @@
     "has_0_5b_validation": true,
     "has_throughput": true,
     "has_real_generation_throughput": true,
+    "has_decode_diagnostics": true,
     "has_1_5b_validation": true,
     "has_layer_policy": true,
     "has_sensitivity": true
@@ -40,10 +39,13 @@
   "promotion_rules": [
     "stable_default: locked default runtime",
     "stable_default_under_teacher_forced_drift: locked default runtime, teacher-forced drift unresolved",
+    "stable_default_decode_update_issue: locked default runtime, decode-update degraded",
     "quality_candidate: better quality, acceptable throughput",
     "quality_candidate_under_teacher_forced_drift: proven at 0.5B, teacher-forced drift unresolved",
+    "quality_candidate_decode_update_issue: proven at 0.5B, decode-update degraded",
     "stable_baseline: proven stable config",
     "stable_baseline_under_teacher_forced_drift: proven at 0.5B, teacher-forced drift unresolved",
+    "stable_baseline_decode_update_issue: proven at 0.5B, decode-update degraded",
     "stable_needs_data: missing context validation",
     "rejected_quality: fails 512/1024/2048",
     "rejected_memory: missing compressed bytes or raw uint32 fallback",

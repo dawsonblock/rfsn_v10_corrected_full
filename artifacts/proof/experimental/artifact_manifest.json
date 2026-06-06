@@ -5,18 +5,29 @@
   "promoted_to_default": false,
   "real_generation_teacher_forced_status": "valid",
   "promotion_blockers": [
-    "decode_quantization_weakness",
-    "throughput_overhead",
+    "teacher_forced_logit_drift",
+    "decode_update_failure",
     "qjl_failed"
   ],
   "experimental_modes": "research_only",
+  "decode_update_diagnosis": "stable_configs_pass_decode_update_experimental_fail",
   "artifacts": {
     "comparison": "comparison_summary.json",
     "memory": "memory_accounting.json",
     "throughput": "throughput.json",
     "real_generation_throughput": "real_generation_throughput.json",
-    "decode_update_trace": "decode_update_trace.json",
-    "decode_append_kv_diff": "decode_append_kv_diff.json",
+    "decode_update_trace": {
+      "path": "decode_update_trace.json",
+      "status": "executed",
+      "rows": 70,
+      "purpose": "step-level decode cache/update diagnostics"
+    },
+    "decode_append_kv_diff": {
+      "path": "decode_append_kv_diff.json",
+      "status": "executed",
+      "rows": 10,
+      "purpose": "old-cache preservation and new-token K/V append diagnostics"
+    },
     "kv_roundtrip_by_context": "kv_roundtrip_by_context.json",
     "prefill_decode_split": "prefill_decode_split.json",
     "short_prompt_drift_trace": "short_prompt_drift_trace.json",

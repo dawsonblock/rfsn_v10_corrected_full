@@ -782,6 +782,100 @@ def check() -> list[str]:
             except (OSError, json.JSONDecodeError):
                 pass
 
+    # --- Deep field validation: decode_update_trace.json ---
+    def check_decode_update_trace(errors: list) -> None:
+        path = (
+            root / "artifacts" / "proof" / "experimental"
+            / "decode_update_trace.json"
+        )
+        if not path.exists():
+            errors.append("decode_update_trace.json missing")
+            return
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            errors.append("decode_update_trace.json is not valid JSON")
+            return
+        if data.get("status") in {"awaiting_execution", "placeholder"}:
+            errors.append(
+                "decode_update_trace.json is a placeholder "
+                f"(status={data.get('status')})"
+            )
+            return
+        traces = data.get("traces", [])
+        if not traces:
+            errors.append("decode_update_trace.json has empty traces")
+            return
+        required = {
+            "config",
+            "prompt_tokens",
+            "decode_step",
+            "kv_len_before",
+            "kv_len_after",
+            "position_id",
+            "cache_position",
+            "logit_cosine_vs_fp16",
+            "top5_overlap_vs_fp16",
+            "kl_vs_fp16",
+            "status",
+        }
+        for i, row in enumerate(traces):
+            if "error" in row:
+                continue
+            missing = required - set(row)
+            if missing:
+                errors.append(
+                    f"decode_update_trace row {i} missing "
+                    f"{sorted(missing)}"
+                )
+
+    check_decode_update_trace(errors)
+
+    # --- Deep field validation: decode_append_kv_diff.json ---
+    def check_decode_append_kv_diff(errors: list) -> None:
+        path = (
+            root / "artifacts" / "proof" / "experimental"
+            / "decode_append_kv_diff.json"
+        )
+        if not path.exists():
+            errors.append("decode_append_kv_diff.json missing")
+            return
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            errors.append("decode_append_kv_diff.json is not valid JSON")
+            return
+        if data.get("status") in {"awaiting_execution", "placeholder"}:
+            errors.append(
+                "decode_append_kv_diff.json is a placeholder "
+                f"(status={data.get('status')})"
+            )
+            return
+        results = data.get("results", [])
+        if not results:
+            errors.append("decode_append_kv_diff.json has empty results")
+            return
+        required = {
+            "config",
+            "prompt_tokens",
+            "old_cache_k_cosine_after_append",
+            "new_token_k_cosine",
+            "kv_order_preserved",
+            "cache_len_correct",
+            "status",
+        }
+        for i, row in enumerate(results):
+            if "error" in row:
+                continue
+            missing = required - set(row)
+            if missing:
+                errors.append(
+                    f"decode_append_kv_diff result {i} missing "
+                    f"{sorted(missing)}"
+                )
+
+    check_decode_append_kv_diff(errors)
+
     # --- Teacher-forced baseline identity check ---
     real_gen_path = (
         root

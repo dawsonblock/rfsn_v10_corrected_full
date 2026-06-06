@@ -128,6 +128,31 @@ def _has_free_running_divergence(
     return False
 
 
+def _check_decode_update_trace(
+    trace_data: dict[str, Any] | None, cfg_name: str
+) -> tuple[bool, bool]:
+    """Return (has_data, decode_update_pass) for a config.
+
+    A config passes decode-update if all non-error rows for it have
+    status == 'pass' (cosine >= 0.99 and top5 >= 0.80).
+    """
+    if trace_data is None:
+        return False, False
+    traces = trace_data.get("traces", [])
+    cfg_rows = [
+        r for r in traces
+        if r.get("config") == cfg_name and "error" not in r
+    ]
+    if not cfg_rows:
+        error_rows = [
+            r for r in traces
+            if r.get("config") == cfg_name and "error" in r
+        ]
+        return bool(error_rows), False
+    all_pass = all(r.get("status") == "pass" for r in cfg_rows)
+    return True, all_pass
+
+
 def classify_configs(exp_dir: Path) -> dict[str, Any]:
     """Classify configs based on available evidence."""
     qwen_dir = exp_dir / "qwen_1_5b"
@@ -153,6 +178,16 @@ def classify_configs(exp_dir: Path) -> dict[str, Any]:
 
     # Global gate: teacher-forced baseline must be identity
     baseline_valid = teacher_forced_baseline_is_valid(real_gen_tp)
+
+    # Load decode diagnostics
+    decode_trace_data = _load_json(exp_dir / "decode_update_trace.json")
+    has_decode_diagnostics = (
+        decode_trace_data is not None
+        and decode_trace_data.get("status") not in {
+            "awaiting_execution", "placeholder"
+        }
+        and bool(decode_trace_data.get("traces"))
+    )
 
     # Load 1.5B validation if available
     qwen_real = _load_json(
@@ -192,6 +227,11 @@ def classify_configs(exp_dir: Path) -> dict[str, Any]:
             real_gen_tp, real_gen_name
         )
 
+        # Decode-update diagnostic gate — checked when diagnostics available
+        du_has, du_pass = _check_decode_update_trace(
+            decode_trace_data, real_gen_name
+        )
+
         if is_stable:
             if not (pass_512 and pass_1024 and pass_2048 and has_mem):
                 classifications[name] = "stable_needs_data"
@@ -212,32 +252,42 @@ def classify_configs(exp_dir: Path) -> dict[str, Any]:
                 )
                 continue
             if tf_has and not tf_pass:
+                # Teacher-forced failed; check if decode-update also failed
+                decode_suffix = (
+                    "_decode_update_issue"
+                    if (du_has and not du_pass)
+                    else "_under_teacher_forced_drift"
+                )
                 if name == "stable_k8_v5_gs64":
-                    classifications[name] = (
-                        "stable_default_under_teacher_forced_drift"
-                    )
+                    label = "stable_default" + decode_suffix
+                    classifications[name] = label
                     notes.append(
-                        f"{name}: "
-                        "stable_default_under_teacher_forced_drift — "
+                        f"{name}: {label} — "
                         "locked default runtime, teacher-forced drift "
                         "unresolved"
+                        + (
+                            ", decode-update degraded"
+                            if decode_suffix == "_decode_update_issue"
+                            else ""
+                        )
                     )
                 elif name == "stable_k8_v5_gs32":
-                    classifications[name] = (
-                        "quality_candidate_under_teacher_forced_drift"
-                    )
+                    label = "quality_candidate" + decode_suffix
+                    classifications[name] = label
                     notes.append(
-                        f"{name}: "
-                        "quality_candidate_under_teacher_forced_drift — "
+                        f"{name}: {label} — "
                         "proven at 0.5B, teacher-forced drift unresolved"
+                        + (
+                            ", decode-update degraded"
+                            if decode_suffix == "_decode_update_issue"
+                            else ""
+                        )
                     )
                 else:
-                    classifications[name] = (
-                        "stable_baseline_under_teacher_forced_drift"
-                    )
+                    label = "stable_baseline" + decode_suffix
+                    classifications[name] = label
                     notes.append(
-                        f"{name}: "
-                        "stable_baseline_under_teacher_forced_drift — "
+                        f"{name}: {label} — "
                         "proven at 0.5B, teacher-forced drift unresolved"
                     )
                 continue
@@ -460,24 +510,19 @@ def classify_configs(exp_dir: Path) -> dict[str, Any]:
                     f"{name}: experimental_only — baseline missing"
                 )
 
+    # Build promotion_blocked_by list reflecting current evidence
+    promotion_blocked_by: list[str] = ["teacher_forced_logit_drift", "qjl_failed"]
+    if has_decode_diagnostics:
+        promotion_blocked_by.append("decode_update_failure")
+    else:
+        promotion_blocked_by.append("decode_update_diagnostics_pending")
+
     return {
         "release": "experimental",
         "stable_default": "k8_v5_gs64",
         "promoted_to_default": False,
         "teacher_forced_baseline_valid": baseline_valid,
-        "promotion_blocked_by": [
-            "teacher_forced_drift_unresolved",
-            "decode_quantization_weakness",
-            "throughput_overhead",
-            "qjl_failed",
-            "placeholder_diagnostics",
-        ] if not baseline_valid else [
-            "teacher_forced_drift_unresolved",
-            "decode_quantization_weakness",
-            "throughput_overhead",
-            "qjl_failed",
-            "placeholder_diagnostics",
-        ],
+        "promotion_blocked_by": promotion_blocked_by,
         "experimental_status": "research_only",
         "classifications": classifications,
         "notes": notes,
@@ -485,6 +530,7 @@ def classify_configs(exp_dir: Path) -> dict[str, Any]:
             "has_0_5b_validation": bool(comp),
             "has_throughput": bool(throughput),
             "has_real_generation_throughput": has_real_gen_tp,
+            "has_decode_diagnostics": has_decode_diagnostics,
             "has_1_5b_validation": bool(qwen_real),
             "has_layer_policy": (exp_dir / "layer_policy.json").exists(),
             "has_sensitivity": (
@@ -497,15 +543,27 @@ def classify_configs(exp_dir: Path) -> dict[str, Any]:
                 "stable_default_under_teacher_forced_drift: "
                 "locked default runtime, teacher-forced drift unresolved"
             ),
+            (
+                "stable_default_decode_update_issue: "
+                "locked default runtime, decode-update degraded"
+            ),
             "quality_candidate: better quality, acceptable throughput",
             (
                 "quality_candidate_under_teacher_forced_drift: "
                 "proven at 0.5B, teacher-forced drift unresolved"
             ),
+            (
+                "quality_candidate_decode_update_issue: "
+                "proven at 0.5B, decode-update degraded"
+            ),
             "stable_baseline: proven stable config",
             (
                 "stable_baseline_under_teacher_forced_drift: "
                 "proven at 0.5B, teacher-forced drift unresolved"
+            ),
+            (
+                "stable_baseline_decode_update_issue: "
+                "proven at 0.5B, decode-update degraded"
             ),
             "stable_needs_data: missing context validation",
             "rejected_quality: fails 512/1024/2048",
