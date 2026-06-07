@@ -136,7 +136,7 @@ The classifier must remain `3 - Alpha` until **all** items below are checked:
 - [x] `docker build -t rfsn-qjl . && docker run --rm rfsn-qjl` — PASS (healthcheck default CMD)
 - [x] Benchmarks re-run with quality + speed metrics - PASS (4 suites, cos >= 0.99998)
 - [x] README updated with inference server section
-- [ ] Archive created with `git archive` (not Finder zip)
+- [x] Archive created with `git archive` (not Finder zip)
 
 ---
 
