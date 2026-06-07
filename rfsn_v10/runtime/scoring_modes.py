@@ -217,7 +217,7 @@ def score_attention_score_corrected(
     Args:
         queries:       [B, H, T_q, D]
         keys_packet:   opaque packed key container.
-        values_packet: opaque packed value container.
+        values_packet: dequantized values of shape ``[B, H, T_k, D]``.
         correction_fn: callable that takes
                        ``(queries, keys_packet, **kwargs)`` and returns
                        corrected scores of shape ``[B, H, T_q, T_k]``.
@@ -226,10 +226,15 @@ def score_attention_score_corrected(
 
     Raises:
         ValueError: If *correction_fn* is not provided.
+        TypeError: If *values_packet* is not an mlx array.
     """
     if correction_fn is None:
         raise ValueError(
             "score_attention_score_corrected requires correction_fn"
+        )
+    if not isinstance(values_packet, mx.array):
+        raise TypeError(
+            f"values_packet must be an mx.array, got {type(values_packet).__name__}"
         )
     scores = correction_fn(queries, keys_packet, **kwargs) * scale
     # Stable softmax

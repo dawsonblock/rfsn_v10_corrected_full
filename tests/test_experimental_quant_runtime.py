@@ -103,10 +103,10 @@ class TestLoadLayerPolicy:
         path = tmp_path / "policy.json"
         path.write_text(json.dumps(data))
         policy = _load_layer_policy(str(path))
-        assert "0" in policy
-        assert "1" in policy
-        assert policy["0"].k_bits == 8
-        assert policy["1"].v_bits == 4
+        assert 0 in policy
+        assert 1 in policy
+        assert policy[0].k_bits == 8
+        assert policy[1].v_bits == 4
 
     def test_load_structured_policy(self, tmp_path):
         data = {
@@ -118,8 +118,8 @@ class TestLoadLayerPolicy:
         path = tmp_path / "policy.json"
         path.write_text(json.dumps(data))
         policy = _load_layer_policy(str(path))
-        assert "0" in policy
-        assert policy["0"].k_bits == 8
+        assert 0 in policy
+        assert policy[0].k_bits == 8
 
     def test_none_path_returns_empty(self):
         assert _load_layer_policy(None) == {}
@@ -187,7 +187,7 @@ class TestTelemetryLogging:
         log_path = tmp_path / "experimental_quant_telemetry.jsonl"
         lines = log_path.read_text(encoding="utf-8").strip().split("\n")
         record = json.loads(lines[0])
-        assert record["layer_policy_layers"] == ["0"]
+        assert record["layer_policy_layers"] == [0]
         _ = runtime
 
 

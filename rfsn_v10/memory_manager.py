@@ -18,8 +18,6 @@ from typing import Any
 class TenantId(str):
     """Tenant identifier for multi-tenant isolation."""
 
-    pass
-
 
 class MemoryRegion(Enum):
     """Memory region types."""
@@ -168,7 +166,6 @@ class MemoryLeakDetector:
         if len(self.snapshots) < 2:
             return {"leaks": []}
 
-        time.time()
         oldest_snapshot = self.snapshots[0]
         newest_snapshot = self.snapshots[-1]
 

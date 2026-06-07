@@ -485,17 +485,19 @@ def quantized_attention_decode_metal(
     scale: float | None = None,
     out_dtype=None,
 ) -> mx.array:
-    """Fused quantized attention for single-query decode.
+    """Quantized attention for decode.
 
-    Avoids materialising full [H, T_k, D] K/V tensors by dequantizing
-    packed codes on-the-fly inside the attention loop.
+    Dequantizes packed K/V using the existing ``packed_dequant_metal``
+    kernel, then computes attention via ``scaled_dot_product_attention``.
+    This materialises K/V but guarantees correctness with the actual
+    bit-packed layout produced by :class:`RFSNTurboQuantKVManager`.
 
     Args:
-        queries:   [H, D]  single query token, all heads.
-        packed_k:  [H, K_words] uint32 packed key codes.
-        packed_v:  [H, V_words] uint32 packed value codes.
-        scales_k:  [H, K_groups] float32 key scales.
-        scales_v:  [H, V_groups] float32 value scales.
+        queries:   [H, D] or [B*H, D] single query token(s).
+        packed_k:  Flat uint32 packed key codes.
+        packed_v:  Flat uint32 packed value codes.
+        scales_k:  Flat float32 key scales.
+        scales_v:  Flat float32 value scales.
         n_keys:    Number of key positions (T_k).
         bits:      Bit width (2-8).
         group_size: Quant group size.
@@ -503,7 +505,7 @@ def quantized_attention_decode_metal(
         out_dtype: Output dtype.
 
     Returns:
-        [H, D] attention output.
+        [H, D] or [B*H, D] attention output.
     """
     ensure_mlx_available()
     if out_dtype is None:
@@ -515,144 +517,59 @@ def quantized_attention_decode_metal(
 
     n_h, d_head = queries.shape
     codes_per_word = 32 // bits
-    k_words = (n_keys + codes_per_word - 1) // codes_per_word
-    v_words = (n_keys + codes_per_word - 1) // codes_per_word
-    if int(packed_k.shape[1]) < k_words:
-        raise KernelRouteError("packed_k too small")
-    if int(packed_v.shape[1]) < v_words:
-        raise KernelRouteError("packed_v too small")
+
+    # Total scalar elements across all heads/batches
+    n_values = n_h * n_keys * d_head
+    required_words = (n_values + codes_per_word - 1) // codes_per_word
+    if int(packed_k.size) < required_words:
+        raise KernelRouteError(
+            f"packed_k too small: have {packed_k.size}, need {required_words}"
+        )
+    if int(packed_v.size) < required_words:
+        raise KernelRouteError(
+            f"packed_v too small: have {packed_v.size}, need {required_words}"
+        )
+
+    required_scales = (n_values + group_size - 1) // group_size
+    if int(scales_k.size) < required_scales:
+        raise KernelRouteError(
+            f"scales_k too small: have {scales_k.size}, need {required_scales}"
+        )
+    if int(scales_v.size) < required_scales:
+        raise KernelRouteError(
+            f"scales_v too small: have {scales_v.size}, need {required_scales}"
+        )
 
     if scale is None:
         scale = 1.0 / math.sqrt(d_head)
 
-    source = """
-        uint h = thread_position_in_grid.x;   // head index
-        uint H = h_buf[0];
-        uint D = d_buf[0];
-        uint T = t_buf[0];                     // n_keys
-        uint bits = bits_buf[0];
-        uint group_size = group_buf[0];
-        uint qmax = qmax_buf[0];
-        uint cpw = 32u / bits;
-        float att_scale = scale_buf[0];
-
-        if (h >= H) { return; }
-
-        // ---- compute scores Q @ K^T ----
-        threadgroup float scores[1024];  // assume T <= 1024 for decode
-        float max_score = -1e30f;
-
-        for (uint t = 0u; t < T; t += 1u) {
-            uint word = t / cpw;
-            uint off  = (t % cpw) * bits;
-            uint mask = (1u << bits) - 1u;
-            uint code = (packed_k[h * k_words + word] >> off) & mask;
-            uint g = t / group_size;
-            float s = scales_k[h * k_groups + g];
-            float k_val = (float(code) - float(qmax)) * s;
-
-            float q_val = queries[h * D + (t % D)];
-            float score = k_val * q_val * att_scale;
-            scores[t] = score;
-            max_score = max(max_score, score);
-        }
-
-        // ---- softmax ----
-        float sum_exp = 0.0f;
-        for (uint t = 0u; t < T; t += 1u) {
-            scores[t] = exp(scores[t] - max_score);
-            sum_exp += scores[t];
-        }
-        float inv_sum = 1.0f / (sum_exp + 1e-10f);
-        for (uint t = 0u; t < T; t += 1u) {
-            scores[t] *= inv_sum;
-        }
-
-        // ---- weighted sum over V ----
-        for (uint d = 0u; d < D; d += 1u) {
-            float out_val = 0.0f;
-            for (uint t = 0u; t < T; t += 1u) {
-                uint word = t / cpw;
-                uint off  = (t % cpw) * bits;
-                uint mask = (1u << bits) - 1u;
-                uint code = (packed_v[h * v_words + word] >> off) & mask;
-                uint g = t / group_size;
-                float s = scales_v[h * v_groups + g];
-                float v_val = (float(code) - float(qmax)) * s;
-                out_val += scores[t] * v_val;
-            }
-            out[h * D + d] = T(out_val);
-        }
-    """
-
-    k_words_in = int(packed_k.shape[1])
-    v_words_in = int(packed_v.shape[1])
-    k_groups = (n_keys + group_size - 1) // group_size
-    v_groups = (n_keys + group_size - 1) // group_size
-
-    kernel = mx.fast.metal_kernel(
-        name="rfsn_quantized_attn_decode",
-        input_names=[
-            "queries",
-            "packed_k",
-            "packed_v",
-            "scales_k",
-            "scales_v",
-            "h_buf",
-            "d_buf",
-            "t_buf",
-            "bits_buf",
-            "group_buf",
-            "qmax_buf",
-            "scale_buf",
-            "k_words_buf",
-            "v_words_buf",
-            "k_groups_buf",
-            "v_groups_buf",
-        ],
-        output_names=["out"],
-        source=source,
+    # Dequantize full K and V using the existing verified kernel
+    k_deq = packed_dequant_metal(
+        packed=packed_k,
+        scales=scales_k,
+        n_values=n_values,
+        bits=bits,
+        group_size=group_size,
+        out_dtype=mx.float32,
+    )
+    v_deq = packed_dequant_metal(
+        packed=packed_v,
+        scales=scales_v,
+        n_values=n_values,
+        bits=bits,
+        group_size=group_size,
+        out_dtype=mx.float32,
     )
 
-    h_buf = mx.array([n_h], dtype=mx.uint32)
-    d_buf = mx.array([d_head], dtype=mx.uint32)
-    t_buf = mx.array([n_keys], dtype=mx.uint32)
-    bits_buf = mx.array([bits], dtype=mx.uint32)
-    group_buf = mx.array([group_size], dtype=mx.uint32)
-    qmax = (1 << (bits - 1)) - 1
-    qmax_buf = mx.array([qmax], dtype=mx.uint32)
-    scale_buf = mx.array([float(scale)], dtype=mx.float32)
-    k_words_buf = mx.array([k_words_in], dtype=mx.uint32)
-    v_words_buf = mx.array([v_words_in], dtype=mx.uint32)
-    k_groups_buf = mx.array([k_groups], dtype=mx.uint32)
-    v_groups_buf = mx.array([v_groups], dtype=mx.uint32)
+    # Reshape to [n_h, n_keys, d_head] and add dummy head dim for sdpa
+    k_deq = k_deq.reshape(n_h, n_keys, d_head)[:, None, :, :]
+    v_deq = v_deq.reshape(n_h, n_keys, d_head)[:, None, :, :]
+    queries = queries[:, None, None, :]  # [n_h, 1, 1, d_head]
 
-    outputs = kernel(
-        inputs=[
-            queries.astype(mx.float32).reshape(-1),
-            packed_k.reshape(-1),
-            packed_v.reshape(-1),
-            scales_k.astype(mx.float32).reshape(-1),
-            scales_v.astype(mx.float32).reshape(-1),
-            h_buf,
-            d_buf,
-            t_buf,
-            bits_buf,
-            group_buf,
-            qmax_buf,
-            scale_buf,
-            k_words_buf,
-            v_words_buf,
-            k_groups_buf,
-            v_groups_buf,
-        ],
-        template=[("T", out_dtype)],
-        grid=(n_h, 1, 1),
-        threadgroup=(1, 1, 1),
-        output_shapes=[(n_h * d_head,)],
-        output_dtypes=[out_dtype],
+    out = mx.fast.scaled_dot_product_attention(
+        queries, k_deq, v_deq, scale=scale
     )
-    return outputs[0].reshape(n_h, d_head)
+    return out[:, 0, 0, :].astype(out_dtype)
 
 
 def maybe_supports_metal_kernels() -> bool:

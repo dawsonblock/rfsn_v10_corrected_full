@@ -71,6 +71,8 @@ __all__ = [
     "audit_decode_step",
     "check_drift",
     "log_audit_event",
+    # adaptive_controller
+    "AdaptiveQuantController",
     # experimental_quant_runtime
     "ExperimentalQuantRuntime",
     "ExperimentalQuantState",

@@ -15,10 +15,15 @@ Supported quant modes:
 
 from __future__ import annotations
 
-import fcntl
 import json
+import sys
 import time
 import uuid
+
+if sys.platform != "win32":
+    import fcntl
+else:
+    fcntl = None  # type: ignore[assignment]
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -125,6 +130,7 @@ class PreparedCache:
         return (
             self.skill_pattern == skill_pattern
             and self.dequantized_k is not None
+            and self.dequantized_v is not None
         )
 
 
@@ -147,11 +153,15 @@ def _load_layer_policy(
     layers = raw.get("layers", raw) if "default" in raw else raw
     if not isinstance(layers, dict):
         return {}
-    policy: dict[str, LayerQuantPolicy] = {}
+    policy: dict[int, LayerQuantPolicy] = {}
     for layer_id, cfg in layers.items():
         if not isinstance(cfg, dict):
             continue
-        policy[str(layer_id)] = LayerQuantPolicy(
+        try:
+            layer_key = int(layer_id)
+        except (ValueError, TypeError):
+            continue
+        policy[layer_key] = LayerQuantPolicy(
             k_bits=cfg.get("k_bits", 8),
             v_bits=cfg.get("v_bits", 5),
             group_size=cfg.get("group_size", 64),
@@ -202,14 +212,16 @@ def _log_telemetry_event(
         "timestamp": event.timestamp,
     }
     with path.open("a", encoding="utf-8") as fh:
-        fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
+        if fcntl is not None:
+            fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
         try:
             fh.write(
                 json.dumps(record, ensure_ascii=False, default=str)
                 + "\n"
             )
         finally:
-            fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+            if fcntl is not None:
+                fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
 
 
 def _log_fallback_event(
@@ -227,14 +239,16 @@ def _log_fallback_event(
         "timestamp": time.time(),
     }
     with path.open("a", encoding="utf-8") as fh:
-        fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
+        if fcntl is not None:
+            fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
         try:
             fh.write(
                 json.dumps(record, ensure_ascii=False, default=str)
                 + "\n"
             )
         finally:
-            fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+            if fcntl is not None:
+                fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
 
 
 # ---------------------------------------------------------------------------
@@ -322,6 +336,9 @@ class ExperimentalQuantRuntime:
         self.state = ExperimentalQuantState()
         self._step_num = 0
         self._prepared_cache: dict[str, PreparedCache] = {}
+        self._adaptive_managers: dict[
+            tuple[int, int, int], RFSNTurboQuantKVManager
+        ] = {}
 
         # Log startup
         self._log_startup()
@@ -384,8 +401,12 @@ class ExperimentalQuantRuntime:
 
     def _manager_for_layer(self, layer_id: str) -> RFSNTurboQuantKVManager:
         """Return a manager instance respecting layer policy, if any."""
-        if layer_id in self.layer_policy:
-            policy = self.layer_policy[layer_id]
+        try:
+            layer_key = int(layer_id)
+        except (ValueError, TypeError):
+            layer_key = None
+        if layer_key is not None and layer_key in self.layer_policy:
+            policy = self.layer_policy[layer_key]
             base = self.base_manager
             return RFSNTurboQuantKVManager(
                 k_bits=policy.k_bits,
@@ -443,7 +464,13 @@ class ExperimentalQuantRuntime:
         self._step_num += 1
 
         manager = self._manager_for_layer(layer_id)
-        policy_applied = layer_id in self.layer_policy
+        try:
+            _layer_key = int(layer_id)
+        except (ValueError, TypeError):
+            _layer_key = None
+        policy_applied = (
+            _layer_key is not None and _layer_key in self.layer_policy
+        )
 
         # ------------------------------------------------------------------
         # 1. Adaptive bit selection (if mode == adaptive)
@@ -457,15 +484,15 @@ class ExperimentalQuantRuntime:
             effective_k_bits, effective_v_bits, effective_group_size = (
                 _adaptive_bits(seq_len)
             )
-            # Spawn a temporary manager with adaptive bits.
-            # This overrides any layer-specific policy, so reflect that in
-            # telemetry.
             policy_applied = False
-            manager = RFSNTurboQuantKVManager(
-                k_bits=effective_k_bits,
-                v_bits=effective_v_bits,
-                group_size=effective_group_size,
-                quant_mode="cartesian",
+            manager = self._adaptive_managers.setdefault(
+                (effective_k_bits, effective_v_bits, effective_group_size),
+                RFSNTurboQuantKVManager(
+                    k_bits=effective_k_bits,
+                    v_bits=effective_v_bits,
+                    group_size=effective_group_size,
+                    quant_mode="cartesian",
+                ),
             )
         elif self.quant_mode == "live_adaptive":
             if self._live_controller is not None:
@@ -476,7 +503,6 @@ class ExperimentalQuantRuntime:
                 ) = self._live_controller.get_effective_bits()
                 controller_adjusted = True
             else:
-                # Fallback to length-based heuristic if controller missing.
                 seq_len = keys.shape[2]
                 (
                     effective_k_bits,
@@ -484,11 +510,14 @@ class ExperimentalQuantRuntime:
                     effective_group_size,
                 ) = _adaptive_bits(seq_len)
             policy_applied = False
-            manager = RFSNTurboQuantKVManager(
-                k_bits=effective_k_bits,
-                v_bits=effective_v_bits,
-                group_size=effective_group_size,
-                quant_mode="cartesian",
+            manager = self._adaptive_managers.setdefault(
+                (effective_k_bits, effective_v_bits, effective_group_size),
+                RFSNTurboQuantKVManager(
+                    k_bits=effective_k_bits,
+                    v_bits=effective_v_bits,
+                    group_size=effective_group_size,
+                    quant_mode="cartesian",
+                ),
             )
 
         # ------------------------------------------------------------------
@@ -599,7 +628,7 @@ class ExperimentalQuantRuntime:
                 packed_v=cache.v_packed,
                 scales_k=cache.k_scales,
                 scales_v=cache.v_scales,
-                n_keys=cache.k_n_values,
+                n_keys=cache.token_count,
                 bits=cache.k_bits,
                 group_size=manager.group_size,
             )
@@ -722,7 +751,7 @@ class ExperimentalQuantRuntime:
 
     def get_state_summary(self) -> dict[str, Any]:
         """Return a snapshot of the runtime state."""
-        elapsed = max(self.state.total_dequant_time_ms, 1e-6)
+        elapsed_sec = max(self.state.total_dequant_time_ms / 1000.0, 1e-3)
         return {
             "quant_mode": self.quant_mode,
             "layer_policy_layers": list(self.layer_policy.keys()),
@@ -730,5 +759,5 @@ class ExperimentalQuantRuntime:
             "total_dequant_time_ms": self.state.total_dequant_time_ms,
             "total_tokens": self.state.total_tokens,
             "fallback_count": self.state.fallback_count,
-            "avg_tokens_per_sec": self.state.total_tokens / (elapsed / 1000.0),
+            "avg_tokens_per_sec": self.state.total_tokens / elapsed_sec,
         }
