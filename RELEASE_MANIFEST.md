@@ -6,7 +6,7 @@
 |-------|-------|
 | Release name | `rfsn_v10_qjl_alpha_candidate_3` |
 | Git branch | `qjl-beta-repair-finalization` |
-| Git commit | `3fdedd2` (beta: integrity checker passing) |
+| Git commit | `bd8edde` (beta: MLX backend config fix + integrity checker) |
 | Broken snapshot tag | `qjl-beta-repair-broken-snapshot` (preserved, do not delete) |
 | Build date | 2026-06-07 |
 | Python requirement | `>=3.11,<3.13` |
@@ -131,7 +131,7 @@ The classifier must remain `3 - Alpha` until **all** items below are checked:
 - [x] `pytest tests/test_no_placeholder_source.py` — PASS
 - [x] `pytest tests/test_runtime_import_contract.py` — PASS
 - [x] Full non-MLX test gate — PASS (882 tests)
-- [x] Full MLX gate — PASS (110 tests)
+- [x] Full MLX gate — PASS (99 tests)
 - [x] Wheel builds and subpackages install correctly
 - [ ] `docker build -t rfsn-qjl . && docker run --rm -e RFSN_BACKEND=numpy rfsn-qjl` — **pending manual Docker run**
 - [ ] Benchmarks re-run with quality + speed metrics side by side
