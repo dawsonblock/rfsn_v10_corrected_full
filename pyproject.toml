@@ -7,7 +7,7 @@ name = "rfsn-v10"
 dynamic = ["version"]
 description = "RFSN v10 - Quantized KV-cache + decode-time sparse-attention runtime for MLX/Apple Silicon"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = "==3.11.*"
 license = {text = "MIT"}
 authors = [
     {name = "RFSN Contributors"},
@@ -27,14 +27,11 @@ classifiers = [
     "Intended Audience :: Science/Research",
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
-    "Programming Language :: Python :: 3.12",
-    "Programming Language :: Python :: 3.13",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
 dependencies = [
-    "numpy>=1.26",
+    "numpy==1.26.4",
     "matplotlib>=3.8",
     "requests>=2.31",
     "pydantic>=2.5",
@@ -43,17 +40,17 @@ dependencies = [
 
 [project.optional-dependencies]
 mlx = [
-    "mlx>=0.21",
+    "mlx==0.21.1",
 ]
 dev = [
-    "pytest>=8.1",
-    "pytest-timeout>=2.3",
-    "pytest-asyncio>=0.23",
-    "ruff>=0.4.0",
-    "mypy>=1.8",
+    "pytest==8.1.*",
+    "pytest-timeout==2.3.*",
+    "pytest-asyncio==0.23.*",
+    "ruff==0.4.*",
+    "mypy==1.8.*",
 ]
 real_model = [
-    "torch>=2.1",
+    "torch==2.3.1",
     "transformers>=4.38",
 ]
 production = [
