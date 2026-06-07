@@ -6,16 +6,19 @@ LABEL description="RFSN v10 - Quantized KV-cache + decode-time sparse-attention 
 WORKDIR /app
 
 # Install system dependencies
-RUN apt-get update && apt-get install -y \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
+    ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements
-COPY pyproject.toml .
-COPY README.md .
+# Create non-root user
+RUN groupadd -r rfsn && useradd -r -g rfsn rfsn
 
-# Install Python dependencies
-RUN pip install --no-cache-dir -e ".[mlx,production]"
+# Copy build metadata first for layer caching
+COPY pyproject.toml README.md ./
+
+# Install Python dependencies (editable so local changes are reflected)
+RUN pip install --no-cache-dir -e ".[production]"
 
 # Copy source code
 COPY rfsn_v10/ ./rfsn_v10/
@@ -24,17 +27,24 @@ COPY tools/ ./tools/
 COPY benchmarks/ ./benchmarks/
 COPY tests/ ./tests/
 
-# Create cache directory
-RUN mkdir -p /app/.cache
+# Re-install to pick up any source changes
+RUN pip install --no-cache-dir -e ".[production]"
+
+# Create cache directory and fix permissions
+RUN mkdir -p /app/.cache /app/artifacts && chown -R rfsn:rfsn /app
 
 # Set environment variables
-ENV PYTHONPATH=/app
+ENV PYTHONUNBUFFERED=1
 ENV RFSN_CACHE_DIR=/app/.cache
 ENV RFSN_LOG_LEVEL=INFO
+ENV RFSN_TELEMETRY_DIR=/app/artifacts/runtime_logs
 
-# Health check
+# Switch to non-root user
+USER rfsn
+
+# Health check — runs the actual CLI healthcheck subcommand
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD python -c "from rfsn_v10.health import get_health_checker; checker = get_health_checker(); report = checker.get_health_report(); exit(0 if report['overall_status'] == 'healthy' else 1)"
+    CMD python -m rfsn_v10 healthcheck
 
-# Default command
-CMD ["python", "-m", "rfsn_v10"]
+# Default command: CLI healthcheck (no HTTP server — this is a CLI tool)
+CMD ["python", "-m", "rfsn_v10", "healthcheck"]

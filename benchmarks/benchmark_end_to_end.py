@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 import mlx.core as mx
 
 from rfsn_v10.kv_manager import RFSNTurboQuantKVManager
-from rfsn_v10.runtime import RFSNRuntime
+from rfsn_v10 import RFSNRuntime
 
 
 def get_metadata() -> dict:

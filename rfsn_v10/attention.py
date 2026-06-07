@@ -10,18 +10,20 @@ Correct use case:
 - Positional information is already baked into keys, e.g. RoPE-applied keys
 - Prefill uses dense attention because physical compaction breaks causal alignment
 
-NOTE: The dense fallback path uses mx.fast.scaled_dot_product_attention without
-a causal mask. Callers handling autoregressive prefill must supply their own
-causal masking. This module is designed for decode, not prefill.
+All dense fallback paths route through
+:func:`rfsn_v10.attention_reference.causal_attention_dense` which always
+applies a causal mask for T_q > 1.  Direct calls to
+``mx.fast.scaled_dot_product_attention`` without masking are forbidden on
+the prefill path.
 """
 
 from __future__ import annotations
 
 import math
-from typing import Literal, Optional, Tuple
+from typing import Literal
 
+from .attention_reference import causal_attention_dense
 from .compat import mx
-
 from .memory_guard import MemoryGuard
 
 ExecutionMode = Literal[
@@ -63,8 +65,8 @@ class AdaptiveBlockSparseAttention:
         top_k_ratio: float,
         block_size: int,
         consensus_mix: float,
-        memory_guard: Optional[MemoryGuard] = None,
-    ) -> Tuple[int, int, int, int, int]:
+        memory_guard: MemoryGuard | None = None,
+    ) -> tuple[int, int, int, int, int]:
         if len(queries.shape) != 4:
             raise ValueError(f"queries must be [B,H,T_q,D], got {queries.shape}")
         if len(keys.shape) != 4:
@@ -110,22 +112,24 @@ class AdaptiveBlockSparseAttention:
         return B, H, T_q, T_k, D
 
     @staticmethod
-    def _dense_unmasked(
+    def _dense_masked(
         queries: mx.array,
         keys: mx.array,
         values: mx.array,
         scale: float,
         block_size: int,
         mode: str,
-    ) -> Tuple[mx.array, int, str]:
+    ) -> tuple[mx.array, int, str]:
+        """Causal dense attention fallback.
+
+        Routes through :func:`~rfsn_v10.attention_reference.causal_attention_dense`
+        which is the single authoritative implementation.  Causal masking is
+        always applied for T_q > 1 (prefill); T_q == 1 (decode) skips the
+        mask because all KV tokens are strictly in the past.
+        """
         T_k = keys.shape[2]
         num_blocks = max(1, AdaptiveBlockSparseAttention._ceil_div(T_k, block_size))
-        out = mx.fast.scaled_dot_product_attention(
-            queries,
-            keys,
-            values,
-            scale=scale,
-        )
+        out = causal_attention_dense(queries, keys, values, scale=scale, backend="mlx")
         return out, num_blocks, mode
 
     @staticmethod
@@ -189,8 +193,8 @@ class AdaptiveBlockSparseAttention:
         allow_budget_overflow: bool = False,
         recent_bias: float = 0.05,
         sink_bias: float = 0.10,
-        memory_guard: Optional[MemoryGuard] = None,
-    ) -> Tuple[mx.array, int, ExecutionMode]:
+        memory_guard: MemoryGuard | None = None,
+    ) -> tuple[mx.array, int, ExecutionMode]:
         """
         Execute hardware-aware block-sparse scaled dot-product attention.
 
@@ -234,19 +238,19 @@ class AdaptiveBlockSparseAttention:
         # - Prefill path: physical compaction breaks causal mask alignment
         # - Caller cannot guarantee KV contains only past tokens
         if top_k_ratio >= 1.0:
-            return AdaptiveBlockSparseAttention._dense_unmasked(
+            return AdaptiveBlockSparseAttention._dense_masked(
                 queries, keys, values, scale, block_size, "dense_requested",
             )
         if T_k <= block_size:
-            return AdaptiveBlockSparseAttention._dense_unmasked(
+            return AdaptiveBlockSparseAttention._dense_masked(
                 queries, keys, values, scale, block_size, "dense_short_context",
             )
         if T_q > 1:
-            return AdaptiveBlockSparseAttention._dense_unmasked(
+            return AdaptiveBlockSparseAttention._dense_masked(
                 queries, keys, values, scale, block_size, "dense_prefill",
             )
         if not kv_is_strictly_past:
-            return AdaptiveBlockSparseAttention._dense_unmasked(
+            return AdaptiveBlockSparseAttention._dense_masked(
                 queries, keys, values, scale, block_size, "dense_not_strictly_past",
             )
 
@@ -270,7 +274,7 @@ class AdaptiveBlockSparseAttention:
         k_active = max(1, int(math.ceil(num_blocks * float(top_k_ratio))))
 
         if k_active >= num_blocks:
-            return AdaptiveBlockSparseAttention._dense_unmasked(
+            return AdaptiveBlockSparseAttention._dense_masked(
                 queries, keys, values, scale, block_size, "dense_short_context",
             )
 
@@ -332,7 +336,7 @@ class AdaptiveBlockSparseAttention:
 
         max_selected = max(len(v) for v in selected_blocks_per_batch)
         if max_selected <= 0:
-            return AdaptiveBlockSparseAttention._dense_unmasked(
+            return AdaptiveBlockSparseAttention._dense_masked(
                 queries, keys, values, scale, block_size, "dense_short_context",
             )
 
@@ -353,7 +357,7 @@ class AdaptiveBlockSparseAttention:
         # - For B == 1, remove padded positions directly.
         # - For B > 1, padding would create ragged compact tensors, so fallback dense.
         if pad_len > 0 and B > 1:
-            return AdaptiveBlockSparseAttention._dense_unmasked(
+            return AdaptiveBlockSparseAttention._dense_masked(
                 queries, keys, values, scale, block_size, "dense_requested",
             )
 
@@ -382,11 +386,6 @@ class AdaptiveBlockSparseAttention:
             values_compact = mx.concatenate(compact_values_list, axis=0)
             active_blocks = max_selected
 
-        out = mx.fast.scaled_dot_product_attention(
-            queries,
-            keys_compact,
-            values_compact,
-            scale=scale,
-        )
+        out = causal_attention_dense(queries, keys_compact, values_compact, scale=scale, backend="mlx")
 
         return out, active_blocks, "sparse_compacted"

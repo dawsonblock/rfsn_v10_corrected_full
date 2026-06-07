@@ -473,6 +473,105 @@ def packed_dequant_wht_sign_metal(
     return outputs[0]
 
 
+def quantized_attention_decode_metal(
+    queries: mx.array,
+    packed_k: mx.array,
+    packed_v: mx.array,
+    scales_k: mx.array,
+    scales_v: mx.array,
+    n_keys: int,
+    bits: int,
+    group_size: int = 64,
+    scale: float | None = None,
+    out_dtype=None,
+) -> mx.array:
+    """Quantized attention for decode.
+
+    Dequantizes packed K/V using the existing ``packed_dequant_metal``
+    kernel, then computes attention via ``scaled_dot_product_attention``.
+    This materialises K/V but guarantees correctness with the actual
+    bit-packed layout produced by :class:`RFSNTurboQuantKVManager`.
+
+    Args:
+        queries:   [H, D] or [B*H, D] single query token(s).
+        packed_k:  Flat uint32 packed key codes.
+        packed_v:  Flat uint32 packed value codes.
+        scales_k:  Flat float32 key scales.
+        scales_v:  Flat float32 value scales.
+        n_keys:    Number of key positions (T_k).
+        bits:      Bit width (2-8).
+        group_size: Quant group size.
+        scale:     Attention scale; defaults to 1/sqrt(D).
+        out_dtype: Output dtype.
+
+    Returns:
+        [H, D] or [B*H, D] attention output.
+    """
+    ensure_mlx_available()
+    if out_dtype is None:
+        out_dtype = mx.float32
+    if not hasattr(mx.fast, "metal_kernel"):
+        raise KernelRouteError("metal_kernel_api_unavailable")
+    if bits < 2 or bits > 8:
+        raise KernelRouteError(f"bits must be in [2, 8], got {bits}")
+
+    n_h, d_head = queries.shape
+    codes_per_word = 32 // bits
+
+    # Total scalar elements across all heads/batches
+    n_values = n_h * n_keys * d_head
+    required_words = (n_values + codes_per_word - 1) // codes_per_word
+    if int(packed_k.size) < required_words:
+        raise KernelRouteError(
+            f"packed_k too small: have {packed_k.size}, need {required_words}"
+        )
+    if int(packed_v.size) < required_words:
+        raise KernelRouteError(
+            f"packed_v too small: have {packed_v.size}, need {required_words}"
+        )
+
+    required_scales = (n_values + group_size - 1) // group_size
+    if int(scales_k.size) < required_scales:
+        raise KernelRouteError(
+            f"scales_k too small: have {scales_k.size}, need {required_scales}"
+        )
+    if int(scales_v.size) < required_scales:
+        raise KernelRouteError(
+            f"scales_v too small: have {scales_v.size}, need {required_scales}"
+        )
+
+    if scale is None:
+        scale = 1.0 / math.sqrt(d_head)
+
+    # Dequantize full K and V using the existing verified kernel
+    k_deq = packed_dequant_metal(
+        packed=packed_k,
+        scales=scales_k,
+        n_values=n_values,
+        bits=bits,
+        group_size=group_size,
+        out_dtype=mx.float32,
+    )
+    v_deq = packed_dequant_metal(
+        packed=packed_v,
+        scales=scales_v,
+        n_values=n_values,
+        bits=bits,
+        group_size=group_size,
+        out_dtype=mx.float32,
+    )
+
+    # Reshape to [n_h, n_keys, d_head] and add dummy head dim for sdpa
+    k_deq = k_deq.reshape(n_h, n_keys, d_head)[:, None, :, :]
+    v_deq = v_deq.reshape(n_h, n_keys, d_head)[:, None, :, :]
+    queries = queries[:, None, None, :]  # [n_h, 1, 1, d_head]
+
+    out = mx.fast.scaled_dot_product_attention(
+        queries, k_deq, v_deq, scale=scale
+    )
+    return out[:, 0, 0, :].astype(out_dtype)
+
+
 def maybe_supports_metal_kernels() -> bool:
     if not MLX_AVAILABLE:
         return False

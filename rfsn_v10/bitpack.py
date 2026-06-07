@@ -9,14 +9,16 @@ from __future__ import annotations
 
 from .compat import mx
 
-# Version-safe float dtype detection
-FLOAT_DTYPES = {
-    dt for dt in [
-        getattr(mx, "float16", None),
-        getattr(mx, "float32", None),
-        getattr(mx, "bfloat16", None),
-    ]
-    if dt is not None
+
+def _float_dtypes():
+    """Return the set of MLX float dtypes (lazy, avoids import-time MLX access)."""
+    return {
+        dt for dt in [
+            getattr(mx, "float16", None),
+            getattr(mx, "float32", None),
+            getattr(mx, "bfloat16", None),
+        ]
+        if dt is not None
 }
 
 
@@ -45,11 +47,11 @@ class BitPackedQuantizer:
             raise ValueError("Cannot pack empty array")
 
         # Handle float inputs: check integer-valued
-        if x.dtype in FLOAT_DTYPES:
+        if x.dtype in _float_dtypes():
             x_rounded = mx.round(x)
             if not mx.all(x == x_rounded).item():
                 raise ValueError(
-                    f"Float codes must be integer-valued, got non-integer values"
+                    "Float codes must be integer-valued, got non-integer values"
                 )
             x = x_rounded.astype(mx.int32)
 

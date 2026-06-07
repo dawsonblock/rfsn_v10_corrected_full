@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generation throughput benchmark for RFSN v10 Main 27.
+"""Generation throughput benchmark for RFSN v10 Main 28.
 
 Measures:
   - Tokens/second (decode throughput)
@@ -14,7 +14,7 @@ Usage:
   python benchmarks/benchmark_generation_throughput.py \\
       --model Qwen/Qwen2.5-0.5B-Instruct \\
       --tokens 256 --decode 64 --repeats 5 \\
-      --out artifacts/proof/main27/generation_throughput.json
+      --out artifacts/proof/main28/generation_throughput.json
 """
 from __future__ import annotations
 
@@ -102,7 +102,8 @@ def _compress_past(past_legacy: list, config: dict, device: torch.device) -> lis
     group_size = config["group_size"]
 
     compressed = []
-    for k, v in past_legacy:
+    layer_map = config.get("layer_map", {})
+    for layer_idx, (k, v) in enumerate(past_legacy):
         k_np = k.float().cpu().numpy()
         v_np = v.float().cpu().numpy()
         mgr = RFSNTurboQuantKVManager(
@@ -110,11 +111,13 @@ def _compress_past(past_legacy: list, config: dict, device: torch.device) -> lis
             cache_dir=str(Path.home() / ".rfsn_cache"),
         )
         token_count = k.shape[2]  # [B, H, T, D]
+        kb, vb = layer_map.get(layer_idx, (k_bits, v_bits))
         mgr.store(
             skill_pattern="throughput",
             keys=mx.array(k_np),
             values=mx.array(v_np),
             token_count=token_count,
+            k_bits=kb, v_bits=vb,
         )
         rk, rv = mgr.retrieve(skill_pattern="throughput")
         k_out = torch.from_numpy(np.array(rk)).to(device=device, dtype=k.dtype)
@@ -146,6 +149,8 @@ def _peak_memory_mb() -> float:
 
 _CONFIG_REGISTRY: dict[str, dict[str, Any]] = {
     "baseline_fp16": {"name": "baseline_fp16", "k_bits": 16, "v_bits": 16, "group_size": 64},
+    "mixed_L0-1k8v4_restk6v4_gs64": {"name": "mixed_L0-1k8v4_restk6v4_gs64", "k_bits": 6, "v_bits": 4, "group_size": 64, "layer_map": {0: (8, 4), 1: (8, 4)}},
+    "mixed_L0k8v4_restk6v4_gs64": {"name": "mixed_L0k8v4_restk6v4_gs64", "k_bits": 6, "v_bits": 4, "group_size": 64, "layer_map": {0: (8, 4)}},
     "k8_v3_gs64": {"name": "k8_v3_gs64", "k_bits": 8, "v_bits": 3, "group_size": 64},
     "k8_v4_gs64": {"name": "k8_v4_gs64", "k_bits": 8, "v_bits": 4, "group_size": 64},
     "k8_v5_gs64": {"name": "k8_v5_gs64", "k_bits": 8, "v_bits": 5, "group_size": 64},
@@ -407,7 +412,7 @@ def _run_benchmark(
         )
 
     payload: dict[str, Any] = {
-        "release": "main27",
+        "release": "main28",
         "analysis": "generation_throughput",
         "model": model_id,
         "hardware": _get_hardware_info(),
@@ -434,7 +439,7 @@ def _run_benchmark(
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="RFSN v10 Main 26 generation throughput benchmark"
+        description="RFSN v10 Main 28 generation throughput benchmark"
     )
     parser.add_argument(
         "--model", default="Qwen/Qwen2.5-0.5B-Instruct",
@@ -447,14 +452,15 @@ def main() -> None:
     parser.add_argument(
         "--configs",
         default=(
-            "baseline_fp16,k8_v3_gs64,k8_v4_gs64,k8_v5_gs64,"
+            "baseline_fp16,mixed_L0-1k8v4_restk6v4_gs64,"
+            "k8_v4_gs64,k8_v5_gs64,k8_v3_gs64,"
             "k6_v6_gs64,k8_v4_gs32,k8_v5_gs32,k4_v4_gs64"
         ),
         help="Comma-separated config names",
     )
     parser.add_argument(
         "--out",
-        default="artifacts/proof/main27/generation_throughput.json",
+        default="artifacts/proof/main28/generation_throughput.json",
         help="Output JSON path",
     )
     parser.add_argument(

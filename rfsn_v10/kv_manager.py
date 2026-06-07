@@ -10,15 +10,15 @@ from __future__ import annotations
 
 import hashlib
 import math
+import sys
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from threading import RLock, get_ident
-from typing import Optional
-
-from .compat import mx
+from typing import Any
 
 from .bitpack import BitPackedQuantizer
+from .compat import mx
 from .kernels import (
     KernelRouteError,
     apply_hash_signs_metal,
@@ -28,6 +28,31 @@ from .kernels import (
     packed_dequant_wht_sign_metal,
     wht64_metal,
 )
+
+# Experimental quantization backends — loaded lazily to avoid importing MLX
+# at package level on systems that do not have MLX installed.
+# TYPE_CHECKING guard keeps mypy/pyright happy without forcing a real import.
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .quantization.hybrid_polar_cartesian import HybridPolarCartesianQuantizer
+    from .quantization.isoquant_precondition import IsoQuantMetadata, IsoQuantPreconditioner
+    from .quantization.qjl_score_correction import QJLScoreCorrector, QJLSketch
+
+
+def _get_hybrid_polar_cartesian():
+    from .quantization.hybrid_polar_cartesian import HybridPolarCartesianQuantizer
+    return HybridPolarCartesianQuantizer
+
+
+def _get_isoquant():
+    from .quantization.isoquant_precondition import IsoQuantMetadata, IsoQuantPreconditioner
+    return IsoQuantMetadata, IsoQuantPreconditioner
+
+
+def _get_qjl():
+    from .quantization.qjl_score_correction import QJLScoreCorrector, QJLSketch
+    return QJLScoreCorrector, QJLSketch
 
 
 @dataclass
@@ -59,6 +84,12 @@ class TurboQuantKVCache:
     v_block_n_values: list[int] = field(default_factory=list)
     pinned: bool = False
     last_used: float = 0.0
+    quant_mode: str = "cartesian"
+    k_hybrid: Any | None = None
+    v_hybrid: Any | None = None
+    isoquant_meta: IsoQuantMetadata | None = None
+    k_qjl: QJLSketch | None = None
+    v_qjl: QJLSketch | None = None
 
     @property
     def use_incoherent(self) -> bool:
@@ -78,10 +109,10 @@ class RFSNTurboQuantKVManager:
         self,
         k_bits: int = 8,
         v_bits: int = 3,
-        use_wht: Optional[bool] = None,
-        use_incoherent_signs: Optional[bool] = None,
-        use_incoherent: Optional[bool] = None,
-        use_custom_kernel: Optional[bool] = None,
+        use_wht: bool | None = None,
+        use_incoherent_signs: bool | None = None,
+        use_incoherent: bool | None = None,
+        use_custom_kernel: bool | None = None,
         prefer_metal_kernels: bool = False,
         prefer_fused_kernel: bool = True,
         strict_metal: bool = False,
@@ -91,8 +122,41 @@ class RFSNTurboQuantKVManager:
         cache_dir: str = ".rfsn_cache",
         group_size: int = 64,
         block_size: int = 64,
+        quant_mode: str = "cartesian",
+        polar_ratio: float = 0.65,
+        polar_levels: int = 4,
+        polar_angle_bits: int = 5,
+        polar_radius_bits: int = 8,
+        use_isoquant: bool = False,
+        isoquant_seed: int = 42,
+        use_qjl_score_correction: bool = False,
+        qjl_proj_dim: int = 64,
     ):
         # Validate parameters
+        _valid_modes = (
+            "cartesian",
+            "hybrid_polar_cartesian",
+            "isoquant",
+            "isoquant_cartesian",
+            "isoquant_hybrid",
+        )
+        if quant_mode not in _valid_modes:
+            raise ValueError(
+                f"quant_mode must be one of {_valid_modes}, got {quant_mode}"
+            )
+
+        # Experimental quant modes require explicit opt-in.
+        _experimental_modes = {"hybrid_polar_cartesian", "isoquant", "isoquant_cartesian", "isoquant_hybrid"}
+        if quant_mode in _experimental_modes or use_isoquant or use_qjl_score_correction:
+            try:
+                from .config import require_experimental
+                if quant_mode in _experimental_modes or use_isoquant:
+                    require_experimental("polar")
+                if use_qjl_score_correction:
+                    require_experimental("qjl")
+            except RuntimeError:
+                raise
+
         if not (2 <= k_bits <= 8):
             raise ValueError(f"k_bits must be between 2 and 8, got {k_bits}")
         if not (2 <= v_bits <= 8):
@@ -129,6 +193,19 @@ class RFSNTurboQuantKVManager:
         self.cache_dir = Path(cache_dir)
         self.group_size = group_size
         self.block_size = block_size
+        self.quant_mode = quant_mode
+        self._polar_ratio = polar_ratio
+        self._polar_levels = polar_levels
+        self._polar_angle_bits = polar_angle_bits
+        self._polar_radius_bits = polar_radius_bits
+        self._k_quant_polar: HybridPolarCartesianQuantizer | None = None
+        self._v_quant_polar: HybridPolarCartesianQuantizer | None = None
+        self._isoquant_preconditioner: IsoQuantPreconditioner | None = None
+        self._qjl_corrector: QJLScoreCorrector | None = None
+        self.use_isoquant = bool(use_isoquant)
+        self.isoquant_seed = int(isoquant_seed)
+        self.use_qjl_score_correction = bool(use_qjl_score_correction)
+        self.qjl_proj_dim = int(qjl_proj_dim)
         # Cache for sign masks to avoid regenerating for same shape/seed/dtype.
         self._sign_cache: dict[tuple[tuple[int, ...], int, mx.Dtype, int], mx.array] = {}
         self._sign_cache_lock = RLock()
@@ -137,6 +214,51 @@ class RFSNTurboQuantKVManager:
         self._pinned_bytes = 0
         self.last_reconstruction_kernel = "sequential_reference"
         self.cache_dir.mkdir(parents=True, exist_ok=True)
+
+    def _ensure_polar_quantizers(self, feature_dim: int) -> None:
+        """Lazily create polar quantizers with the correct feature_dim."""
+        HybridPolarCartesianQuantizer = _get_hybrid_polar_cartesian()
+        if self._k_quant_polar is None:
+            self._k_quant_polar = HybridPolarCartesianQuantizer(
+                feature_dim=feature_dim,
+                polar_ratio=self._polar_ratio,
+                polar_levels=self._polar_levels,
+                polar_angle_bits=self._polar_angle_bits,
+                polar_radius_bits=self._polar_radius_bits,
+                cartesian_bits=self.k_bits,
+                group_size=self.group_size,
+            )
+        if self._v_quant_polar is None:
+            self._v_quant_polar = HybridPolarCartesianQuantizer(
+                feature_dim=feature_dim,
+                polar_ratio=self._polar_ratio,
+                polar_levels=self._polar_levels,
+                polar_angle_bits=self._polar_angle_bits,
+                polar_radius_bits=self._polar_radius_bits,
+                cartesian_bits=self.v_bits,
+                group_size=self.group_size,
+            )
+
+    def _ensure_isoquant_preconditioner(
+        self, feature_dim: int
+    ) -> None:
+        """Lazily create IsoQuant preconditioner with the correct feature_dim."""
+        _, IsoQuantPreconditioner = _get_isoquant()
+        if self._isoquant_preconditioner is None:
+            self._isoquant_preconditioner = IsoQuantPreconditioner(
+                feature_dim=feature_dim,
+                seed=self.isoquant_seed,
+            )
+
+    def _ensure_qjl_corrector(self, feature_dim: int) -> None:
+        """Lazily create QJL score corrector with the correct feature_dim."""
+        QJLScoreCorrector, _ = _get_qjl()
+        if self._qjl_corrector is None:
+            self._qjl_corrector = QJLScoreCorrector(
+                feature_dim=feature_dim,
+                proj_dim=self.qjl_proj_dim,
+                seed=self.isoquant_seed,
+            )
 
     @property
     def use_incoherent(self) -> bool:
@@ -164,7 +286,7 @@ class RFSNTurboQuantKVManager:
         self,
         x: mx.array,
         seed: int,
-        indices: Optional[mx.array] = None,
+        indices: mx.array | None = None,
     ) -> mx.array:
         """Apply deterministic sign preconditioning (self-inverse).
 
@@ -269,9 +391,9 @@ class RFSNTurboQuantKVManager:
     def estimate_compressed_bytes_for_shape(
         self,
         shape: tuple,
-        k_bits: Optional[int] = None,
-        v_bits: Optional[int] = None,
-        group_size: Optional[int] = None,
+        k_bits: int | None = None,
+        v_bits: int | None = None,
+        group_size: int | None = None,
     ) -> int:
         """Estimate compressed KV cache footprint for a given KV shape.
 
@@ -288,6 +410,24 @@ class RFSNTurboQuantKVManager:
             raise ValueError("k_bits and v_bits must both be in [2, 8]")
         if group_size <= 0:
             raise ValueError("group_size must be positive")
+
+        if self.quant_mode in ("hybrid_polar_cartesian", "isoquant_hybrid"):
+            self._ensure_polar_quantizers(shape[-1])
+            assert self._k_quant_polar is not None
+            assert self._v_quant_polar is not None
+            # Analytical estimate avoids materialising dummy GPU arrays.
+            total = (
+                self._k_quant_polar.estimate_bytes_for_shape(shape)
+                + self._v_quant_polar.estimate_bytes_for_shape(shape)
+            )
+            if self.use_isoquant:
+                total += 32  # isoquant_meta overhead (approx)
+            if self.use_qjl_score_correction:
+                n_tokens = shape[2]
+                qjl_signs = n_tokens * self.qjl_proj_dim * 4
+                qjl_norms = n_tokens * 4 * 2
+                total += qjl_signs + qjl_norms
+            return total
 
         n_values = math.prod(shape)
 
@@ -460,10 +600,10 @@ class RFSNTurboQuantKVManager:
         shape: tuple,
         bits: int,
         seed: int,
-        use_wht: Optional[bool] = None,
-        use_incoherent_signs: Optional[bool] = None,
+        use_wht: bool | None = None,
+        use_incoherent_signs: bool | None = None,
         out_dtype=None,
-        use_incoherent: Optional[bool] = None,
+        use_incoherent: bool | None = None,
     ) -> mx.array:
         """Packed-dequant-WHT reconstruction: unpack → dequant →
         reshape → WHT → optional signs.
@@ -805,12 +945,54 @@ class RFSNTurboQuantKVManager:
     # ------------------------------------------------------------------
     def _estimate_cache_bytes(self, cache: TurboQuantKVCache) -> int:
         """Estimate the memory usage of a cache entry in bytes."""
-        return (
+        if cache.quant_mode in ("hybrid_polar_cartesian", "isoquant_hybrid"):
+            total = 0
+            if cache.k_hybrid is not None:
+                total += self._k_quant_polar.estimate_bytes(  # type: ignore[union-attr]
+                    cache.k_hybrid
+                )
+            if cache.v_hybrid is not None:
+                total += self._v_quant_polar.estimate_bytes(  # type: ignore[union-attr]
+                    cache.v_hybrid
+                )
+            if cache.isoquant_meta is not None:
+                total += 32
+            if cache.k_qjl is not None:
+                total += int(cache.k_qjl.signs.size) * 4
+                total += int(cache.k_qjl.residual_norm.size) * 4
+            if cache.v_qjl is not None:
+                total += int(cache.v_qjl.signs.size) * 4
+                total += int(cache.v_qjl.residual_norm.size) * 4
+            return total
+        base = (
             cache.k_packed.size * 4  # uint32
             + cache.k_scales.size * 4  # float32
             + cache.v_packed.size * 4  # uint32
             + cache.v_scales.size * 4  # float32
         )
+        # Account for Python list overhead of block metadata (approximate)
+        if cache.num_blocks > 0:
+            list_overhead = sum(
+                sys.getsizeof(lst)
+                for lst in (
+                    cache.k_block_packed_offsets,
+                    cache.k_block_scale_offsets,
+                    cache.k_block_n_values,
+                    cache.v_block_packed_offsets,
+                    cache.v_block_scale_offsets,
+                    cache.v_block_n_values,
+                )
+            )
+            base += list_overhead
+        if cache.isoquant_meta is not None:
+            base += 32
+        if cache.k_qjl is not None:
+            base += int(cache.k_qjl.signs.size) * 4
+            base += int(cache.k_qjl.residual_norm.size) * 4
+        if cache.v_qjl is not None:
+            base += int(cache.v_qjl.signs.size) * 4
+            base += int(cache.v_qjl.residual_norm.size) * 4
+        return base
 
     def _enforce_memory_budget(self) -> None:
         """Evict least-recently-used unpinned caches until budget is met."""
@@ -841,6 +1023,8 @@ class RFSNTurboQuantKVManager:
         keys: mx.array,
         values: mx.array,
         token_count: int,
+        k_bits: int | None = None,
+        v_bits: int | None = None,
     ) -> None:
         """Store KV cache with TurboQuant compression.
 
@@ -857,7 +1041,21 @@ class RFSNTurboQuantKVManager:
             raise ValueError(
                 f"keys/values shape mismatch: {keys.shape} vs {values.shape}"
             )
-        if keys.shape[-1] % 64 != 0:
+        if self.quant_mode in ("hybrid_polar_cartesian", "isoquant_hybrid"):
+            self._ensure_polar_quantizers(keys.shape[-1])
+            base = 2 ** self._k_quant_polar.polar_levels  # type: ignore[union-attr]
+            if keys.shape[-1] % base != 0:
+                raise ValueError(
+                    f"Polar mode requires head_dim divisible by "
+                    f"2**levels={base}, got {keys.shape[-1]}"
+                )
+        if self.quant_mode.startswith("isoquant"):
+            if keys.shape[-1] % 4 != 0:
+                raise ValueError(
+                    f"IsoQuant mode requires head_dim divisible by 4, "
+                    f"got {keys.shape[-1]}"
+                )
+        elif keys.shape[-1] % 64 != 0:
             raise ValueError(
                 f"Head dimension must be a multiple of 64, got {keys.shape[-1]}"
             )
@@ -865,105 +1063,198 @@ class RFSNTurboQuantKVManager:
             raise ValueError(
                 f"token_count must be positive, got {token_count}"
             )
+        if keys.shape[2] <= 0:
+            raise ValueError(
+                f"Sequence dimension must be positive, got {keys.shape[2]}"
+            )
+
+        k_bits = self.k_bits if k_bits is None else k_bits
+        v_bits = self.v_bits if v_bits is None else v_bits
+        if not (2 <= k_bits <= 8 and 2 <= v_bits <= 8):
+            raise ValueError("k_bits and v_bits must both be in [2, 8]")
 
         # Deterministic seed derived from cache identity for sign preconditioning
         seed = int(
             hashlib.sha256(
-                f"{skill_pattern}|{keys.shape}|{self.k_bits}|{self.v_bits}".encode()
+                f"{skill_pattern}|{keys.shape}|{k_bits}|{v_bits}".encode()
             ).hexdigest()[:8],
             16,
         )
 
-        # Apply optional sign preconditioning and optional WHT before quantization.
-        if self.use_incoherent_signs:
-            k_pre = self._apply_signs_on_the_fly(keys, seed)
-            v_pre = self._apply_signs_on_the_fly(values, seed)
-        else:
-            k_pre = keys
-            v_pre = values
-
-        if self.use_wht:
-            k_pre = self._apply_wht_pretransform(k_pre)
-            v_pre = self._apply_wht_pretransform(v_pre)
-
-        # Per-block quantization along the token dimension
         _bsz, _num_h, t_len, _head_dim = keys.shape
         block_size = self.block_size
         num_blocks = max(1, (t_len + block_size - 1) // block_size)
 
-        def _quantize_blocks(pre: mx.array, bits: int) -> tuple:
-            """Quantize pre-transformed tensor block by block.
+        # Optional IsoQuant preconditioning
+        k_orig = keys if self.use_qjl_score_correction else None
+        v_orig = values if self.use_qjl_score_correction else None
+        isoquant_meta = None
+        if self.quant_mode.startswith("isoquant"):
+            self._ensure_isoquant_preconditioner(_head_dim)
+            keys, k_meta = self._isoquant_preconditioner.forward(keys)
+            values = self._isoquant_preconditioner.forward(values)[0]
+            isoquant_meta = k_meta
 
-            Returns (packed, scales, packed_offsets, scale_offsets,
-                     block_n_values, total_n).
-            """
-            packed_blocks: list[mx.array] = []
-            scale_blocks: list[mx.array] = []
-            packed_offsets = [0]
-            scale_offsets = [0]
-            block_n_values: list[int] = []
+        if self.quant_mode in ("hybrid_polar_cartesian", "isoquant_hybrid"):
+            assert self._k_quant_polar is not None
+            assert self._v_quant_polar is not None
+            k_hybrid = self._k_quant_polar.quantize(keys)
+            v_hybrid = self._v_quant_polar.quantize(values)
+            empty = mx.array([], dtype=mx.uint32)
+            empty_f = mx.array([], dtype=mx.float32)
+            cache = TurboQuantKVCache(
+                k_packed=empty,
+                k_scales=empty_f,
+                v_packed=empty,
+                v_scales=empty_f,
+                shape=tuple(keys.shape),
+                k_bits=k_bits,
+                v_bits=v_bits,
+                group_size=self.group_size,
+                use_wht=self.use_wht,
+                use_incoherent_signs=self.use_incoherent_signs,
+                format_version="rfsn_v10",
+                seed=seed,
+                token_count=token_count,
+                block_size=block_size,
+                num_blocks=0,
+                quant_mode=self.quant_mode,
+                k_hybrid=k_hybrid,
+                v_hybrid=v_hybrid,
+                isoquant_meta=isoquant_meta,
+            )
+        else:
+            # Apply optional sign preconditioning and optional WHT before quantization.
+            if self.use_incoherent_signs:
+                k_pre = self._apply_signs_on_the_fly(keys, seed)
+                v_pre = self._apply_signs_on_the_fly(values, seed)
+            else:
+                k_pre = keys
+                v_pre = values
 
-            for blk in range(num_blocks):
-                start = blk * block_size
-                end = min((blk + 1) * block_size, t_len)
-                block = pre[:, :, start:end, :]
-                flat = block.reshape(-1)
-                codes, scales = self._quantize(flat, bits)
-                packed, n = BitPackedQuantizer.pack(codes, bits)
-                packed_blocks.append(packed)
-                scale_blocks.append(scales)
-                packed_offsets.append(
-                    packed_offsets[-1] + int(packed.size)
+            if self.use_wht:
+                k_pre = self._apply_wht_pretransform(k_pre)
+                v_pre = self._apply_wht_pretransform(v_pre)
+
+            def _quantize_blocks(pre: mx.array, bits: int) -> tuple:
+                """Quantize pre-transformed tensor block by block.
+
+                Returns (packed, scales, packed_offsets, scale_offsets,
+                         block_n_values, total_n).
+                """
+                packed_blocks: list[mx.array] = []
+                scale_blocks: list[mx.array] = []
+                packed_offsets = [0]
+                scale_offsets = [0]
+                block_n_values: list[int] = []
+
+                for blk in range(num_blocks):
+                    start = blk * block_size
+                    end = min((blk + 1) * block_size, t_len)
+                    block = pre[:, :, start:end, :]
+                    flat = block.reshape(-1)
+                    codes, scales = self._quantize(flat, bits)
+                    packed, n = BitPackedQuantizer.pack(codes, bits)
+                    packed_blocks.append(packed)
+                    scale_blocks.append(scales)
+                    packed_offsets.append(
+                        packed_offsets[-1] + int(packed.size)
+                    )
+                    scale_offsets.append(
+                        scale_offsets[-1] + int(scales.size)
+                    )
+                    block_n_values.append(n)
+
+                return (
+                    mx.concatenate(packed_blocks),
+                    mx.concatenate(scale_blocks),
+                    packed_offsets,
+                    scale_offsets,
+                    block_n_values,
+                    sum(block_n_values),
                 )
-                scale_offsets.append(
-                    scale_offsets[-1] + int(scales.size)
-                )
-                block_n_values.append(n)
 
-            return (
-                mx.concatenate(packed_blocks),
-                mx.concatenate(scale_blocks),
-                packed_offsets,
-                scale_offsets,
-                block_n_values,
-                sum(block_n_values),
+            (
+                k_packed, k_scales, k_poff, k_soff,
+                k_bnv, k_n,
+            ) = _quantize_blocks(k_pre, k_bits)
+            (
+                v_packed, v_scales, v_poff, v_soff,
+                v_bnv, v_n,
+            ) = _quantize_blocks(v_pre, v_bits)
+
+            # Create cache entry
+            cache = TurboQuantKVCache(
+                k_packed=k_packed,
+                k_scales=k_scales,
+                v_packed=v_packed,
+                v_scales=v_scales,
+                shape=tuple(keys.shape),
+                k_bits=k_bits,
+                v_bits=v_bits,
+                group_size=self.group_size,
+                use_wht=self.use_wht,
+                use_incoherent_signs=self.use_incoherent_signs,
+                format_version="rfsn_v10",
+                seed=seed,
+                k_n_values=k_n,
+                v_n_values=v_n,
+                token_count=token_count,
+                block_size=block_size,
+                num_blocks=num_blocks,
+                k_block_packed_offsets=k_poff,
+                k_block_scale_offsets=k_soff,
+                k_block_n_values=k_bnv,
+                v_block_packed_offsets=v_poff,
+                v_block_scale_offsets=v_soff,
+                v_block_n_values=v_bnv,
+                quant_mode=self.quant_mode,
+                isoquant_meta=isoquant_meta,
+            )
+        # Optional QJL score correction: sketch residual between original
+        # and base reconstruction.
+        if self.use_qjl_score_correction:
+            self._ensure_qjl_corrector(_head_dim)
+            if self.quant_mode in ("hybrid_polar_cartesian", "isoquant_hybrid"):
+                k_rec = self._k_quant_polar.dequantize(cache.k_hybrid)
+                v_rec = self._v_quant_polar.dequantize(cache.v_hybrid)
+            else:
+                k_rec = self._reconstruct_cached_tensor(
+                    packed=cache.k_packed,
+                    scales=cache.k_scales,
+                    n_values=cache.k_n_values,
+                    shape=cache.shape,
+                    bits=cache.k_bits,
+                    seed=cache.seed,
+                    use_wht=cache.use_wht,
+                    use_incoherent_signs=cache.use_incoherent_signs,
+                    out_dtype=mx.float32,
+                )
+                v_rec = self._reconstruct_cached_tensor(
+                    packed=cache.v_packed,
+                    scales=cache.v_scales,
+                    n_values=cache.v_n_values,
+                    shape=cache.shape,
+                    bits=cache.v_bits,
+                    seed=cache.seed,
+                    use_wht=cache.use_wht,
+                    use_incoherent_signs=cache.use_incoherent_signs,
+                    out_dtype=mx.float32,
+                )
+            if cache.isoquant_meta is not None:
+                k_rec = self._isoquant_preconditioner.inverse(
+                    k_rec, cache.isoquant_meta
+                )
+                v_rec = self._isoquant_preconditioner.inverse(
+                    v_rec, cache.isoquant_meta
+                )
+            cache.k_qjl = self._qjl_corrector.sketch_residual(
+                k_orig.astype(mx.float32) - k_rec.astype(mx.float32)
+            )
+            cache.v_qjl = self._qjl_corrector.sketch_residual(
+                v_orig.astype(mx.float32) - v_rec.astype(mx.float32)
             )
 
-        (
-            k_packed, k_scales, k_poff, k_soff,
-            k_bnv, k_n,
-        ) = _quantize_blocks(k_pre, self.k_bits)
-        (
-            v_packed, v_scales, v_poff, v_soff,
-            v_bnv, v_n,
-        ) = _quantize_blocks(v_pre, self.v_bits)
-
-        # Create cache entry
-        cache = TurboQuantKVCache(
-            k_packed=k_packed,
-            k_scales=k_scales,
-            v_packed=v_packed,
-            v_scales=v_scales,
-            shape=tuple(keys.shape),
-            k_bits=self.k_bits,
-            v_bits=self.v_bits,
-            group_size=self.group_size,
-            use_wht=self.use_wht,
-            use_incoherent_signs=self.use_incoherent_signs,
-            format_version="rfsn_v10",
-            seed=seed,
-            k_n_values=k_n,
-            v_n_values=v_n,
-            token_count=token_count,
-            block_size=block_size,
-            num_blocks=num_blocks,
-            k_block_packed_offsets=k_poff,
-            k_block_scale_offsets=k_soff,
-            k_block_n_values=k_bnv,
-            v_block_packed_offsets=v_poff,
-            v_block_scale_offsets=v_soff,
-            v_block_n_values=v_bnv,
-        )
         # Set last_used timestamp for newly created cache
         cache.last_used = time.monotonic()
 
@@ -996,7 +1287,7 @@ class RFSNTurboQuantKVManager:
         self,
         skill_pattern: str,
         out_dtype=None,
-    ) -> Optional[tuple[mx.array, mx.array]]:
+    ) -> tuple[mx.array, mx.array] | None:
         """Retrieve and dequantize KV cache.
 
         Returns None if the cache key is not found.
@@ -1020,20 +1311,84 @@ class RFSNTurboQuantKVManager:
                 f"Unsupported cache format version: {cache.format_version}"
             )
 
-        # Validate metadata matches current manager settings
-        if cache.k_bits != self.k_bits or cache.v_bits != self.v_bits:
-            raise ValueError(
-                f"metadata mismatch: stored k_bits={cache.k_bits} "
-                f"v_bits={cache.v_bits}, current k_bits={self.k_bits} "
-                f"v_bits={self.v_bits}"
-            )
-
         # Validate group_size metadata
         if cache.group_size != self.group_size:
             raise ValueError(
                 f"metadata mismatch: stored group_size={cache.group_size} "
                 f"current group_size={self.group_size}"
             )
+
+        if cache.quant_mode in ("hybrid_polar_cartesian", "isoquant_hybrid"):
+            if cache.k_hybrid is None or cache.v_hybrid is None:
+                raise ValueError(
+                    "polar cache missing k_hybrid or v_hybrid data"
+                )
+            assert self._k_quant_polar is not None
+            assert self._v_quant_polar is not None
+            k_rec = self._k_quant_polar.dequantize(cache.k_hybrid)
+            v_rec = self._v_quant_polar.dequantize(cache.v_hybrid)
+            if cache.isoquant_meta is not None:
+                assert self._isoquant_preconditioner is not None
+                k_rec = self._isoquant_preconditioner.inverse(
+                    k_rec, cache.isoquant_meta
+                )
+                v_rec = self._isoquant_preconditioner.inverse(
+                    v_rec, cache.isoquant_meta
+                )
+            return k_rec.astype(out_dtype), v_rec.astype(out_dtype)
+
+        # Validate bits consistency against packed data shapes
+        def _expected_packed_words(n_values: int, bits: int) -> int:
+            codes_per_word = 32 // bits
+            return (n_values + codes_per_word - 1) // codes_per_word
+
+        if cache.num_blocks == 0:
+            expected_k = _expected_packed_words(
+                cache.k_n_values, cache.k_bits
+            )
+            if cache.k_packed.size < expected_k:
+                raise ValueError(
+                    f"metadata mismatch: stored k_bits={cache.k_bits} "
+                    f"inconsistent with k_packed size "
+                    f"({cache.k_packed.size} vs expected at least {expected_k})"
+                )
+            expected_v = _expected_packed_words(
+                cache.v_n_values, cache.v_bits
+            )
+            if cache.v_packed.size < expected_v:
+                raise ValueError(
+                    f"metadata mismatch: stored v_bits={cache.v_bits} "
+                    f"inconsistent with v_packed size "
+                    f"({cache.v_packed.size} vs expected at least {expected_v})"
+                )
+        else:
+            for blk in range(cache.num_blocks):
+                k_expected = _expected_packed_words(
+                    cache.k_block_n_values[blk], cache.k_bits
+                )
+                k_actual = (
+                    cache.k_block_packed_offsets[blk + 1]
+                    - cache.k_block_packed_offsets[blk]
+                )
+                if k_expected != k_actual:
+                    raise ValueError(
+                        f"metadata mismatch: stored k_bits={cache.k_bits} "
+                        f"inconsistent with block {blk} k_packed size "
+                        f"({k_actual} vs expected {k_expected})"
+                    )
+                v_expected = _expected_packed_words(
+                    cache.v_block_n_values[blk], cache.v_bits
+                )
+                v_actual = (
+                    cache.v_block_packed_offsets[blk + 1]
+                    - cache.v_block_packed_offsets[blk]
+                )
+                if v_expected != v_actual:
+                    raise ValueError(
+                        f"metadata mismatch: stored v_bits={cache.v_bits} "
+                        f"inconsistent with block {blk} v_packed size "
+                        f"({v_actual} vs expected {v_expected})"
+                    )
 
         if cache.num_blocks == 0:
             # Legacy cache without per-block offsets
@@ -1059,6 +1414,14 @@ class RFSNTurboQuantKVManager:
                 use_incoherent_signs=cache.use_incoherent_signs,
                 out_dtype=out_dtype,
             )
+            if cache.isoquant_meta is not None:
+                assert self._isoquant_preconditioner is not None
+                k_rec = self._isoquant_preconditioner.inverse(
+                    k_rec, cache.isoquant_meta
+                )
+                v_rec = self._isoquant_preconditioner.inverse(
+                    v_rec, cache.isoquant_meta
+                )
             return k_rec, v_rec
 
         k_rec = self._reconstruct_all_blocks(
@@ -1067,6 +1430,14 @@ class RFSNTurboQuantKVManager:
         v_rec = self._reconstruct_all_blocks(
             cache=cache, is_key=False, out_dtype=out_dtype,
         )
+        if cache.isoquant_meta is not None:
+            assert self._isoquant_preconditioner is not None
+            k_rec = self._isoquant_preconditioner.inverse(
+                k_rec, cache.isoquant_meta
+            )
+            v_rec = self._isoquant_preconditioner.inverse(
+                v_rec, cache.isoquant_meta
+            )
         return k_rec, v_rec
 
     def retrieve_blocks(
@@ -1075,7 +1446,7 @@ class RFSNTurboQuantKVManager:
         block_indices: list[int],
         block_size: int = 64,
         out_dtype=None,
-    ) -> Optional[tuple[mx.array, mx.array]]:
+    ) -> tuple[mx.array, mx.array] | None:
         """Retrieve selected token blocks from a compressed KV cache.
 
         For block-aware cache entries, non-contiguous block selections
@@ -1124,7 +1495,12 @@ class RFSNTurboQuantKVManager:
         block_indices = sorted(set(int(i) for i in block_indices))
 
         _b, _h, t, _d = cache.shape
-        max_blocks = max(1, (t + block_size - 1) // block_size)
+        if block_size != cache.block_size:
+            raise ValueError(
+                f"block_size mismatch: requested {block_size} "
+                f"but cache was stored with {cache.block_size}"
+            )
+        max_blocks = max(1, (t + cache.block_size - 1) // cache.block_size)
         if block_indices[-1] >= max_blocks:
             raise ValueError(
                 f"block index out of range: max valid is {max_blocks - 1}, "
@@ -1227,6 +1603,15 @@ class RFSNTurboQuantKVManager:
             )
             v_result = self._apply_signs_on_the_fly(
                 v_result, cache.seed, indices=global_idx
+            )
+
+        if cache.isoquant_meta is not None:
+            assert self._isoquant_preconditioner is not None
+            k_result = self._isoquant_preconditioner.inverse(
+                k_result, cache.isoquant_meta
+            )
+            v_result = self._isoquant_preconditioner.inverse(
+                v_result, cache.isoquant_meta
             )
 
         return k_result, v_result

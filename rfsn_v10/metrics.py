@@ -8,9 +8,10 @@ from __future__ import annotations
 
 import time
 from collections import defaultdict
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional
 from threading import Lock
+from typing import Any
 
 
 @dataclass
@@ -20,7 +21,7 @@ class Metric:
     name: str
     value: float
     timestamp: float
-    tags: Dict[str, str] = field(default_factory=dict)
+    tags: dict[str, str] = field(default_factory=dict)
     metric_type: str = "gauge"  # gauge, counter, histogram
 
 
@@ -28,13 +29,13 @@ class MetricsRegistry:
     """Registry for collecting metrics."""
 
     def __init__(self):
-        self.metrics: List[Metric] = []
-        self.gauges: Dict[str, float] = {}
-        self.counters: Dict[str, float] = {}
-        self.histograms: Dict[str, List[float]] = defaultdict(list)
+        self.metrics: list[Metric] = []
+        self.gauges: dict[str, float] = {}
+        self.counters: dict[str, float] = {}
+        self.histograms: dict[str, list[float]] = defaultdict(list)
         self.lock = Lock()
 
-    def gauge(self, name: str, value: float, tags: Optional[Dict[str, str]] = None) -> None:
+    def gauge(self, name: str, value: float, tags: dict[str, str] | None = None) -> None:
         """Record a gauge metric."""
         with self.lock:
             self.gauges[name] = value
@@ -47,7 +48,7 @@ class MetricsRegistry:
             )
             self.metrics.append(metric)
 
-    def counter(self, name: str, increment: float = 1.0, tags: Optional[Dict[str, str]] = None) -> None:
+    def counter(self, name: str, increment: float = 1.0, tags: dict[str, str] | None = None) -> None:
         """Record a counter metric."""
         with self.lock:
             self.counters[name] = self.counters.get(name, 0.0) + increment
@@ -60,7 +61,7 @@ class MetricsRegistry:
             )
             self.metrics.append(metric)
 
-    def histogram(self, name: str, value: float, tags: Optional[Dict[str, str]] = None) -> None:
+    def histogram(self, name: str, value: float, tags: dict[str, str] | None = None) -> None:
         """Record a histogram metric."""
         with self.lock:
             self.histograms[name].append(value)
@@ -73,7 +74,7 @@ class MetricsRegistry:
             )
             self.metrics.append(metric)
 
-    def get_metric_summary(self) -> Dict[str, Any]:
+    def get_metric_summary(self) -> dict[str, Any]:
         """Get summary of all metrics."""
         with self.lock:
             summary = {
@@ -139,11 +140,11 @@ class MetricsRegistry:
 class MetricsCollector:
     """Collects metrics from RFSN components."""
 
-    def __init__(self, registry: Optional[MetricsRegistry] = None):
+    def __init__(self, registry: MetricsRegistry | None = None):
         self.registry = registry or MetricsRegistry()
-        self.collectors: Dict[str, Callable[[], Dict[str, Any]]] = {}
+        self.collectors: dict[str, Callable[[], dict[str, Any]]] = {}
 
-    def register_collector(self, name: str, collector: Callable[[], Dict[str, Any]]) -> None:
+    def register_collector(self, name: str, collector: Callable[[], dict[str, Any]]) -> None:
         """Register a metrics collector."""
         self.collectors[name] = collector
 
@@ -164,7 +165,7 @@ class MetricsCollector:
 
 
 # Singleton instance
-_metrics_collector: Optional[MetricsCollector] = None
+_metrics_collector: MetricsCollector | None = None
 
 
 def get_metrics_collector() -> MetricsCollector:
@@ -180,7 +181,7 @@ def setup_default_metrics() -> MetricsCollector:
     collector = get_metrics_collector()
 
     # KV cache metrics
-    def collect_kv_metrics() -> Dict[str, Any]:
+    def collect_kv_metrics() -> dict[str, Any]:
         return {
             "cache_size_bytes": 0,  # Would be populated from actual cache
             "cache_hit_rate": 0.0,
@@ -188,7 +189,7 @@ def setup_default_metrics() -> MetricsCollector:
         }
 
     # Attention metrics
-    def collect_attention_metrics() -> Dict[str, Any]:
+    def collect_attention_metrics() -> dict[str, Any]:
         return {
             "sparse_ratio": 0.0,
             "fallback_count": 0,
@@ -196,7 +197,7 @@ def setup_default_metrics() -> MetricsCollector:
         }
 
     # Memory metrics
-    def collect_memory_metrics() -> Dict[str, Any]:
+    def collect_memory_metrics() -> dict[str, Any]:
         try:
             import psutil
 

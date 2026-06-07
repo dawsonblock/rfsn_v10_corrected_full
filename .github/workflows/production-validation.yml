@@ -21,7 +21,7 @@ env:
 
 jobs:
   production-validation:
-    runs-on: macos-latest
+    runs-on: macos-14
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -29,7 +29,10 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: "3.11"
+
+      - name: Lock Xcode
+        run: sudo xcode-select -s /Applications/Xcode_15.2.app
 
       - name: Install dependencies
         run: |
@@ -47,6 +50,12 @@ jobs:
           fi
           echo "model=$MODEL" >> $GITHUB_OUTPUT
           echo "Selected model: $MODEL"
+
+      - name: Cache model weights
+        uses: actions/cache@v4
+        with:
+          path: models/
+          key: model-${{ steps.model.outputs.model }}-${{ hashFiles('tools/model_download.py') }}
 
       - name: Download model
         env:

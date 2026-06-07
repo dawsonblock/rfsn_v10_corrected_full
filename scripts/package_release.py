@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-"""Package Main 27 release into a clean zip file."""
+"""Package a release into a clean zip file."""
 
+import argparse
 import json
 import shutil
 import tempfile
@@ -9,13 +10,23 @@ from pathlib import Path
 
 
 def main():
-    """Package the Main 27 release."""
+    """Package the release."""
+    parser = argparse.ArgumentParser(
+        description="Package RFSN v10 release into a clean zip"
+    )
+    parser.add_argument(
+        "--release",
+        default="main28",
+        help="Release name to package (default: main28)",
+    )
+    args = parser.parse_args()
+
     root = Path(__file__).parent.parent
-    proof_dir = root / "artifacts" / "proof" / "main27"
-    manifest_path = proof_dir / "main27_release_manifest.json"
+    proof_dir = root / "artifacts" / "proof" / args.release
+    manifest_path = proof_dir / f"{args.release}_release_manifest.json"
 
     # Read manifest
-    with open(manifest_path) as f:
+    with open(manifest_path, encoding="utf-8") as f:
         manifest = json.load(f)
 
     release_name = manifest["release"]

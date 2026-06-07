@@ -10,7 +10,6 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass
 from enum import Enum
-from typing import Dict, Optional, List
 
 
 class EvictionStrategy(Enum):
@@ -28,7 +27,7 @@ class CachePolicy:
 
     max_size_gb: float = 2.0
     eviction_strategy: EvictionStrategy = EvictionStrategy.LRU
-    ttl_seconds: Optional[float] = None
+    ttl_seconds: float | None = None
     min_access_count: int = 0
     priority_boost: float = 1.0
 
@@ -38,10 +37,10 @@ class ModelCachePolicyManager:
 
     def __init__(self):
         """Initialize model cache policy manager."""
-        self.policies: Dict[str, CachePolicy] = {}
-        self.access_counts: Dict[str, Dict[str, int]] = {}
-        self.last_access: Dict[str, Dict[str, float]] = {}
-        self.insertion_order: Dict[str, List[str]] = {}
+        self.policies: dict[str, CachePolicy] = {}
+        self.access_counts: dict[str, dict[str, int]] = {}
+        self.last_access: dict[str, dict[str, float]] = {}
+        self.insertion_order: dict[str, list[str]] = {}
 
     def set_policy(self, model_id: str, policy: CachePolicy) -> None:
         """Set cache policy for a model.
@@ -55,7 +54,7 @@ class ModelCachePolicyManager:
         self.last_access[model_id] = {}
         self.insertion_order[model_id] = []
 
-    def get_policy(self, model_id: str) -> Optional[CachePolicy]:
+    def get_policy(self, model_id: str) -> CachePolicy | None:
         """Get cache policy for a model.
 
         Args:
@@ -99,7 +98,7 @@ class ModelCachePolicyManager:
         model_id: str,
         current_size_gb: float,
         required_gb: float,
-    ) -> List[str]:
+    ) -> list[str]:
         """Get cache keys to evict based on policy.
 
         Args:
@@ -148,7 +147,7 @@ class ModelCachePolicyManager:
 
         return candidates
 
-    def _get_lru_candidates(self, model_id: str) -> List[str]:
+    def _get_lru_candidates(self, model_id: str) -> list[str]:
         """Get LRU eviction candidates.
 
         Args:
@@ -160,7 +159,7 @@ class ModelCachePolicyManager:
         last_access = self.last_access.get(model_id, {})
         return sorted(last_access.keys(), key=lambda k: last_access.get(k, 0))
 
-    def _get_lfu_candidates(self, model_id: str) -> List[str]:
+    def _get_lfu_candidates(self, model_id: str) -> list[str]:
         """Get LFU eviction candidates.
 
         Args:
@@ -172,7 +171,7 @@ class ModelCachePolicyManager:
         access_counts = self.access_counts.get(model_id, {})
         return sorted(access_counts.keys(), key=lambda k: access_counts.get(k, 0))
 
-    def _get_fifo_candidates(self, model_id: str) -> List[str]:
+    def _get_fifo_candidates(self, model_id: str) -> list[str]:
         """Get FIFO eviction candidates.
 
         Args:
@@ -183,7 +182,7 @@ class ModelCachePolicyManager:
         """
         return self.insertion_order.get(model_id, [])
 
-    def _get_adaptive_candidates(self, model_id: str) -> List[str]:
+    def _get_adaptive_candidates(self, model_id: str) -> list[str]:
         """Get adaptive eviction candidates.
 
         Combines LRU and LFU for adaptive eviction.
@@ -211,7 +210,7 @@ class ModelCachePolicyManager:
 
         return sorted(self.last_access.get(model_id, {}).keys(), key=adaptive_score)
 
-    def get_cache_stats(self, model_id: str) -> Dict[str, any]:
+    def get_cache_stats(self, model_id: str) -> dict[str, any]:
         """Get cache statistics for a model.
 
         Args:
@@ -221,7 +220,7 @@ class ModelCachePolicyManager:
             Dictionary of cache statistics
         """
         access_counts = self.access_counts.get(model_id, {})
-        last_access = self.last_access.get(model_id, {})
+        self.last_access.get(model_id, {})
 
         total_accesses = sum(access_counts.values())
         avg_access_count = (

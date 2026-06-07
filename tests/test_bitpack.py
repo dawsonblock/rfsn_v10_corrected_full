@@ -10,7 +10,6 @@ import pytest
 mx = pytest.importorskip("mlx.core")
 from rfsn_v10.bitpack import BitPackedQuantizer
 
-
 # --- Roundtrip edge cases ---
 
 def test_roundtrip_all_zeros():

@@ -16,7 +16,7 @@ def check_syntax(filepath):
 
 if __name__ == "__main__":
     files_to_check = [
-        "rfsn_v10/runtime.py",
+        "rfsn_v10/runtime/engine.py",
         "rfsn_v10/kv_manager.py", 
         "rfsn_v10/clickhouse_client.py",
         "rfsn_v10/async_writer.py",

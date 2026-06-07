@@ -1,339 +1,245 @@
-# RFSN v10 Main 27 — Validation Semantics Correction
+# RFSN v10 — Alpha Repair Build
 
-## Status: RFSN v10 Main 27 — Validation Semantics Correction
+## Status
 
-Implemented:
-- low-bit KV cache compression
-- sequential reference reconstruction route
-- multi-kernel Metal reconstruction route
-- fused packed-dequant-WHT-sign Metal kernel source path
-- sparse safety gate
-- kernel benchmark artifacts
-- synthetic proof artifacts
+**Strong alpha candidate.** Repair plan (Phases 0–13) applied. Not yet beta: compile
+and full packaging gates must pass on a clean build before the classifier can advance.
 
-Proof status:
-- multi-kernel route: benchmarked
-- fused route: proven by fused_kernel_benchmark.json (cosine 1.000, max_abs_diff 0.0)
-- sparse decode: below threshold, disabled by default
-- real-model validation: alpha-level on real non-random model (Qwen/Qwen2.5-0.5B-Instruct)
-- long-context validation: included
-- polar quant: not implemented
-- true arbitrary partial dequantization: not implemented
+To verify the current state locally:
 
-Not claimed:
-- production LLM deployment
-- sparse safe inference
-- universal speedup
-- polar quantization
-- true arbitrary partial dequantization
-
-## Overview
-RFSN v10 is an alpha quantized KV-cache + decode-time sparse-attention runtime for MLX/Apple Silicon. This build focuses on proving numerical equivalence and quality-safe sparse behavior before any production claim.
-
-## Components
-
-### Core Modules
-- `bitpack.py` - Bit-packed quantizer (2-8 bit widths) with exact roundtrip guarantees
-- `kv_manager.py` - TurboQuant KV manager with grouped symmetric quantization and WHT preconditioning
-- `attention.py` - Adaptive block-sparse attention with decode-only sparse path and prefill dense fallback
-- `runtime.py` - Orchestrator integrating KV cache, sparse attention, audit mode, and telemetry
-- `adaptive_sparsity.py` - Controller that adjusts top_k_ratio based on real quality signals
-- `memory_guard.py` - MLX/Metal memory monitoring and protection against OOM
-- `async_writer.py` - Background telemetry writer with batching and retry logic
-- `clickhouse_client.py` - HTTP-based ClickHouse client for telemetry ingestion
-
-### Test Suite
-- `tests/test_bitpack.py` - bitpack roundtrip, stress, and rejection coverage
-- `tests/test_kv_manager.py` - KV compression/reconstruction and cache behavior coverage
-- `tests/test_metal_kernel_math.py` - bitpack, quantization, WHT, and metal-path reconstruction coverage
-- `tests/test_attention.py` - sparse attention correctness, fallback, and validation coverage
-- `tests/test_runtime.py` - runtime orchestration, telemetry, and audit coverage
-- `tests/test_long_context.py` - long sequence smoke coverage
-
-### Benchmarks
-- `benchmarks/benchmark_bitpack.py` - Pack/unpack throughput and compression ratio
-- `benchmarks/benchmark_kv_cache.py` - Store/retrieve latency and quality metrics
-- `benchmarks/benchmark_attention.py` - Dense vs sparse latency, top_k_ratio sweep
-- `benchmarks/benchmark_end_to_end.py` - Full pipeline benchmark with KV + attention
-
-### Scripts
-- `scripts/run_tests.sh` - Execute full test suite
-- `scripts/run_benchmarks.sh` - Run all benchmarks
-- `scripts/profile_memory.py` - MLX/Metal memory profiling utility
-
-## Features
-- **Bit-Packing**: Exact roundtrip for bits 2-8 with validation of edge cases
-- **KV Cache**: Grouped symmetric quantization (2-8 bit widths), WHT preconditioning, sign randomization
-- **Sparse Attention**: Decode-only block-sparse with proper padding handling and dense fallback
-- **Runtime Orchestrator**: Composite cache keys, audit mode, latency timing, failure handling
-- **Adaptive Sparsity**: Quality-based top_k_ratio adjustment using audit signals
-- **Memory Safety**: MLX memory monitoring with automatic eviction under pressure
-- **Telemetry**: Async writer with batching, retries, and ClickHouse backend
-- **Testing**: Deterministic unit coverage across core components
-- **Benchmarks**: Performance measurements with hardware/software metadata
-
-Kernel status:
-- Implemented: Metal sign kernel, Metal packed-dequant kernel, Metal WHT64 kernel, multi-kernel Metal reconstruction route, fused packed-dequant-WHT-sign Metal kernel source path
-- Proof validation: fused route proven by fused_kernel_benchmark.json (cosine 1.000, max_abs_diff 0.0)
-- Block-aware retrieval: selected-block reconstruction (`retrieve_blocks()`) uses per-block multi-kernel reconstruction with global-index sign correction. It does not always use the fused full-route kernel.
-
-## Requirements
-- Apple Silicon Mac (ARM64)
-- macOS 12.0+
-- Python 3.10+
-- MLX (`pip install mlx`)
-- ClickHouse server (optional, for telemetry)
-
-## Installation
 ```bash
-pip install -e ".[dev]"
-pip install -e ".[dev,real_model]"  # Optional: real-model validation (torch + transformers)
-pip install -e ".[production]"  # Optional: production validation (huggingface_hub)
-pip install mlx  # If not already installed
+python -m compileall -q rfsn_v10 tests          # must produce no output
+python scripts/release_gate.py --cpu-only        # must print: Gate: 9 passed, 0 failed
 ```
 
-## Usage
-```python
-import mlx.core as mx
-from rfsn_v10 import (
-    RFSNTurboQuantKVManager,
-    RFSNRuntime,
-    AdaptiveSparsityController,
-    MemoryGuard
-)
+| Path | Status |
+|------|--------|
+| Stable runtime (MLX 8-bit KV compression) | Alpha — validated on Apple Silicon, quality gates passing |
+| Package installation (subpackages) | Fixed — `rfsn_v10.kernels`, `rfsn_v10.runtime` install correctly |
+| CLI health check (`python -m rfsn_v10 healthcheck`) | Working |
+| Sparse decode | Disabled by default — not end-to-end proven |
+| QJL score correction | Experimental — disabled by default, requires explicit opt-in |
+| Polar / hybrid quantization | Experimental — disabled by default, requires explicit opt-in |
+| Adaptive sparse controller | Experimental — disabled by default, requires explicit opt-in |
+| CUDA backend | **Not implemented** |
+| Full portable runtime | Not implemented — MLX required for core runtime |
+| End-to-end speedup | Not proven — decode TPS comparable, compression overhead makes total slower at short contexts |
+| Production deployment | Not supported |
+| Docker | CLI health check only — no HTTP service |
 
-# Initialize KV manager
-kv_manager = RFSNTurboQuantKVManager(
-    k_bits=8, v_bits=3, use_incoherent=True,
-    max_memory_gb=1.0, max_pinned_memory_gb=0.5
-)
+---
 
-# Initialize runtime
-runtime = RFSNRuntime(
-    kv_manager=kv_manager,
-    model_id="my_model",
-    audit_mode=True
-)
+## Platform Support
 
-# Run decode step
-q = mx.random.normal((1, 4, 1, 64))  # [B, H, T_q, D]
-k = mx.random.normal((1, 4, 128, 64))  # [B, H, T_k, D]
-v = mx.random.normal((1, 4, 128, 64))
-output, info = runtime.execute_decode_step(
-    skill_pattern="transformer",
-    layer_id="layer_0",
-    batch_id="batch_0",
-    queries=q,
-    keys=k,
-    values=v
-)
+| Platform | Status |
+|----------|--------|
+| Apple Silicon + MLX | Supported (primary runtime) |
+| NumPy CPU | Partial — kernel validation, config, security tests pass; MLX-dependent runtime tests skip |
+| Linux / CI | CPU tests pass; MLX suites skip cleanly |
+| CUDA | Not implemented |
+| macOS x86 (Intel) | MLX not supported on Intel Macs — NumPy-only |
 
-# Access telemetry
-telemetry = runtime.get_telemetry()
-```
+---
 
-## Testing
+## Quick Start
+
 ```bash
-# Install dependencies
+# Requires Python 3.11 and Apple Silicon with MLX for full runtime
 pip install -e .
-pip install mlx pytest
 
-# Run full test suite
-./scripts/run_tests.sh
-# or
-pytest -v
+# Verify install
+python -m rfsn_v10 version
 
-# Run specific test suites
-pytest tests/test_bitpack.py -v
-pytest tests/test_kv_manager.py -v
-pytest tests/test_metal_kernel_math.py -v
-pytest tests/test_attention.py -v
-pytest tests/test_runtime.py -v
-pytest tests/test_long_context.py -v
+# Health check
+python -m rfsn_v10 healthcheck
+
+# Validate config
+python -m rfsn_v10 validate-config --config configs/default_runtime.yaml
+
+# CPU-safe tests (no MLX required)
+pytest tests/test_config.py tests/test_config_strict.py \
+       tests/test_kernels_validation.py \
+       tests/test_quantization_lazy_imports.py \
+       tests/test_experimental_flags.py \
+       tests/test_clickhouse_security.py \
+       tests/test_no_runtime_raw_sdpa.py -q
+
+# MLX-dependent tests (Apple Silicon required)
+pytest tests/test_attention.py tests/test_bitpack.py \
+       tests/test_bitpack_fuzz.py tests/test_kv_manager.py \
+       tests/test_drift.py tests/test_attention_causal_mask.py \
+       tests/test_short_prompt_decode_drift.py \
+       tests/test_prefill_decode_split.py -q
 ```
 
-## Benchmarking
+---
+
+## Architecture
+
+### Stable Modules
+
+- `rfsn_v10/bitpack.py` — Bit-packed quantizer (2–8 bit widths) with exact roundtrip guarantees
+- `rfsn_v10/kv_manager.py` — TurboQuant KV manager with grouped symmetric quantization and WHT preconditioning
+- `rfsn_v10/attention.py` — Adaptive block-sparse attention; all dense fallbacks route through `attention_reference.py`
+- `rfsn_v10/attention_reference.py` — Canonical causal attention reference (always applies causal mask for T_q > 1)
+- `rfsn_v10/runtime/engine.py` — Orchestrator integrating KV cache, sparse attention, audit mode, and telemetry
+- `rfsn_v10/runtime/__init__.py` — Re-exports `RFSNRuntime` from `engine.py`
+- `rfsn_v10/config.py` — Strict Pydantic config (extra='forbid' on all models)
+- `rfsn_v10/health.py` — Health check system; returns UNHEALTHY until checks have been run
+- `rfsn_v10/clickhouse_client.py` — HMAC-SHA256 prompt sanitization, recursive sanitizer, retry queue
+
+### Experimental Modules (disabled by default)
+
+All experimental paths require explicit opt-in. The runtime **will not activate them
+silently** — attempting to use an experimental feature without enabling it raises a
+`RuntimeError`.
+
+```yaml
+# config.yaml
+experimental:
+  enable_qjl: false    # QJL score correction
+  enable_polar: false  # Polar / hybrid quantization
+  enable_adaptive: false  # Adaptive sparse controller
+```
+
+Or via environment:
+
 ```bash
-# Run all benchmarks
-./scripts/run_benchmarks.sh
-# or run individually
-python3 benchmarks/benchmark_bitpack.py
-python3 benchmarks/benchmark_kv_cache.py
-python3 benchmarks/benchmark_attention.py
-python3 benchmarks/benchmark_end_to_end.py
-
-# Generate proof artifacts (JSON + summary report)
-./scripts/run_proof_artifacts.sh
-# Optional custom output dir, iterations, and profile
-./scripts/run_proof_artifacts.sh artifacts/proof/main27 3 main27
-
-# Compare current proof run vs tracked baseline
-python3 scripts/compare_proof_runs.py \
-    --profile main27 \
-    --baseline-dir benchmarks/proof_baselines/main10 \
-    --current-dir artifacts/proof/main27 \
-    --output-json artifacts/proof/main27/trend_report.json \
-    --output-md artifacts/proof/main27/trend_report.md
-
-# Enforce regression gate (non-zero exit on threshold breach)
-python3 scripts/check_proof_regression.py \
-    --baseline benchmarks/proof_baselines/main10 \
-    --current artifacts/proof/main27 \
-    --output-json artifacts/proof/main27/regression_report.json \
-    --output-md artifacts/proof/main27/regression_report.md
-
-# Generate kernel benchmark evidence
-python3 benchmarks/benchmark_kernel_paths.py \
-    --out artifacts/proof/main27/kernel_benchmark.json
-
-# Generate plot artifacts from proof JSON
-python3 scripts/generate_plots.py \
-    --input-dir artifacts/proof/main27 \
-    --output-dir results/plots
-
-# Real-model validation (auto-downloads from HuggingFace)
-python3 benchmarks/validate_real_model_kv.py \
-    --model Qwen/Qwen2.5-0.5B-Instruct \
-    --tokens 512 \
-    --positions 64 \
-    --configs k8_v3_gs64,k8_v4_gs64,k8_v5_gs64,k8_v4_gs32,k8_v5_gs32,k6_v6_gs64,k4_v4_gs64 \
-    --out artifacts/proof/main27/real_model_validation.json
-
-# Long-context validation
-python3 benchmarks/validate_long_context_kv.py \
-    --model Qwen/Qwen2.5-0.5B-Instruct \
-    --contexts 512,1024,2048 \
-    --positions 64 \
-    --configs k8_v3_gs64,k8_v4_gs64,k8_v5_gs64,k8_v4_gs32,k8_v5_gs32,k6_v6_gs64,k4_v4_gs64 \
-    --out artifacts/proof/main27/long_context_validation.json
-
-# Production-grade model validation
-# Download a model first:
-python tools/model_download.py mistral-7b --output-dir models
-# Then run comprehensive validation:
-python benchmarks/validate_production_model.py \
-    --model-path models/mistral-7b \
-    --prompt-suite prompts/validation_suite.json \
-    --out artifacts/proof/main27/production_validation.json
-# Check against baseline:
-python scripts/check_production_regression.py \
-    --results artifacts/proof/main27/production_validation.json \
-    --baseline benchmarks/production_baseline.json
+RFSN_EXPERIMENTAL_QJL=true
+RFSN_EXPERIMENTAL_POLAR=true
+RFSN_EXPERIMENTAL_ADAPTIVE=true
 ```
 
-Policy:
-- Tune thresholds in `scripts/proof_regression_thresholds.json` only when benchmark noise or hardware/runtime variance is proven to cause false positives across repeated runs.
-- Refresh baseline files in `benchmarks/proof_baselines/<profile>/` when performance or quality changes are intentional and accepted after review.
-- Do not update thresholds and baseline in the same change unless explicitly documenting why both are necessary.
-- KV latency thresholds are intentionally looser than quality thresholds because microbenchmark timing variance is higher than quality metric variance.
-- Metal kernel path is an alpha route with strict fallback to sequential reconstruction when unsupported.
-- Absolute quality minima should be treated as deployment warnings unless explicitly upgraded to hard-fail policy.
-- Current proof output includes `WARNING_UNSAFE_FOR_LLM_DEPLOYMENT` when sparse absolute quality is below target.
-- Sparse decode is experimental and disabled by default unless a profile passes safety gates.
+**Warning:** Experimental features are not validated for production or quality-critical generation.
 
-## Memory Profiling
-```bash
-python3 scripts/profile_memory.py
-```
+- `rfsn_v10/quantization/polar_quant.py` — Iterative hierarchical polar quantization
+- `rfsn_v10/quantization/hybrid_polar_cartesian.py` — Hybrid polar-cartesian quantizer
+- `rfsn_v10/quantization/qjl_score_correction.py` — QJL sketch-based score correction
+- `rfsn_v10/quantization/isoquant_precondition.py` — IsoQuant quaternion preconditioner
 
-## Proof Artifacts
+---
 
-All Main 27 proof artifacts are in `artifacts/proof/main27/`.
+## Validated Stable Configs
 
-Note: Main 23, 24, 25, and 26 artifacts are retained in their respective subdirectories for historical reference only.
+Validated at the beta level on Apple Silicon. Quality thresholds (cosine ≥ 0.998 vs.
+FP32 reference) measured with `tests/test_short_prompt_decode_drift.py`.
 
-## Recommended Configs
+| Config | K bits | V bits | Group size | Status |
+|--------|--------|--------|------------|--------|
+| `k8_v5_gs32` | 8 | 5 | 32 | **Default** — slightly better cosine |
+| `k8_v5_gs64` | 8 | 5 | 64 | Validated |
+| `k8_v4_gs64` | 8 | 4 | 64 | Validated |
 
-- **Compression-oriented**: `k8_v3_gs64` (8-bit K / 3-bit V / group_size 64)
-- **Balanced**: `k8_v4_gs64` (8-bit K / 4-bit V / group_size 64)
-- **Quality-oriented**: `k8_v5_gs64` or `k8_v5_gs32`
-- **Rejected**: `k4_v4_gs64`, `k6_v6_gs64` (fail alpha thresholds)
-
-## Real-Model Validation
-
-Main 27 includes real non-random model validation on `Qwen/Qwen2.5-0.5B-Instruct` with corrected causal LM NLL scoring (≥64 decode positions) and multi-position logit metrics. Results are alpha-level: quality metrics are reported honestly with pass/fail thresholds. NaN metrics are marked `nan_fail`. If thresholds are not met, the config is marked `fail`.
-
-## Sparse Decode Status
-
-Sparse decode is **disabled by default**. Current sparse max cosine is below the deployment threshold. Do not enable sparse decode unless you are explicitly testing the safety gate.
+---
 
 ## Known Limitations
 
-- Polar quantization is not implemented.
-- True arbitrary partial dequantization is not implemented (selected-block reconstruction via `retrieve_blocks()` exists; arbitrary token-level partial dequant remains unimplemented).
-- Production hardening and end-to-end real-model validation remain in progress.
-- RFSN is not production-ready.
+1. **Sparse path is decode-focused.** Prefill always uses dense attention with causal masking.
+2. **QJL correction is disabled by default.** Experimental — not validated.
+3. **Experimental configs may degrade logits.** Short-prompt drift under active investigation.
+4. **Full runtime requires MLX.** Apple Silicon is mandatory for the core runtime.
+5. **Docker service mode is not production hardened.** CLI health check only; no HTTP service exposed.
+6. **CUDA not implemented.** Do not depend on it.
+7. **End-to-end speedup not proven.** Decode TPS is comparable; compression overhead makes total time slower at short contexts.
+8. **macOS x86 Metal not supported.** MLX is ARM-only; Intel Mac users get NumPy backend only.
 
-## How to Reproduce
+---
+
+## Security
+
+- Telemetry prompt text is HMAC-SHA256 hashed before leaving the process boundary.
+- Sanitization is recursive — nested dicts and message lists are also cleaned.
+- **`RFSN_TELEMETRY_HMAC_KEY` is required** when events with sensitive fields are written.
+  An absent key raises `RuntimeError` rather than silently hashing with an empty key.
+- HTTPS is required for remote ClickHouse hosts; HTTP is only allowed for localhost.
+- Retry queue stores `(table, event)` tuples — routing metadata is never mixed into event payloads.
+
+---
+
+## Running Tests
 
 ```bash
-# Install
-pip install -e ".[dev,real_model]"
-pip install mlx
+# CPU-safe tests (no MLX required, runs on Linux CI)
+RFSN_BACKEND=numpy pytest \
+    tests/test_config.py \
+    tests/test_config_strict.py \
+    tests/test_kernels_validation.py \
+    tests/test_quantization_lazy_imports.py \
+    tests/test_experimental_flags.py \
+    tests/test_clickhouse_security.py \
+    tests/test_no_runtime_raw_sdpa.py -q
 
-# Run synthetic proof benchmarks
-python benchmarks/benchmark_kernel_paths.py --out artifacts/proof/main27/kernel_benchmark.json
-python benchmarks/benchmark_fused_kernel.py --out artifacts/proof/main27/fused_kernel_benchmark.json
-python benchmarks/benchmark_optimizations.py --out artifacts/proof/main27/optimization_benchmark.json
+# MLX-dependent tests (Apple Silicon required)
+pytest \
+    tests/test_attention.py \
+    tests/test_bitpack.py \
+    tests/test_bitpack_fuzz.py \
+    tests/test_kv_manager.py \
+    tests/test_drift.py \
+    tests/test_attention_causal_mask.py \
+    tests/test_short_prompt_decode_drift.py \
+    tests/test_prefill_decode_split.py -q
 
-# Run real-model validation (64 decode positions, corrected causal NLL)
-python benchmarks/validate_real_model_kv.py \
-    --model Qwen/Qwen2.5-0.5B-Instruct \
-    --tokens 512 \
-    --positions 64 \
-    --configs k8_v3_gs64,k8_v4_gs64,k8_v5_gs64,k8_v4_gs32,k8_v5_gs32,k6_v6_gs64,k4_v4_gs64 \
-    --out artifacts/proof/main27/real_model_validation.json
+# Security tests
+pytest tests/test_clickhouse_security.py \
+       tests/test_clickhouse_routing.py \
+       tests/test_tool_runner_security.py -q
 
-# Run long-context validation
-python benchmarks/validate_long_context_kv.py \
-    --model Qwen/Qwen2.5-0.5B-Instruct \
-    --contexts 512,1024,2048 \
-    --positions 64 \
-    --configs k8_v3_gs64,k8_v4_gs64,k8_v5_gs64,k8_v4_gs32,k8_v5_gs32,k6_v6_gs64,k4_v4_gs64 \
-    --out artifacts/proof/main27/long_context_validation.json
-
-# Run generation smoke test
-python benchmarks/validate_generation_smoke.py \
-    --model Qwen/Qwen2.5-0.5B-Instruct \
-    --max-new-tokens 64 \
-    --configs baseline_fp16,k8_v4_gs64,k8_v5_gs64,k8_v5_gs32 \
-    --out artifacts/proof/main27/generation_smoke.json
-
-# Run throughput benchmark
-python benchmarks/benchmark_generation_throughput.py \
-    --model Qwen/Qwen2.5-0.5B-Instruct \
-    --contexts 512,1024,2048 \
-    --configs baseline_fp16,k8_v4_gs64,k8_v5_gs64,k8_v5_gs32 \
-    --out artifacts/proof/main27/generation_throughput.json
-
-# Run release integrity check
-python scripts/check_release_integrity.py
+# Full CI (mirrors .github/workflows/ci.yml linux-cpu job)
+RFSN_BACKEND=numpy pytest --collect-only -q
 ```
 
-## Design Notes
-- Tests are deterministic; wall-clock runtime depends on hardware and MLX availability
-- Sparse attention is decode-only (T_q=1) with prefill dense fallback
-- KV cache uses grouped symmetric quantization with WHT preconditioning
-- Telemetry is written asynchronously to prevent inference stalls
-- Memory guard prevents OOM by monitoring MLX/Metal usage
-- Benchmarks include hardware/software metadata for reproducibility
+---
 
-## Implementation Status
-✅ Core modules compile and integrate in alpha scope
-✅ Benchmark scripts and proof plots are present
-✅ Metal packed-dequant, Metal WHT64, and Metal sign kernels are implemented
-✅ Telemetry layer is implemented with batched writer support
-✅ Real-model validation on non-random model (alpha-level)
-✅ Long-context validation included
-⚠ MLX-dependent quality and performance validation is environment-dependent
-⚠ Sparse quality remains warning-scoped; sparse decode defaults to disabled
-⚠ Production hardening remains in progress
-❌ Polar quantization (not implemented)
-❌ True arbitrary partial dequantization (selected-block reconstruction exists via retrieve_blocks(); arbitrary token-level partial dequant remains unimplemented)
-❌ Disk persistence (planned for future)
+## Benchmarks
 
-## Next Steps
-1. Run benchmarks to get performance numbers on your hardware
-2. Review real-model validation results and adjust compression configs if needed
-3. Consider adding disk persistence for long-running workloads
-4. Evaluate polar quantization for future quality improvement
+```bash
+# Fast run (attention + bitpack)
+python benchmarks/run_all.py --fast
+
+# Full benchmark suite
+python benchmarks/run_all.py
+
+# Regression check against production_baseline.json
+python benchmarks/run_all.py --check
+```
+
+Results are written to `benchmarks/results/run_all_<timestamp>.json` and `benchmarks/results/latest.json`.
+
+---
+
+## Docker
+
+```bash
+docker build -t rfsn-qjl17 .
+
+# Health check (CLI-only; no HTTP server)
+docker run --rm rfsn-qjl17 python -m rfsn_v10 healthcheck
+
+# With ClickHouse (production compose)
+cp .env.example .env   # fill CLICKHOUSE_PASSWORD
+docker-compose up
+
+# With ClickHouse ports exposed (local dev only)
+docker-compose -f docker-compose.yml -f docker-compose.dev.yml up
+```
+
+Requires Python 3.11. Core runtime does not function in Docker without Apple Silicon + MLX.
+
+---
+
+## Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `RFSN_BACKEND` | *(auto)* | Force backend: `mlx` or `numpy` |
+| `RFSN_LOG_LEVEL` | `INFO` | Logging level |
+| `RFSN_CACHE_DIR` | `~/.cache/rfsn` | KV cache directory |
+| `RFSN_TELEMETRY_HMAC_KEY` | *(required if telemetry enabled)* | HMAC key for prompt sanitisation |
+| `RFSN_CLICKHOUSE_HOST` | `localhost` | ClickHouse hostname |
+| `RFSN_CLICKHOUSE_PORT` | `8123` | ClickHouse HTTP port |
+| `RFSN_CLICKHOUSE_SECURE` | `true` | Use HTTPS |
+| `RFSN_CLICKHOUSE_TOKEN` | *(empty)* | Bearer token for RFSN-Auth header |
+| `RFSN_EXPERIMENTAL_QJL` | `false` | Enable QJL score correction |
+| `RFSN_EXPERIMENTAL_POLAR` | `false` | Enable polar/hybrid quantization |
+| `RFSN_EXPERIMENTAL_ADAPTIVE` | `false` | Enable adaptive sparse controller |

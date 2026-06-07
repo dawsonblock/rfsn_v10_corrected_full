@@ -6,15 +6,17 @@ soft/hard limits with proactive eviction callbacks.
 """
 
 from __future__ import annotations
+
 import warnings
-from typing import Optional, Callable
+from collections.abc import Callable
+
 from .compat import mx
 
 
 class MemoryGuard:
     """
     Monitors and enforces memory safety for MLX/Metal workloads.
-    
+
     Responsibilities:
     - Track active MLX/Metal memory (defensive wrapping for API availability)
     - Track estimated cache memory
@@ -23,13 +25,13 @@ class MemoryGuard:
     - Disable sparse/quantized mode under pressure
     - Protect against kernel panic risk from memory exhaustion
     """
-    
+
     def __init__(
         self,
         safety_margin_gb: float = 0.5,
-        soft_limit_gb: Optional[float] = None,
-        hard_limit_gb: Optional[float] = None,
-        eviction_callback: Optional[Callable[[int], int]] = None,
+        soft_limit_gb: float | None = None,
+        hard_limit_gb: float | None = None,
+        eviction_callback: Callable[[int], int] | None = None,
     ):
         """
         Args:
@@ -48,16 +50,16 @@ class MemoryGuard:
         self._quantized_disabled = False
         self._has_mlx_memory_api = self._check_mlx_memory_api()
 
-    def _soft_limit_bytes(self) -> Optional[int]:
+    def _soft_limit_bytes(self) -> int | None:
         if self.soft_limit_gb is None:
             return None
         return int(self.soft_limit_gb * (1024 ** 3))
 
-    def _hard_limit_bytes(self) -> Optional[int]:
+    def _hard_limit_bytes(self) -> int | None:
         if self.hard_limit_gb is None:
             return None
         return int(self.hard_limit_gb * (1024 ** 3))
-    
+
     @staticmethod
     def _check_mlx_memory_api() -> bool:
         """Check if MLX memory introspection APIs are available."""
@@ -69,7 +71,7 @@ class MemoryGuard:
             return False
         except Exception:
             return False
-    
+
     def get_active_memory_bytes(self) -> int:
         """Get current active GPU memory usage in bytes, or 0 if unavailable."""
         if not self._has_mlx_memory_api:
@@ -82,7 +84,7 @@ class MemoryGuard:
         except Exception:
             pass
         return 0
-    
+
     def get_peak_memory_bytes(self) -> int:
         """Get peak GPU memory usage in bytes, or 0 if unavailable."""
         if not self._has_mlx_memory_api:
@@ -95,39 +97,39 @@ class MemoryGuard:
         except Exception:
             pass
         return 0
-    
+
     def check_pressure(self, estimated_cache_bytes: int = 0) -> bool:
         """
         Check if memory pressure is exceeded.
-        
+
         Args:
             estimated_cache_bytes: Current estimated cache memory in bytes.
-        
+
         Returns:
             True if memory pressure is detected.
         """
         active_bytes = self.get_active_memory_bytes()
         total_estimated = active_bytes + estimated_cache_bytes
-        
+
         # Check hard limit
         if self.hard_limit_gb is not None:
             if total_estimated > self.hard_limit_gb * (1024 ** 3):
                 self._pressure_active = True
                 return True
-        
+
         # Check soft limit
         if self.soft_limit_gb is not None:
             if total_estimated > self.soft_limit_gb * (1024 ** 3):
                 self._pressure_active = True
                 return True
-        
+
         self._pressure_active = False
         return False
-    
+
     def enforce_safety(self, estimated_cache_bytes: int = 0) -> int:
         """
         Enforce memory safety: trigger eviction if under pressure.
-        
+
         Returns:
             Bytes freed by eviction (0 if no action taken).
         """
@@ -163,30 +165,30 @@ class MemoryGuard:
 
         if hard_limit_bytes is not None and projected_active - bytes_freed > hard_limit_bytes:
             self.enter_emergency_mode()
-        
+
         return bytes_freed
-    
+
     def should_disable_sparse(self) -> bool:
         """Return True if sparse attention should be disabled due to pressure."""
         return self._sparse_disabled or self._pressure_active
-    
+
     def should_disable_quantized(self) -> bool:
         """Return True if quantized KV cache should be disabled due to pressure."""
         return self._quantized_disabled or self._pressure_active
-    
+
     def enter_emergency_mode(self) -> None:
         """Disable sparse and quantized modes as a protective measure."""
         self._sparse_disabled = True
         self._quantized_disabled = True
         self._pressure_active = True
         warnings.warn("MemoryGuard: entered emergency mode — sparse and quantized modes disabled")
-    
+
     def exit_emergency_mode(self) -> None:
         """Re-enable sparse and quantized modes."""
         self._sparse_disabled = False
         self._quantized_disabled = False
         self._pressure_active = False
-    
+
     def get_status(self) -> dict:
         """Return current memory guard status."""
         return {

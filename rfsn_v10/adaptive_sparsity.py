@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional
 
 
 @dataclass
@@ -56,7 +55,7 @@ class AdaptiveSparsityController:
         self._profiles: dict[str, _ProfileState] = {}
 
     @staticmethod
-    def _seq_bucket(seq_len: Optional[int]) -> str:
+    def _seq_bucket(seq_len: int | None) -> str:
         if seq_len is None:
             return "unknown"
         val = int(seq_len)
@@ -71,10 +70,10 @@ class AdaptiveSparsityController:
     def _profile_key(
         self,
         *,
-        model_id: Optional[str],
-        layer_id: Optional[str],
-        skill_pattern: Optional[str],
-        seq_len: Optional[int],
+        model_id: str | None,
+        layer_id: str | None,
+        skill_pattern: str | None,
+        seq_len: int | None,
     ) -> str:
         return ":".join(
             [
@@ -88,10 +87,10 @@ class AdaptiveSparsityController:
     def _state_for(
         self,
         *,
-        model_id: Optional[str],
-        layer_id: Optional[str],
-        skill_pattern: Optional[str],
-        seq_len: Optional[int],
+        model_id: str | None,
+        layer_id: str | None,
+        skill_pattern: str | None,
+        seq_len: int | None,
     ) -> _ProfileState:
         key = self._profile_key(
             model_id=model_id,
@@ -106,20 +105,20 @@ class AdaptiveSparsityController:
         return state
 
     @staticmethod
-    def _bad_cosine(value: Optional[float], threshold: float) -> bool:
+    def _bad_cosine(value: float | None, threshold: float) -> bool:
         return value is not None and float(value) < float(threshold)
 
     @staticmethod
-    def _bad_mae(value: Optional[float], threshold: float) -> bool:
+    def _bad_mae(value: float | None, threshold: float) -> bool:
         return value is not None and float(value) > float(threshold)
 
     def get_decision(
         self,
         *,
-        model_id: Optional[str] = None,
-        layer_id: Optional[str] = None,
-        skill_pattern: Optional[str] = None,
-        seq_len: Optional[int] = None,
+        model_id: str | None = None,
+        layer_id: str | None = None,
+        skill_pattern: str | None = None,
+        seq_len: int | None = None,
     ) -> AdaptiveDecision:
         state = self._state_for(
             model_id=model_id,

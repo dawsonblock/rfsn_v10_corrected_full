@@ -7,12 +7,11 @@ Implements write-ahead logging and cache recovery for durability.
 from __future__ import annotations
 
 import json
-import os
 import threading
-from dataclasses import dataclass, asdict
-from pathlib import Path
-from typing import Any, Optional
 import time
+from dataclasses import asdict, dataclass
+from pathlib import Path
+from typing import Any
 
 
 @dataclass
@@ -62,7 +61,7 @@ class WriteAheadLog:
             return []
 
         entries = []
-        with open(self.log_path, "r", encoding="utf-8") as f:
+        with open(self.log_path, encoding="utf-8") as f:
             for line in f:
                 line = line.strip()
                 if line:
@@ -136,7 +135,7 @@ class CachePersistenceManager:
             # WAL entry remains for recovery
             return False
 
-    def load(self, metadata: CacheMetadata) -> Optional[bytes]:
+    def load(self, metadata: CacheMetadata) -> bytes | None:
         """Load cache data from disk."""
         cache_path = self._get_cache_path(metadata)
 
@@ -146,7 +145,7 @@ class CachePersistenceManager:
         # Verify metadata
         metadata_path = cache_path.with_suffix(".meta")
         if metadata_path.exists():
-            with open(metadata_path, "r", encoding="utf-8") as f:
+            with open(metadata_path, encoding="utf-8") as f:
                 stored_metadata = json.load(f)
                 if stored_metadata.get("checksum") != metadata.checksum:
                     return None
@@ -210,7 +209,7 @@ class CachePersistenceManager:
         entries = []
         for meta_path in self.cache_dir.glob("*.meta"):
             try:
-                with open(meta_path, "r", encoding="utf-8") as f:
+                with open(meta_path, encoding="utf-8") as f:
                     metadata = json.load(f)
                     entries.append((metadata, meta_path))
             except Exception:
@@ -237,7 +236,7 @@ class CachePersistenceManager:
         entries = []
         for meta_path in self.cache_dir.glob("*.meta"):
             try:
-                with open(meta_path, "r", encoding="utf-8") as f:
+                with open(meta_path, encoding="utf-8") as f:
                     metadata = json.load(f)
                     entries.append(CacheMetadata(**metadata))
             except Exception:

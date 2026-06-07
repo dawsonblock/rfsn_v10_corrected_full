@@ -10,8 +10,8 @@ from __future__ import annotations
 import enum
 import traceback
 from dataclasses import dataclass
-from typing import Any, Optional
 from datetime import datetime
+from typing import Any
 
 
 class ErrorCode(enum.Enum):
@@ -77,7 +77,7 @@ class RFSNError:
     severity: ErrorSeverity = ErrorSeverity.ERROR
     timestamp: datetime = None
     context: dict[str, Any] = None
-    stack_trace: Optional[str] = None
+    stack_trace: str | None = None
     recoverable: bool = True
 
     def __post_init__(self):
@@ -111,7 +111,7 @@ class ErrorHandler:
         self,
         error: Exception,
         code: ErrorCode = ErrorCode.UNKNOWN_ERROR,
-        context: Optional[dict[str, Any]] = None,
+        context: dict[str, Any] | None = None,
         severity: ErrorSeverity = ErrorSeverity.ERROR,
     ) -> RFSNError:
         """Handle an exception and create structured error."""
@@ -167,7 +167,7 @@ def get_error_handler() -> ErrorHandler:
 def handle_error(
     error: Exception,
     code: ErrorCode = ErrorCode.UNKNOWN_ERROR,
-    context: Optional[dict[str, Any]] = None,
+    context: dict[str, Any] | None = None,
     severity: ErrorSeverity = ErrorSeverity.ERROR,
 ) -> RFSNError:
     """Handle an error using the global error handler."""
@@ -181,7 +181,7 @@ class RFSNException(Exception):
         self,
         code: ErrorCode,
         message: str,
-        context: Optional[dict[str, Any]] = None,
+        context: dict[str, Any] | None = None,
     ):
         self.code = code
         self.message = message

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generation smoke test for RFSN v10 Main 27.
+"""Generation smoke test for RFSN v10 Main 28.
 
 Runs greedy decode for baseline and compressed KV configs, then checks:
   - Token match rate vs baseline (first N tokens)
@@ -7,13 +7,13 @@ Runs greedy decode for baseline and compressed KV configs, then checks:
   - Repetition rate (fraction of duplicate n-grams)
   - No NaN/Inf in logits at any decode step
 
-Produces a JSON summary at --out (default: artifacts/proof/main27/generation_smoke.json).
+Produces a JSON summary at --out (default: artifacts/proof/main28/generation_smoke.json).
 
 Usage:
   python benchmarks/validate_generation_smoke.py \\
       --model Qwen/Qwen2.5-0.5B-Instruct \\
       --tokens 128 --decode 32 \\
-      --out artifacts/proof/main27/generation_smoke.json
+      --out artifacts/proof/main28/generation_smoke.json
 """
 from __future__ import annotations
 
@@ -120,7 +120,8 @@ def _compress_past(past_legacy: list, config: dict, device: torch.device) -> lis
     group_size = config["group_size"]
 
     compressed = []
-    for k, v in past_legacy:
+    layer_map = config.get("layer_map", {})
+    for layer_idx, (k, v) in enumerate(past_legacy):
         k_np = k.float().cpu().numpy()
         v_np = v.float().cpu().numpy()
         mgr = RFSNTurboQuantKVManager(
@@ -128,11 +129,13 @@ def _compress_past(past_legacy: list, config: dict, device: torch.device) -> lis
             cache_dir=str(Path.home() / ".rfsn_cache"),
         )
         token_count = k.shape[2]  # [B, H, T, D]
+        kb, vb = layer_map.get(layer_idx, (k_bits, v_bits))
         mgr.store(
             skill_pattern="smoke_test",
             keys=mx.array(k_np),
             values=mx.array(v_np),
             token_count=token_count,
+            k_bits=kb, v_bits=vb,
         )
         rk, rv = mgr.retrieve(skill_pattern="smoke_test")
         k_out = torch.from_numpy(np.array(rk)).to(device=device, dtype=k.dtype)
@@ -191,6 +194,8 @@ def _greedy_decode(
 
 _CONFIG_REGISTRY: dict[str, dict[str, Any]] = {
     "baseline_fp16": {"name": "baseline_fp16", "k_bits": 16, "v_bits": 16, "group_size": 64},
+    "mixed_L0-1k8v4_restk6v4_gs64": {"name": "mixed_L0-1k8v4_restk6v4_gs64", "k_bits": 6, "v_bits": 4, "group_size": 64, "layer_map": {0: (8, 4), 1: (8, 4)}},
+    "mixed_L0k8v4_restk6v4_gs64": {"name": "mixed_L0k8v4_restk6v4_gs64", "k_bits": 6, "v_bits": 4, "group_size": 64, "layer_map": {0: (8, 4)}},
     "k8_v3_gs64": {"name": "k8_v3_gs64", "k_bits": 8, "v_bits": 3, "group_size": 64},
     "k8_v4_gs64": {"name": "k8_v4_gs64", "k_bits": 8, "v_bits": 4, "group_size": 64},
     "k8_v5_gs64": {"name": "k8_v5_gs64", "k_bits": 8, "v_bits": 5, "group_size": 64},
@@ -360,7 +365,7 @@ def _run_smoke(
         )
 
     payload: dict[str, Any] = {
-        "release": "main27",
+        "release": "main28",
         "analysis": "generation_smoke",
         "model": model_id,
         "context_tokens": int(input_ids.shape[1]),
@@ -380,7 +385,9 @@ def _run_smoke(
 # ---------------------------------------------------------------------------
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="RFSN v10 Main 26 generation smoke test")
+    parser = argparse.ArgumentParser(
+        description="RFSN v10 Main 28 generation smoke test"
+    )
     parser.add_argument(
         "--model", default="Qwen/Qwen2.5-0.5B-Instruct",
         help="HuggingFace model ID",
@@ -396,14 +403,15 @@ def main() -> None:
     parser.add_argument(
         "--configs",
         default=(
-            "baseline_fp16,k8_v3_gs64,k8_v4_gs64,k8_v5_gs64,"
+            "baseline_fp16,mixed_L0-1k8v4_restk6v4_gs64,"
+            "k8_v4_gs64,k8_v5_gs64,k8_v3_gs64,"
             "k6_v6_gs64,k8_v4_gs32,k8_v5_gs32,k4_v4_gs64"
         ),
         help="Comma-separated config names",
     )
     parser.add_argument(
         "--out",
-        default="artifacts/proof/main27/generation_smoke.json",
+        default="artifacts/proof/main28/generation_smoke.json",
         help="Output JSON path",
     )
     parser.add_argument(

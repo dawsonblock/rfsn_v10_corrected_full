@@ -9,16 +9,14 @@ from __future__ import annotations
 
 import threading
 import time
-from collections import defaultdict, OrderedDict
+from collections import defaultdict
 from dataclasses import dataclass, field
-from typing import Any, Optional, Dict
 from enum import Enum
+from typing import Any
 
 
 class TenantId(str):
     """Tenant identifier for multi-tenant isolation."""
-
-    pass
 
 
 class MemoryRegion(Enum):
@@ -168,7 +166,6 @@ class MemoryLeakDetector:
         if len(self.snapshots) < 2:
             return {"leaks": []}
 
-        current_time = time.time()
         oldest_snapshot = self.snapshots[0]
         newest_snapshot = self.snapshots[-1]
 
@@ -214,8 +211,8 @@ class MultiTenantMemoryManager:
         tenant_id: TenantId,
         region: MemoryRegion,
         size_bytes: int,
-        metadata: Optional[dict[str, Any]] = None,
-    ) -> Optional[str]:
+        metadata: dict[str, Any] | None = None,
+    ) -> str | None:
         """Allocate memory for a tenant."""
         with self.lock:
             # Check quota

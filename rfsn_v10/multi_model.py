@@ -10,7 +10,6 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Dict, Optional
 
 from rfsn_v10.memory_manager import MemoryRegion, MultiTenantMemoryManager, TenantId
 
@@ -53,16 +52,16 @@ class ModelStats:
 class ModelIsolationManager:
     """Manages isolation between different models."""
 
-    def __init__(self, memory_manager: Optional[MultiTenantMemoryManager] = None):
+    def __init__(self, memory_manager: MultiTenantMemoryManager | None = None):
         """Initialize model isolation manager.
 
         Args:
             memory_manager: Optional memory manager for tenant isolation
         """
         self.memory_manager = memory_manager or MultiTenantMemoryManager()
-        self.models: Dict[str, ModelConfig] = {}
-        self.stats: Dict[str, ModelStats] = {}
-        self.active_model: Optional[str] = None
+        self.models: dict[str, ModelConfig] = {}
+        self.stats: dict[str, ModelStats] = {}
+        self.active_model: str | None = None
 
     def register_model(self, config: ModelConfig) -> None:
         """Register a model with its configuration.
@@ -77,7 +76,7 @@ class ModelIsolationManager:
         tenant_id = TenantId(f"model_{config.model_id}")
         self.memory_manager.set_tenant_quota(tenant_id, config.max_cache_gb * 1024**3)
 
-    def get_model_config(self, model_id: str) -> Optional[ModelConfig]:
+    def get_model_config(self, model_id: str) -> ModelConfig | None:
         """Get configuration for a model.
 
         Args:
@@ -88,7 +87,7 @@ class ModelIsolationManager:
         """
         return self.models.get(model_id)
 
-    def get_model_stats(self, model_id: str) -> Optional[ModelStats]:
+    def get_model_stats(self, model_id: str) -> ModelStats | None:
         """Get statistics for a model.
 
         Args:
@@ -146,7 +145,7 @@ class ModelIsolationManager:
         model_id: str,
         region: MemoryRegion,
         size_bytes: int,
-    ) -> Optional[str]:
+    ) -> str | None:
         """Allocate memory for a model.
 
         Args:
@@ -206,7 +205,7 @@ class ModelIsolationManager:
 
         return stats.cache_hits / stats.total_requests
 
-    def get_all_stats(self) -> Dict[str, ModelStats]:
+    def get_all_stats(self) -> dict[str, ModelStats]:
         """Get statistics for all models.
 
         Returns:
@@ -303,7 +302,7 @@ class ModelSwitchingOptimizer:
         total_cost = sum(cost for _, _, cost in self.switch_history)
         return total_cost / len(self.switch_history)
 
-    def recommend_model(self, context: Dict[str, any]) -> Optional[str]:
+    def recommend_model(self, context: dict[str, any]) -> str | None:
         """Recommend a model based on context.
 
         Args:
@@ -348,4 +347,4 @@ def get_model_isolation_manager() -> ModelIsolationManager:
     return _model_isolation_manager
 
 
-_model_isolation_manager: Optional[ModelIsolationManager] = None
+_model_isolation_manager: ModelIsolationManager | None = None
