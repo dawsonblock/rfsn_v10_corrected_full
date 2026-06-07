@@ -1,0 +1,160 @@
+name: CI
+
+# Honest test matrix — only claims what the code actually supports:
+#
+#   linux-cpu         : NumPy backend, collection, config, kernels, security tests
+#   macos-arm-mlx     : Apple Silicon, Metal kernel, drift, causal mask, bitpack
+#   docker            : CLI healthcheck in a container
+#   packaging         : Build wheel and verify all subpackages install
+#
+# NOT included (not yet implemented):
+#   - CUDA runtime
+#   - macOS x86 Metal (Metal is ARM only)
+#   - Production HTTP service
+
+on:
+  push:
+    branches: [main, feature/*, qjl-beta-repair]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # linux-cpu: NumPy backend, no MLX required
+  # ---------------------------------------------------------------------------
+  linux-cpu:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies (no MLX)
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+
+      - name: Verify collection
+        run: pytest --collect-only -q
+
+      - name: Config tests
+        run: pytest tests/test_config.py tests/test_config_strict.py -q
+
+      - name: Kernel validation (NumPy)
+        env:
+          RFSN_BACKEND: numpy
+        run: pytest tests/test_kernels_validation.py -q
+
+      - name: Experimental flags quarantine
+        run: pytest tests/test_experimental_flags.py -q
+
+      - name: Lazy import tests
+        run: pytest tests/test_quantization_lazy_imports.py -q
+
+      - name: Security tests
+        run: pytest tests/test_clickhouse_security.py -q
+
+      - name: Runtime raw-SDPA enforcement
+        run: pytest tests/test_no_runtime_raw_sdpa.py -q
+
+      - name: Health CLI (numpy backend)
+        env:
+          RFSN_BACKEND: numpy
+        run: python -m rfsn_v10 healthcheck
+
+      - name: Config validation CLI
+        env:
+          RFSN_BACKEND: numpy
+        run: python -m rfsn_v10 validate-config --config configs/default_runtime.yaml
+
+  # ---------------------------------------------------------------------------
+  # macos-arm-mlx: Apple Silicon — Metal kernels, drift, causal mask
+  # ---------------------------------------------------------------------------
+  macos-arm-mlx:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Lock Xcode
+        run: sudo xcode-select -s /Applications/Xcode_15.2.app
+
+      - name: Install dependencies (MLX)
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[mlx,dev]"
+
+      - name: Causal attention mask tests
+        run: pytest tests/test_attention_causal_mask.py -q
+
+      - name: Drift tests
+        run: pytest tests/test_drift.py -q
+
+      - name: Bitpack fuzz tests
+        run: pytest tests/test_bitpack_fuzz.py -q
+
+      - name: Short prompt generation regression
+        run: pytest tests/test_short_prompt_generation_regression.py -q
+
+      - name: Health CLI (MLX backend)
+        env:
+          RFSN_BACKEND: mlx
+        run: python -m rfsn_v10 healthcheck
+
+  # ---------------------------------------------------------------------------
+  # packaging: Build wheel and verify all subpackages are included
+  # ---------------------------------------------------------------------------
+  packaging:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install build tools
+        run: |
+          python -m pip install --upgrade pip build
+
+      - name: Build wheel
+        run: python -m build
+
+      - name: Install wheel
+        run: python -m pip install --force-reinstall dist/*.whl
+
+      - name: Verify subpackage imports
+        run: |
+          python -c "import rfsn_v10"
+          python -c "import rfsn_v10.kernels"
+          python -c "import rfsn_v10.runtime"
+          python -c "from rfsn_v10 import RFSNRuntime; print(RFSNRuntime)"
+          python -c "from rfsn_v10.runtime import RFSNRuntime; print(RFSNRuntime)"
+
+  # ---------------------------------------------------------------------------
+  # security: Security-specific test suite
+  # ---------------------------------------------------------------------------
+  security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+
+      - name: ClickHouse security tests
+        run: pytest tests/test_clickhouse_security.py tests/test_clickhouse_routing.py -q
+
+      - name: Tool runner security
+        run: pytest tests/test_tool_runner_security.py -q

@@ -120,7 +120,7 @@ class TestPromptHashing:
         expected_hash = _expected_hmac(original)
 
         event = {"prompt": original, "model": "llama-7b"}
-        result = ClickHouseClient._hash_sensitive_values(event)
+        result = ClickHouseClient._hash_sensitive_values(event, _allow_missing_key=True)
 
         assert result["prompt"] == expected_hash
         assert len(result["prompt"]) == 64  # 32 bytes * 2 hex chars
@@ -129,7 +129,7 @@ class TestPromptHashing:
     def test_hash_empty_string(self):
         """Empty string should hash correctly."""
         event = {"prompt": ""}
-        result = ClickHouseClient._hash_sensitive_values(event)
+        result = ClickHouseClient._hash_sensitive_values(event, _allow_missing_key=True)
         expected = _expected_hmac("")
         assert result["prompt"] == expected
 
@@ -141,7 +141,7 @@ class TestPromptHashing:
             "temperature": 0.7
         }
 
-        result = ClickHouseClient._hash_sensitive_values(event)
+        result = ClickHouseClient._hash_sensitive_values(event, _allow_missing_key=True)
         assert result == event
 
     def test_mixed_sensitive_and_non_sensitive(self):
@@ -153,7 +153,7 @@ class TestPromptHashing:
             "text": "another secret"
         }
 
-        result = ClickHouseClient._hash_sensitive_values(event)
+        result = ClickHouseClient._hash_sensitive_values(event, _allow_missing_key=True)
 
         # Sensitive fields should be hashed
         assert result["prompt"] != "secret prompt text"
@@ -176,7 +176,7 @@ class TestPromptHashing:
             "text": None,  # Not a string
         }
 
-        result = ClickHouseClient._hash_sensitive_values(event)
+        result = ClickHouseClient._hash_sensitive_values(event, _allow_missing_key=True)
         # Non-string values should be preserved as-is
         assert result["prompt"] == 12345
         assert result["text"] is None
@@ -187,12 +187,35 @@ class TestPromptHashing:
 
         for word in sensitive_words:
             event = {"prompt": f"my {word} is 12345"}
-            result = ClickHouseClient._hash_sensitive_values(event)
+            result = ClickHouseClient._hash_sensitive_values(event, _allow_missing_key=True)
 
             # Original words should not appear
             assert word not in result["prompt"]
             assert "12345" not in result["prompt"]
             assert len(result["prompt"]) == 64  # It's a hash
+
+    def test_missing_hmac_key_raises_without_flag(self):
+        """Missing HMAC key must raise RuntimeError when telemetry is enabled."""
+        import os
+        orig = os.environ.pop("RFSN_TELEMETRY_HMAC_KEY", None)
+        try:
+            with pytest.raises(RuntimeError, match="RFSN_TELEMETRY_HMAC_KEY"):
+                ClickHouseClient._hash_sensitive_values({"prompt": "secret"})
+        finally:
+            if orig is not None:
+                os.environ["RFSN_TELEMETRY_HMAC_KEY"] = orig
+
+    def test_hmac_key_from_env(self):
+        """HMAC key should be read from environment variable."""
+        import os
+        os.environ["RFSN_TELEMETRY_HMAC_KEY"] = "test-secret-key"
+        try:
+            event = {"prompt": "hello world"}
+            result = ClickHouseClient._hash_sensitive_values(event)
+            expected = _expected_hmac("hello world", "test-secret-key")
+            assert result["prompt"] == expected
+        finally:
+            del os.environ["RFSN_TELEMETRY_HMAC_KEY"]
 
 
 class TestRetryQueue:
@@ -210,38 +233,34 @@ class TestRetryQueue:
 
     def test_exponential_backoff_in_write_events(self):
         """Backoff in _write_events should follow exponential pattern."""
-        client = ClickHouseClient(host="localhost", secure=False)
+        sleep_calls = []
+        client = ClickHouseClient(
+            host="localhost", secure=False, sleep_fn=sleep_calls.append
+        )
 
-        with patch(
-            "rfsn_v10.clickhouse_client.time.sleep"
-        ) as mock_sleep, patch.object(
-            client, "_execute_query", side_effect=RuntimeError("fail")
-        ):
-            client._write_events(
-                "rfsn_attention_events", [{"test": "data"}]
-            )
+        with patch.object(client, "_execute_query", side_effect=RuntimeError("fail")):
+            client._write_events("rfsn_attention_events", [{"test": "data"}])
 
-        assert mock_sleep.call_count == 5
-        mock_sleep.assert_any_call(1)
-        mock_sleep.assert_any_call(2)
-        mock_sleep.assert_any_call(4)
-        mock_sleep.assert_any_call(8)
-        mock_sleep.assert_any_call(16)
+        assert len(sleep_calls) == 5
+        assert sleep_calls == [1, 2, 4, 8, 16]
 
     def test_failed_events_queued(self):
-        """Failed events should be added to pending queue."""
-        client = ClickHouseClient(host="localhost", secure=False)
+        """Failed events should be added to pending queue as (table, event) tuples."""
+        client = ClickHouseClient(
+            host="localhost", secure=False, sleep_fn=lambda _: None
+        )
 
-        with patch.object(
-            client, "_execute_query", side_effect=RuntimeError("fail")
-        ):
+        with patch.object(client, "_execute_query", side_effect=RuntimeError("fail")):
             client._write_events(
                 "rfsn_attention_events", [{"model": "test", "latency_ms": 100}]
             )
 
         assert len(client._pending_queue) == 1
-        assert client._pending_queue[0]["model"] == "test"
-        assert client._pending_queue[0]["_table"] == "rfsn_attention_events"
+        # Queue stores (table, event) tuples — _table must NOT be in the payload
+        table, event = client._pending_queue[0]
+        assert table == "rfsn_attention_events"
+        assert event["model"] == "test"
+        assert "_table" not in event, "_table routing key must not pollute the event payload"
 
     def test_drain_pending_queue_empty(self):
         """Draining empty queue should not error."""
@@ -267,10 +286,10 @@ class TestSIGTERMHandling:
         """Queue should be flushable to disk."""
         client = ClickHouseClient(host="localhost", secure=False)
 
-        # Add events to queue
+        # Add events to queue as (table, event) tuples
         client._pending_queue = [
-            {"event_id": 1, "data": "test1"},
-            {"event_id": 2, "data": "test2"}
+            ("rfsn_attention_events", {"event_id": 1, "data": "test1"}),
+            ("rfsn_attention_events", {"event_id": 2, "data": "test2"}),
         ]
 
         with tempfile.NamedTemporaryFile(
@@ -285,13 +304,18 @@ class TestSIGTERMHandling:
 
             client._flush_queue_to_disk()
 
-            # Verify file contents
+            # Verify file contents: each line is {_table, _event}
             with open(flush_path) as f_read:
                 lines = f_read.readlines()
 
             assert len(lines) == 2
-            assert json.loads(lines[0])["event_id"] == 1
-            assert json.loads(lines[1])["event_id"] == 2
+            record0 = json.loads(lines[0])
+            record1 = json.loads(lines[1])
+            assert record0["_table"] == "rfsn_attention_events"
+            assert record0["_event"]["event_id"] == 1
+            assert record1["_event"]["event_id"] == 2
+            # _table must NOT appear inside the event payload
+            assert "_table" not in record0["_event"]
 
             # Queue should be cleared after flush
             assert len(client._pending_queue) == 0
@@ -305,12 +329,12 @@ class TestSIGTERMHandling:
         """Previously flushed events should be replayed on startup."""
         client = ClickHouseClient(host="localhost", secure=False)
 
-        # Create a flush file with old events
+        # Create a flush file in new format {_table, _event}
         with tempfile.NamedTemporaryFile(
             mode='w', suffix='.jsonl', delete=False
         ) as f:
-            f.write(json.dumps({"old_event": 1}) + '\n')
-            f.write(json.dumps({"old_event": 2}) + '\n')
+            f.write(json.dumps({"_table": "rfsn_attention_events", "_event": {"old_event": 1}}) + '\n')
+            f.write(json.dumps({"_table": "rfsn_kv_cache_events", "_event": {"old_event": 2}}) + '\n')
             flush_path = f.name
 
         try:
@@ -318,9 +342,13 @@ class TestSIGTERMHandling:
             client._flush_path = flush_path
             client._replay_flushed_events()
 
-            # Events should be in queue
+            # Events should be in queue as (table, event) tuples
             assert len(client._pending_queue) == 2
-            assert client._pending_queue[0]["old_event"] == 1
+            table0, event0 = client._pending_queue[0]
+            assert table0 == "rfsn_attention_events"
+            assert event0["old_event"] == 1
+            table1, event1 = client._pending_queue[1]
+            assert table1 == "rfsn_kv_cache_events"
 
             # Restore path
             client._flush_path = original_path
@@ -356,8 +384,8 @@ class TestIntegrationSecurity:
             "latency_ms": 150.5,
         }
 
-        # Hash sensitive values
-        hashed = ClickHouseClient._hash_sensitive_values(raw_event)
+        # Hash sensitive values (using _allow_missing_key for test portability)
+        hashed = ClickHouseClient._hash_sensitive_values(raw_event, _allow_missing_key=True)
 
         # Verify all sensitive data is hashed
         assert hashed["prompt"] != raw_event["prompt"]

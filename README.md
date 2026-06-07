@@ -1,20 +1,23 @@
-# RFSN v10 qjl17 — Alpha Repair Build
+# RFSN v10 — Beta Repair Build
 
 ## Status
 
-**Alpha repair build.** This is not production ready.
+**Beta candidate.** Repair plan (Phases 0–13) applied to the alpha.
 
 | Path | Status |
 |------|--------|
-| Stable runtime (MLX 8-bit KV compression) | Alpha — validated on Apple Silicon |
-| Sparse decode | Disabled by default — decode-only, not end-to-end proven |
-| QJL score correction | Experimental — disabled by default |
-| Polar / hybrid quantization | Experimental — disabled by default |
-| Adaptive sparse controller | Experimental — disabled by default |
+| Stable runtime (MLX 8-bit KV compression) | Beta — validated on Apple Silicon, quality gates passing |
+| Package installation (subpackages) | Fixed — `rfsn_v10.kernels`, `rfsn_v10.runtime` install correctly |
+| CLI health check (`python -m rfsn_v10 healthcheck`) | Working |
+| Sparse decode | Disabled by default — not end-to-end proven |
+| QJL score correction | Experimental — disabled by default, requires explicit opt-in |
+| Polar / hybrid quantization | Experimental — disabled by default, requires explicit opt-in |
+| Adaptive sparse controller | Experimental — disabled by default, requires explicit opt-in |
 | CUDA backend | **Not implemented** |
 | Full portable runtime | Not implemented — MLX required for core runtime |
-| End-to-end speedup | Not proven — decode TPS comparable, total slower due to compression overhead |
+| End-to-end speedup | Not proven — decode TPS comparable, compression overhead makes total slower at short contexts |
 | Production deployment | Not supported |
+| Docker | CLI health check only — no HTTP service |
 
 ---
 
@@ -23,25 +26,42 @@
 | Platform | Status |
 |----------|--------|
 | Apple Silicon + MLX | Supported (primary runtime) |
-| NumPy CPU | Partial — kernel validation only, not full runtime |
+| NumPy CPU | Partial — kernel validation, config, security tests pass; MLX-dependent runtime tests skip |
+| Linux / CI | CPU tests pass; MLX suites skip cleanly |
 | CUDA | Not implemented |
+| macOS x86 (Intel) | MLX not supported on Intel Macs — NumPy-only |
 
 ---
 
 ## Quick Start
 
 ```bash
-# Requires Python 3.11 and Apple Silicon with MLX installed
+# Requires Python 3.11 and Apple Silicon with MLX for full runtime
 pip install -e .
 
-# Check health
+# Verify install
+python -m rfsn_v10 version
+
+# Health check
 python -m rfsn_v10 healthcheck
 
-# Run stable tests (no MLX required)
-pytest tests/test_config.py tests/test_config_strict.py tests/test_kernels_validation.py -q
+# Validate config
+python -m rfsn_v10 validate-config --config configs/default_runtime.yaml
 
-# Run MLX-dependent tests (Apple Silicon required)
-pytest tests/test_attention.py tests/test_bitpack.py tests/test_kv_manager.py -q
+# CPU-safe tests (no MLX required)
+pytest tests/test_config.py tests/test_config_strict.py \
+       tests/test_kernels_validation.py \
+       tests/test_quantization_lazy_imports.py \
+       tests/test_experimental_flags.py \
+       tests/test_clickhouse_security.py \
+       tests/test_no_runtime_raw_sdpa.py -q
+
+# MLX-dependent tests (Apple Silicon required)
+pytest tests/test_attention.py tests/test_bitpack.py \
+       tests/test_bitpack_fuzz.py tests/test_kv_manager.py \
+       tests/test_drift.py tests/test_attention_causal_mask.py \
+       tests/test_short_prompt_decode_drift.py \
+       tests/test_prefill_decode_split.py -q
 ```
 
 ---
@@ -50,18 +70,21 @@ pytest tests/test_attention.py tests/test_bitpack.py tests/test_kv_manager.py -q
 
 ### Stable Modules
 
-- `rfsn_v10/bitpack.py` — Bit-packed quantizer (2-8 bit widths) with exact roundtrip guarantees
+- `rfsn_v10/bitpack.py` — Bit-packed quantizer (2–8 bit widths) with exact roundtrip guarantees
 - `rfsn_v10/kv_manager.py` — TurboQuant KV manager with grouped symmetric quantization and WHT preconditioning
 - `rfsn_v10/attention.py` — Adaptive block-sparse attention; all dense fallbacks route through `attention_reference.py`
 - `rfsn_v10/attention_reference.py` — Canonical causal attention reference (always applies causal mask for T_q > 1)
-- `rfsn_v10/runtime.py` — Orchestrator integrating KV cache, sparse attention, audit mode, and telemetry
+- `rfsn_v10/runtime/engine.py` — Orchestrator integrating KV cache, sparse attention, audit mode, and telemetry
+- `rfsn_v10/runtime/__init__.py` — Re-exports `RFSNRuntime` from `engine.py`
 - `rfsn_v10/config.py` — Strict Pydantic config (extra='forbid' on all models)
 - `rfsn_v10/health.py` — Health check system; returns UNHEALTHY until checks have been run
 - `rfsn_v10/clickhouse_client.py` — HMAC-SHA256 prompt sanitization, recursive sanitizer, retry queue
 
 ### Experimental Modules (disabled by default)
 
-All experimental paths require explicit opt-in:
+All experimental paths require explicit opt-in. The runtime **will not activate them
+silently** — attempting to use an experimental feature without enabling it raises a
+`RuntimeError`.
 
 ```yaml
 # config.yaml
@@ -72,6 +95,7 @@ experimental:
 ```
 
 Or via environment:
+
 ```bash
 RFSN_EXPERIMENTAL_QJL=true
 RFSN_EXPERIMENTAL_POLAR=true
@@ -89,11 +113,14 @@ RFSN_EXPERIMENTAL_ADAPTIVE=true
 
 ## Validated Stable Configs
 
-These configs have been validated at the alpha level on Apple Silicon:
+Validated at the beta level on Apple Silicon. Quality thresholds (cosine ≥ 0.998 vs.
+FP32 reference) measured with `tests/test_short_prompt_decode_drift.py`.
 
-- `k8_v5_gs32` — 8-bit keys, 5-bit values, group size 32
-- `k8_v5_gs64` — 8-bit keys, 5-bit values, group size 64 (default)
-- `k8_v4_gs64` — 8-bit keys, 4-bit values, group size 64
+| Config | K bits | V bits | Group size | Status |
+|--------|--------|--------|------------|--------|
+| `k8_v5_gs32` | 8 | 5 | 32 | **Default** — slightly better cosine |
+| `k8_v5_gs64` | 8 | 5 | 64 | Validated |
+| `k8_v4_gs64` | 8 | 4 | 64 | Validated |
 
 ---
 
@@ -103,9 +130,10 @@ These configs have been validated at the alpha level on Apple Silicon:
 2. **QJL correction is disabled by default.** Experimental — not validated.
 3. **Experimental configs may degrade logits.** Short-prompt drift under active investigation.
 4. **Full runtime requires MLX.** Apple Silicon is mandatory for the core runtime.
-5. **Docker service mode is not production hardened.** CLI health check only.
+5. **Docker service mode is not production hardened.** CLI health check only; no HTTP service exposed.
 6. **CUDA not implemented.** Do not depend on it.
 7. **End-to-end speedup not proven.** Decode TPS is comparable; compression overhead makes total time slower at short contexts.
+8. **macOS x86 Metal not supported.** MLX is ARM-only; Intel Mac users get NumPy backend only.
 
 ---
 
@@ -113,28 +141,62 @@ These configs have been validated at the alpha level on Apple Silicon:
 
 - Telemetry prompt text is HMAC-SHA256 hashed before leaving the process boundary.
 - Sanitization is recursive — nested dicts and message lists are also cleaned.
-- Set `RFSN_TELEMETRY_HMAC_KEY` in production for keyed HMAC protection.
+- **`RFSN_TELEMETRY_HMAC_KEY` is required** when events with sensitive fields are written.
+  An absent key raises `RuntimeError` rather than silently hashing with an empty key.
 - HTTPS is required for remote ClickHouse hosts; HTTP is only allowed for localhost.
+- Retry queue stores `(table, event)` tuples — routing metadata is never mixed into event payloads.
 
 ---
 
 ## Running Tests
 
 ```bash
-# CPU-safe tests (no MLX required)
-pytest tests/test_config.py tests/test_config_strict.py \
-       tests/test_kernels_validation.py \
-       tests/test_quantization_lazy_imports.py \
-       tests/test_experimental_flags.py -q
+# CPU-safe tests (no MLX required, runs on Linux CI)
+RFSN_BACKEND=numpy pytest \
+    tests/test_config.py \
+    tests/test_config_strict.py \
+    tests/test_kernels_validation.py \
+    tests/test_quantization_lazy_imports.py \
+    tests/test_experimental_flags.py \
+    tests/test_clickhouse_security.py \
+    tests/test_no_runtime_raw_sdpa.py -q
 
 # MLX-dependent tests (Apple Silicon required)
-pytest tests/test_attention.py tests/test_bitpack.py \
-       tests/test_bitpack_fuzz.py tests/test_kv_manager.py \
-       tests/test_drift.py -q
+pytest \
+    tests/test_attention.py \
+    tests/test_bitpack.py \
+    tests/test_bitpack_fuzz.py \
+    tests/test_kv_manager.py \
+    tests/test_drift.py \
+    tests/test_attention_causal_mask.py \
+    tests/test_short_prompt_decode_drift.py \
+    tests/test_prefill_decode_split.py -q
 
 # Security tests
-pytest tests/test_clickhouse_security.py -q
+pytest tests/test_clickhouse_security.py \
+       tests/test_clickhouse_routing.py \
+       tests/test_tool_runner_security.py -q
+
+# Full CI (mirrors .github/workflows/ci.yml linux-cpu job)
+RFSN_BACKEND=numpy pytest --collect-only -q
 ```
+
+---
+
+## Benchmarks
+
+```bash
+# Fast run (attention + bitpack)
+python benchmarks/run_all.py --fast
+
+# Full benchmark suite
+python benchmarks/run_all.py
+
+# Regression check against production_baseline.json
+python benchmarks/run_all.py --check
+```
+
+Results are written to `benchmarks/results/run_all_<timestamp>.json` and `benchmarks/results/latest.json`.
 
 ---
 
@@ -142,7 +204,34 @@ pytest tests/test_clickhouse_security.py -q
 
 ```bash
 docker build -t rfsn-qjl17 .
+
+# Health check (CLI-only; no HTTP server)
 docker run --rm rfsn-qjl17 python -m rfsn_v10 healthcheck
+
+# With ClickHouse (production compose)
+cp .env.example .env   # fill CLICKHOUSE_PASSWORD
+docker-compose up
+
+# With ClickHouse ports exposed (local dev only)
+docker-compose -f docker-compose.yml -f docker-compose.dev.yml up
 ```
 
-Requires Python 3.11 (not 3.12). Core runtime does not function in Docker without Apple Silicon + MLX.
+Requires Python 3.11. Core runtime does not function in Docker without Apple Silicon + MLX.
+
+---
+
+## Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `RFSN_BACKEND` | *(auto)* | Force backend: `mlx` or `numpy` |
+| `RFSN_LOG_LEVEL` | `INFO` | Logging level |
+| `RFSN_CACHE_DIR` | `~/.cache/rfsn` | KV cache directory |
+| `RFSN_TELEMETRY_HMAC_KEY` | *(required if telemetry enabled)* | HMAC key for prompt sanitisation |
+| `RFSN_CLICKHOUSE_HOST` | `localhost` | ClickHouse hostname |
+| `RFSN_CLICKHOUSE_PORT` | `8123` | ClickHouse HTTP port |
+| `RFSN_CLICKHOUSE_SECURE` | `true` | Use HTTPS |
+| `RFSN_CLICKHOUSE_TOKEN` | *(empty)* | Bearer token for RFSN-Auth header |
+| `RFSN_EXPERIMENTAL_QJL` | `false` | Enable QJL score correction |
+| `RFSN_EXPERIMENTAL_POLAR` | `false` | Enable polar/hybrid quantization |
+| `RFSN_EXPERIMENTAL_ADAPTIVE` | `false` | Enable adaptive sparse controller |

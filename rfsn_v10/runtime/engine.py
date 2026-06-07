@@ -18,11 +18,12 @@ import time
 import uuid
 from dataclasses import dataclass
 
-from .adaptive_sparsity import AdaptiveSparsityController
-from .attention import AdaptiveBlockSparseAttention
-from .compat import mx
-from .kv_manager import RFSNTurboQuantKVManager
-from .memory_guard import MemoryGuard
+from ..adaptive_sparsity import AdaptiveSparsityController
+from ..attention import AdaptiveBlockSparseAttention
+from ..attention_reference import causal_attention_dense
+from ..compat import mx
+from ..kv_manager import RFSNTurboQuantKVManager
+from ..memory_guard import MemoryGuard
 
 
 @dataclass
@@ -325,9 +326,10 @@ class RFSNRuntime:
         if ((not sparse_success and not already_dense_output) or self.audit_mode):
             # 6. Dense fallback / audit
             try:
-                dense_output = mx.fast.scaled_dot_product_attention(
+                dense_output = causal_attention_dense(
                     queries, keys, values,
                     scale=1.0 / math.sqrt(D),
+                    backend="mlx",
                 )
                 mx.eval(dense_output)
                 dense_success = True
@@ -362,16 +364,18 @@ class RFSNRuntime:
         sparse_audit_max_abs_error = None
         if self.audit_mode:
             # Compute dense attention from original keys/values for quantization error
-            original_dense_output = mx.fast.scaled_dot_product_attention(
+            original_dense_output = causal_attention_dense(
                 queries, original_keys, original_values,
                 scale=1.0 / math.sqrt(D),
+                backend="mlx",
             )
             mx.eval(original_dense_output)
 
             # Compute dense attention from working keys/values (after storage/retrieval)
-            working_dense_output = mx.fast.scaled_dot_product_attention(
+            working_dense_output = causal_attention_dense(
                 queries, keys, values,
                 scale=1.0 / math.sqrt(D),
+                backend="mlx",
             )
             mx.eval(working_dense_output)
 

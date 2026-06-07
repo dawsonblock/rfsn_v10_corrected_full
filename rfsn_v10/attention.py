@@ -386,11 +386,6 @@ class AdaptiveBlockSparseAttention:
             values_compact = mx.concatenate(compact_values_list, axis=0)
             active_blocks = max_selected
 
-        out = mx.fast.scaled_dot_product_attention(
-            queries,
-            keys_compact,
-            values_compact,
-            scale=scale,
-        )
+        out = causal_attention_dense(queries, keys_compact, values_compact, scale=scale, backend="mlx")
 
         return out, active_blocks, "sparse_compacted"

@@ -42,9 +42,9 @@ ENV RFSN_TELEMETRY_DIR=/app/artifacts/runtime_logs
 # Switch to non-root user
 USER rfsn
 
-# Health check
+# Health check — runs the actual CLI healthcheck subcommand
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD python -c "from rfsn_v10.health import get_health_checker; checker = get_health_checker(); report = checker.get_health_report(); exit(0 if report['overall_status'] == 'healthy' else 1)"
+    CMD python -m rfsn_v10 healthcheck
 
-# Default command
-CMD ["python", "-m", "rfsn_v10"]
+# Default command: CLI healthcheck (no HTTP server — this is a CLI tool)
+CMD ["python", "-m", "rfsn_v10", "healthcheck"]

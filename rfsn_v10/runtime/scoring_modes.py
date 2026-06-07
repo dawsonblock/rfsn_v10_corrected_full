@@ -22,6 +22,8 @@ try:
 except ImportError:  # pragma: no cover
     from rfsn_v10.compat import mx
 
+from rfsn_v10.attention_reference import causal_attention_dense
+
 
 def score_attention_fp16(
     queries: mx.array,
@@ -30,6 +32,9 @@ def score_attention_fp16(
     scale: float | None = None,
 ) -> mx.array:
     """Standard FP16 baseline attention (no quantization).
+
+    Routes through :func:`rfsn_v10.attention_reference.causal_attention_dense`
+    so that causal masking is always applied for multi-token prefill.
 
     Args:
         queries: [B, H, T_q, D]
@@ -42,9 +47,7 @@ def score_attention_fp16(
     """
     if scale is None:
         scale = 1.0 / math.sqrt(queries.shape[-1])
-    return mx.fast.scaled_dot_product_attention(
-        queries, keys, values, scale=scale
-    )
+    return causal_attention_dense(queries, keys, values, scale=scale, backend="mlx")
 
 
 def score_attention_reconstructed(

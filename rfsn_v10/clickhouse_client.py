@@ -67,6 +67,7 @@ class ClickHouseClient:
         "response",
         "content",
         "user_message",
+        "query",
     }
     _FLUSH_PATH = "/tmp/rfsn_telemetry_flush.jsonl"
 
@@ -80,6 +81,7 @@ class ClickHouseClient:
         secure: bool = True,
         auth_token: str = "",
         create_tables: bool = False,
+        sleep_fn=None,
     ):
         """
         Args:
@@ -101,6 +103,7 @@ class ClickHouseClient:
         self.secure = secure
         self.auth_token = auth_token
         self.create_tables = create_tables
+        self._sleep = sleep_fn if sleep_fn is not None else time.sleep
 
         if not secure and host not in ("localhost", "127.0.0.1"):
             raise ValueError(
@@ -109,7 +112,9 @@ class ClickHouseClient:
             )
 
         self._base_url = f"{'https' if secure else 'http'}://{host}:{port}"
-        self._pending_queue: list[dict[str, Any]] = []
+        # Queue stores (table_name, event_dict) tuples so routing metadata is
+        # never mixed into the event payload.
+        self._pending_queue: list[tuple[str, dict[str, Any]]] = []
         self._max_retries = 5
         self._flush_interval = 1.0
         self._flush_path = self._FLUSH_PATH
@@ -135,13 +140,19 @@ class ClickHouseClient:
             pass  # May fail in threads or restricted environments
 
     def _flush_queue_to_disk(self) -> None:
-        """Write pending queue to local JSONL file."""
+        """Write pending queue to local JSONL file.
+
+        Each line is a JSON object with a ``_table`` routing key and an
+        ``_event`` payload key.  The routing key is stored outside the event
+        payload so it never appears in ClickHouse rows.
+        """
         if not self._pending_queue:
             return
         try:
             with open(self._flush_path, "a", encoding="utf-8") as f:
-                for event in self._pending_queue:
-                    f.write(json.dumps(event, default=str) + "\n")
+                for table, event in self._pending_queue:
+                    record = {"_table": table, "_event": event}
+                    f.write(json.dumps(record, default=str) + "\n")
             self._pending_queue.clear()
         except OSError:
             pass
@@ -155,7 +166,12 @@ class ClickHouseClient:
                 for line in f:
                     line = line.strip()
                     if line:
-                        self._pending_queue.append(json.loads(line))
+                        record = json.loads(line)
+                        table = record.get("_table", "rfsn_attention_events")
+                        event = record.get("_event", record)
+                        # Strip legacy _table key if event was written by old code
+                        event.pop("_table", None)
+                        self._pending_queue.append((table, event))
             os.remove(self._flush_path)
         except (OSError, json.JSONDecodeError):
             pass
@@ -211,10 +227,24 @@ class ClickHouseClient:
         return obj
 
     @staticmethod
+    def _has_sensitive_fields(obj: Any) -> bool:
+        """Recursively check whether *obj* contains any sensitive string values."""
+        if isinstance(obj, dict):
+            for key, value in obj.items():
+                if key in ClickHouseClient._SENSITIVE_KEYS and isinstance(value, str):
+                    return True
+                if ClickHouseClient._has_sensitive_fields(value):
+                    return True
+        elif isinstance(obj, list):
+            return any(ClickHouseClient._has_sensitive_fields(item) for item in obj)
+        return False
+
+    @staticmethod
     def _hash_sensitive_values(
         event: dict[str, Any],
         *,
         secret: str | None = None,
+        _allow_missing_key: bool = False,
     ) -> dict[str, Any]:
         """Sanitize *event* using HMAC-SHA256 (recursive).
 
@@ -222,18 +252,33 @@ class ClickHouseClient:
             event:  The telemetry event dict to sanitize.
             secret: HMAC key.  When *None* the value of the
                     ``RFSN_TELEMETRY_HMAC_KEY`` environment variable is used.
-                    An empty string produces weaker but functional hashes and
-                    emits a :class:`UserWarning`.
+            _allow_missing_key: If True, allow an empty key (for tests only).
+
+        Raises:
+            RuntimeError: If the HMAC key is missing and *_allow_missing_key*
+                is False. Telemetry with sensitive fields and no HMAC key is a
+                production security failure.
         """
         if secret is None:
             secret = os.environ.get("RFSN_TELEMETRY_HMAC_KEY", "")
-        if not secret:
-            warnings.warn(
-                "RFSN_TELEMETRY_HMAC_KEY is not set.  "
-                "Prompt hashing will use an empty HMAC key which provides "
-                "weaker protection.  Set this env var in production.",
-                stacklevel=2,
-            )
+
+        # Only enforce key presence when the event actually contains sensitive fields.
+        # Events with no sensitive fields are safe to process with any key.
+        has_sensitive = ClickHouseClient._has_sensitive_fields(event)
+        if not secret and has_sensitive:
+            if _allow_missing_key:
+                warnings.warn(
+                    "RFSN_TELEMETRY_HMAC_KEY is not set.  "
+                    "Prompt hashing will use an empty HMAC key which provides "
+                    "weaker protection.  Set this env var before enabling telemetry.",
+                    stacklevel=2,
+                )
+            else:
+                raise RuntimeError(
+                    "RFSN_TELEMETRY_HMAC_KEY environment variable is not set.  "
+                    "Telemetry with sensitive fields requires a salted HMAC key.  "
+                    "Set RFSN_TELEMETRY_HMAC_KEY or disable telemetry."
+                )
         return ClickHouseClient._sanitize(event, secret=secret)
 
     def _get_url(self, endpoint: str = "") -> str:
@@ -422,7 +467,9 @@ class ClickHouseClient:
         )
         query = f"INSERT INTO {table} FORMAT JSONEachRow\n" + payload
 
-        # Try with exponential backoff; on persistent failure, queue locally
+        # Try with exponential backoff; on persistent failure, queue locally.
+        # Routing metadata (table name) is stored separately from event payloads
+        # so it never appears in ClickHouse rows.
         for attempt in range(self._max_retries):
             try:
                 self._execute_query(query)
@@ -432,28 +479,34 @@ class ClickHouseClient:
                 return
             except (error.URLError, RuntimeError):
                 backoff = min(2 ** attempt, 30)
-                time.sleep(backoff)
-        for ev in hashed:
-            ev["_table"] = table
-        self._pending_queue.extend(hashed)
+                self._sleep(backoff)
+        # Persist as (table, event) tuples — routing key is NOT in the payload
+        self._pending_queue.extend((table, ev) for ev in hashed)
 
     def _drain_pending_queue(self) -> None:
-        """Attempt to flush queued events."""
+        """Attempt to flush queued events, grouped by destination table."""
         if not self._pending_queue:
             return
-        payload = "\n".join(
-            json.dumps(ev, default=str, separators=(",", ":"))
-            for ev in self._pending_queue
-        )
-        table = self._pending_queue[0].get(
-            "_table", "rfsn_attention_events"
-        )
-        query = f"INSERT INTO {table} FORMAT JSONEachRow\n" + payload
-        try:
-            self._execute_query(query)
+
+        # Group events by table to issue one INSERT per table
+        from collections import defaultdict
+        by_table: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        for tbl, ev in self._pending_queue:
+            by_table[tbl].append(ev)
+
+        all_flushed = True
+        for tbl, evs in by_table.items():
+            payload = "\n".join(
+                json.dumps(ev, default=str, separators=(",", ":")) for ev in evs
+            )
+            query = f"INSERT INTO {tbl} FORMAT JSONEachRow\n" + payload
+            try:
+                self._execute_query(query)
+            except (error.URLError, RuntimeError):
+                all_flushed = False
+
+        if all_flushed:
             self._pending_queue.clear()
-        except (error.URLError, RuntimeError):
-            pass
 
     def write_attention_events(self, events: list[dict[str, Any]]) -> None:
         self._write_events("rfsn_attention_events", events)

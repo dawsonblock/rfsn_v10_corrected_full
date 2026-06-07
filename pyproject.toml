@@ -22,7 +22,7 @@ keywords = [
     "inference",
 ]
 classifiers = [
-    "Development Status :: 3 - Alpha",
+    "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
     "Intended Audience :: Science/Research",
     "License :: OSI Approved :: MIT License",
@@ -73,7 +73,7 @@ Issues = "https://github.com/yourusername/rfsn_v10/issues"
 rfsn-benchmark = "rfsn_v10.cli:main"
 
 [tool.setuptools.packages.find]
-include = ["rfsn_v10", "agent_core", "tools"]
+include = ["rfsn_v10*", "agent_core*", "tools*"]
 
 [tool.setuptools.exclude-package-data]
 "*" = ["*.pyc", "__pycache__/*", "*.so", "*.dylib"]

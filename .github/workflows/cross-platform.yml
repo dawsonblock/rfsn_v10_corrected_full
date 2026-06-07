@@ -29,23 +29,9 @@ jobs:
           python benchmarks/run_deterministic.py
           python benchmarks/check_regression.py benchmarks/results/baseline.json benchmarks/results/latest.json
 
-  test-macos-x86:
-    runs-on: macos-13
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-      - name: Lock Xcode
-        run: sudo xcode-select -s /Applications/Xcode_15.2.app
-      - name: Install deps
-        run: |
-          python -m pip install --upgrade pip
-          pip install -e ".[mlx,dev]"
-      - name: Test Metal backend
-        run: |
-          python -c "from rfsn_v10.kernels import backend; assert backend.name == 'metal'"
-          pytest tests/test_attention.py tests/test_drift.py -v
+  # NOTE: macos-x86 (Intel) job removed — Metal is Apple Silicon only.
+  # MLX does not support Intel Macs. This job was misleadingly claiming to
+  # validate Metal on a platform where it does not run.
 
   test-ubuntu-cpu:
     runs-on: ubuntu-latest

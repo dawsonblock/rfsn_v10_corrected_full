@@ -1,17 +1,16 @@
 """RFSN v10 — Runtime sub-package.
 
-Provides experimental scoring modes, quality audit, and quant runtime
-integration layers that wrap :class:`RFSNTurboQuantKVManager` without
-mutating existing production code paths.
+Provides the stable production runtime (RFSNRuntime, TelemetryEvent), plus
+experimental scoring modes, quality audit, and quant runtime integration
+layers that wrap :class:`RFSNTurboQuantKVManager` without mutating existing
+production code paths.
 
-The stable production runtime lives in the sibling ``rfsn_v10/runtime.py``
-module.  It is **not** re-exported here so that importing submodules of
-``rfsn_v10.runtime`` (e.g. ``adaptive_controller``) does not force an
-MLX import on non-MLX systems.
+The stable runtime lives in :mod:`rfsn_v10.runtime.engine`.
 """
 
 from __future__ import annotations
 
+from .engine import RFSNRuntime, TelemetryEvent
 from .adaptive_controller import AdaptiveQuantController
 from .audit import (
     AuditEvent,
@@ -29,6 +28,9 @@ from .scoring_modes import (
 )
 
 __all__ = [
+    # engine (stable runtime)
+    "RFSNRuntime",
+    "TelemetryEvent",
     # scoring_modes
     "score_attention_fp16",
     "score_attention_reconstructed",
