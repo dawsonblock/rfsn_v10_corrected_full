@@ -184,6 +184,36 @@ class QualityAwareSparseAttention:
             return None
         return sum(self.quality_history[layer_id]) / len(self.quality_history[layer_id])
 
+    @staticmethod
+    def _dense_masked(
+        queries: mx.array,
+        keys: mx.array,
+        values: mx.array,
+        scale: float,
+        block_size: int,
+        mode: str,
+    ) -> tuple[mx.array, int, str]:
+        """Causal dense attention fallback with masking for prefill."""
+        B, H, T_q, D = queries.shape
+        T_k = keys.shape[2]
+        num_blocks = max(1, math.ceil(T_k / block_size))
+        if T_q == 1:
+            out = mx.fast.scaled_dot_product_attention(
+                queries, keys, values, scale=scale
+            )
+            return out, num_blocks, mode
+        scores = queries @ keys.transpose(0, 1, 3, 2) * scale
+        q_pos = mx.arange(T_q, dtype=mx.int32).reshape(1, 1, T_q, 1)
+        k_pos = mx.arange(T_k, dtype=mx.int32).reshape(1, 1, 1, T_k)
+        offset = T_k - T_q
+        causal = (k_pos <= (q_pos + offset)).astype(scores.dtype)
+        scores = scores * causal + (1.0 - causal) * mx.array(
+            -1e9, dtype=scores.dtype
+        )
+        weights = mx.softmax(scores, axis=-1)
+        out = weights @ values
+        return out, num_blocks, mode
+
     def execute(
         self,
         queries: mx.array,
@@ -205,19 +235,23 @@ class QualityAwareSparseAttention:
         """
         _, _, T_q, T_k = keys.shape
         D = keys.shape[3]
+        scale = 1.0 / math.sqrt(D)
 
         # Dense fallback conditions
         if top_k_ratio >= 1.0:
-            out = mx.fast.scaled_dot_product_attention(
-                queries, keys, values, scale=1.0 / math.sqrt(D)
-            )
-            return out, T_k // self.block_size, "dense_requested", {}
+            return (*QualityAwareSparseAttention._dense_masked(
+                queries, keys, values, scale, self.block_size, "dense_requested",
+            ), {})
 
         if T_k <= self.block_size or T_q > 1 or not kv_is_strictly_past:
-            out = mx.fast.scaled_dot_product_attention(
-                queries, keys, values, scale=1.0 / math.sqrt(D)
+            mode = (
+                "dense_prefill" if T_q > 1
+                else "dense_not_strictly_past" if not kv_is_strictly_past
+                else "dense_short_context"
             )
-            return out, T_k // self.block_size, "dense_short_context", {}
+            return (*QualityAwareSparseAttention._dense_masked(
+                queries, keys, values, scale, self.block_size, mode,
+            ), {})
 
         # Compute block importance
         block_scores = ImprovedBlockSelection._compute_block_importance(
