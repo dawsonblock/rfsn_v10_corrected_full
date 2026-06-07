@@ -79,9 +79,13 @@ class HealthChecker:
         return results
 
     def get_overall_status(self) -> HealthStatus:
-        """Get overall health status."""
+        """Get overall health status.
+
+        Returns UNHEALTHY when no checks have been run yet, because a system
+        that has not been checked cannot be declared healthy.
+        """
         if not self.last_results:
-            return HealthStatus.HEALTHY
+            return HealthStatus.UNHEALTHY
 
         statuses = [r.status for r in self.last_results.values()]
 

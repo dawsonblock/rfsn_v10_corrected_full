@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-import mlx.core as mx
+from rfsn_v10.compat import mx
 
 from .grouped_cartesian import GroupedCartesianQuantizer, PackedCartesianCodes
 from .isoquant_precondition import IsoQuantMetadata, IsoQuantPreconditioner

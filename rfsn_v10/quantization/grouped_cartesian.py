@@ -15,7 +15,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 
-import mlx.core as mx
+from rfsn_v10.compat import mx
 
 from rfsn_v10.bitpack import BitPackedQuantizer
 

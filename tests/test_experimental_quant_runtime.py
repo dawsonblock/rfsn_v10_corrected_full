@@ -13,6 +13,18 @@ import pytest
 
 mx = pytest.importorskip("mlx.core")
 
+
+@pytest.fixture(autouse=False)
+def experimental_all_env(monkeypatch):
+    """Enable all experimental flags for tests that require them."""
+    monkeypatch.setenv("RFSN_EXPERIMENTAL_POLAR", "true")
+    monkeypatch.setenv("RFSN_EXPERIMENTAL_QJL", "true")
+    monkeypatch.setenv("RFSN_EXPERIMENTAL_ADAPTIVE", "true")
+    import rfsn_v10.config as _cfg
+    _cfg._config = None
+    yield
+    _cfg._config = None
+
 from rfsn_v10.runtime.experimental_quant_runtime import (  # noqa: E402, I001
     ExperimentalQuantRuntime,
     LayerQuantPolicy,
@@ -48,7 +60,7 @@ class TestModeValidation:
         )
         assert runtime.quant_mode == "adaptive"
 
-    def test_accepts_experimental_hybrid_mode(self, tmp_path):
+    def test_accepts_experimental_hybrid_mode(self, tmp_path, experimental_all_env):
         runtime = ExperimentalQuantRuntime(
             quant_mode="experimental_hybrid",
             telemetry_dir=str(tmp_path),
@@ -215,7 +227,7 @@ class TestManagerFactory:
         assert mgr.k_bits == 8
         assert mgr.v_bits == 5
 
-    def test_hybrid_manager_uses_polar_cartesian(self, tmp_path):
+    def test_hybrid_manager_uses_polar_cartesian(self, tmp_path, experimental_all_env):
         runtime = ExperimentalQuantRuntime(
             quant_mode="experimental_hybrid",
             telemetry_dir=str(tmp_path),

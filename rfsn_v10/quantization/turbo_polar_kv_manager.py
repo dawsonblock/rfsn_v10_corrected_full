@@ -2,7 +2,7 @@
 """KV manager that uses TurboPolarQuantizer."""
 from __future__ import annotations
 
-import mlx.core as mx
+from rfsn_v10.compat import mx
 
 from rfsn_v10.quantization.turbo_polar_quant import TurboPolarQuantizer
 

@@ -10,11 +10,14 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+from typing import Literal
 
 
 class LoggingConfig(BaseModel):
     """Logging configuration."""
+
+    model_config = ConfigDict(extra="forbid")
 
     level: str = Field(default="INFO", description="Log level")
     format: str = Field(
@@ -34,6 +37,8 @@ class LoggingConfig(BaseModel):
 class MemoryConfig(BaseModel):
     """Memory management configuration."""
 
+    model_config = ConfigDict(extra="forbid")
+
     max_gb: float = Field(
         default=8.0, ge=0.1, description="Maximum memory in GB"
     )
@@ -47,6 +52,8 @@ class MemoryConfig(BaseModel):
 
 class CacheConfig(BaseModel):
     """Cache configuration."""
+
+    model_config = ConfigDict(extra="forbid")
 
     directory: str = Field(
         default="~/.cache/rfsn", description="Cache directory"
@@ -62,6 +69,8 @@ class CacheConfig(BaseModel):
 class SparseAttentionConfig(BaseModel):
     """Sparse attention configuration."""
 
+    model_config = ConfigDict(extra="forbid")
+
     default_top_k_ratio: float = Field(default=0.3, ge=0.0, le=1.0)
     block_size: int = Field(default=64, ge=1)
     enable_adaptive: bool = Field(default=True)
@@ -69,6 +78,8 @@ class SparseAttentionConfig(BaseModel):
 
 class QuantizationConfig(BaseModel):
     """Quantization configuration."""
+
+    model_config = ConfigDict(extra="forbid")
 
     default_bits: int = Field(default=8, ge=2, le=8)
     group_size: int = Field(default=64, ge=1)
@@ -79,15 +90,20 @@ class QuantizationConfig(BaseModel):
 class BackendConfig(BaseModel):
     """Kernel backend configuration."""
 
-    name: str = Field(
+    model_config = ConfigDict(extra="forbid")
+
+    name: Literal["", "auto", "metal", "numpy"] = Field(
         default="",
-        description="Backend override (metal|numpy|cuda). "
-        "Empty string lets the dispatcher choose.",
+        description="Backend override (metal|numpy). "
+        "Empty string or 'auto' lets the dispatcher choose. "
+        "CUDA is not implemented.",
     )
 
 
 class TelemetryConfig(BaseModel):
     """ClickHouse telemetry configuration."""
+
+    model_config = ConfigDict(extra="forbid")
 
     host: str = Field(default="localhost")
     port: int = Field(default=8123, ge=1, le=65535)
@@ -96,8 +112,25 @@ class TelemetryConfig(BaseModel):
     database: str = Field(default="default")
 
 
+class ExperimentalConfig(BaseModel):
+    """Opt-in gates for experimental / unvalidated features.
+
+    All experimental paths are disabled by default.  Enabling any of them
+    emits a loud warning at runtime because they have not been validated
+    for production or quality-critical generation.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    enable_qjl: bool = Field(default=False)
+    enable_polar: bool = Field(default=False)
+    enable_adaptive: bool = Field(default=False)
+
+
 class RuntimeConfig(BaseModel):
     """Runtime flags matching default_runtime.yaml."""
+
+    model_config = ConfigDict(extra="forbid")
 
     default_quant_mode: str = Field(default="k8_v5_gs64")
     allow_experimental: bool = Field(default=False)
@@ -108,6 +141,8 @@ class RuntimeConfig(BaseModel):
 
 class RFSNConfig(BaseModel):
     """Main RFSN configuration."""
+
+    model_config = ConfigDict(extra="forbid")
 
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
     memory: MemoryConfig = Field(default_factory=MemoryConfig)
@@ -121,6 +156,7 @@ class RFSNConfig(BaseModel):
     backend: BackendConfig = Field(default_factory=BackendConfig)
     telemetry: TelemetryConfig = Field(default_factory=TelemetryConfig)
     runtime: RuntimeConfig = Field(default_factory=RuntimeConfig)
+    experimental: ExperimentalConfig = Field(default_factory=ExperimentalConfig)
 
     @classmethod
     def from_env(cls) -> RFSNConfig:
@@ -182,6 +218,20 @@ class RFSNConfig(BaseModel):
                     == "true"
                 ),
             ),
+            experimental=ExperimentalConfig(
+                enable_qjl=(
+                    os.getenv("RFSN_EXPERIMENTAL_QJL", "false").lower()
+                    == "true"
+                ),
+                enable_polar=(
+                    os.getenv("RFSN_EXPERIMENTAL_POLAR", "false").lower()
+                    == "true"
+                ),
+                enable_adaptive=(
+                    os.getenv("RFSN_EXPERIMENTAL_ADAPTIVE", "false").lower()
+                    == "true"
+                ),
+            ),
         )
 
     @classmethod
@@ -213,12 +263,19 @@ def load_config(path: str | None = None) -> RFSNConfig:
     """Load configuration from file or environment.
 
     Args:
-        path: Optional path to YAML config file
+        path: Optional path to YAML config file.  When *path* is provided the
+              file **must** exist; a :exc:`FileNotFoundError` is raised if it
+              does not.  When *path* is ``None`` the config is loaded from
+              environment variables.
 
     Returns:
         RFSNConfig instance
     """
-    if path and Path(path).exists():
+    if path:
+        # Explicit path: require the file to exist.  Do not silently fall back
+        # to environment variables when the caller specified a config file.
+        if not Path(path).exists():
+            raise FileNotFoundError(f"Config file not found: {path}")
         return RFSNConfig.from_yaml(path)
     return RFSNConfig.from_env()
 
@@ -239,3 +296,50 @@ def set_config(config: RFSNConfig) -> None:
     """Set the global configuration instance."""
     global _config
     _config = config
+
+
+def require_experimental(feature: str, config: RFSNConfig | None = None) -> None:
+    """Raise RuntimeError if *feature* is not enabled in experimental config.
+
+    Call this at the top of any code path that activates QJL, polar, or
+    adaptive features so that they cannot silently activate on a stable
+    runtime.
+
+    Args:
+        feature: One of ``"qjl"``, ``"polar"``, or ``"adaptive"``.
+        config:  Config to check.  Uses the global config when *None*.
+
+    Raises:
+        RuntimeError: If the requested experimental feature is not enabled.
+    """
+    import warnings
+
+    cfg = config or get_config()
+    exp = cfg.experimental
+
+    enabled = {
+        "qjl": exp.enable_qjl,
+        "polar": exp.enable_polar,
+        "adaptive": exp.enable_adaptive,
+    }
+
+    if feature not in enabled:
+        raise ValueError(
+            f"Unknown experimental feature {feature!r}.  "
+            f"Valid values: {sorted(enabled)}"
+        )
+
+    if not enabled[feature]:
+        raise RuntimeError(
+            f"Experimental feature '{feature}' is disabled.  "
+            f"Set experimental.enable_{feature}=true in config or "
+            f"RFSN_EXPERIMENTAL_{feature.upper()}=true in environment to enable.  "
+            "Warning: experimental features are not validated for production "
+            "or quality-critical generation."
+        )
+
+    warnings.warn(
+        f"Experimental mode enabled: '{feature}' is not validated for "
+        "production or quality-critical generation.",
+        stacklevel=3,
+    )

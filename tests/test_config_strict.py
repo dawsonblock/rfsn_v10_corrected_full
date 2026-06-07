@@ -18,11 +18,7 @@ from rfsn_v10.config import RFSNConfig, load_config
 
 
 class TestStrictConfigValidation:
-    """Ticket 7-2: Unknown keys must raise ValidationError.
-
-    NOTE: These tests document the REQUIRED behavior for strict mode.
-    They will FAIL until `extra='forbid'` is added to all config models.
-    """
+    """Strict mode is implemented: unknown keys must raise ValidationError."""
 
     def test_valid_config_loads(self):
         """Valid configuration should load successfully."""
@@ -30,7 +26,6 @@ class TestStrictConfigValidation:
         assert config.logging.level == "INFO"
         assert config.memory.max_gb == 8.0
 
-    @pytest.mark.xfail(reason="Strict mode not yet implemented (Ticket 7-2)")
     def test_unknown_key_raises_validation_error(self):
         """Unknown key in config should raise ValidationError."""
         with pytest.raises(ValidationError) as exc_info:
@@ -38,25 +33,15 @@ class TestStrictConfigValidation:
 
         assert "unknown_field" in str(exc_info.value)
 
-    @pytest.mark.xfail(reason="Strict mode not yet implemented (Ticket 7-2)")
     def test_unknown_nested_key_raises(self):
         """Unknown key in nested config should raise ValidationError."""
         with pytest.raises(ValidationError):
             RFSNConfig(logging={"unknown_log_key": "value"})
 
-    @pytest.mark.xfail(reason="Strict mode not yet implemented (Ticket 7-2)")
     def test_typo_in_key_raises(self):
         """Typo in key name should raise ValidationError."""
         with pytest.raises(ValidationError):
             RFSNConfig(loging={"level": "DEBUG"})  # typo: loging vs logging
-
-    def test_current_behavior_allows_unknown_keys(self):
-        """Document current behavior: unknown keys are silently ignored."""
-        # This shows the current (problematic) behavior
-        # After implementing strict mode, this test should be removed
-        config = RFSNConfig(unknown_field="value")
-        # Unknown field is ignored, no error raised
-        assert not hasattr(config, 'unknown_field')
 
 
 class TestConfigFromFile:
@@ -79,7 +64,6 @@ class TestConfigFromFile:
         assert config.memory.max_gb == 16.0
         assert config.backend.name == "metal"
 
-    @pytest.mark.xfail(reason="Strict mode not yet implemented (Ticket 7-2)")
     def test_load_yaml_with_unknown_key_fails(self):
         """YAML with unknown key should fail on load."""
         config_dict = {
@@ -93,7 +77,6 @@ class TestConfigFromFile:
             with pytest.raises(ValidationError):
                 load_config(f.name)
 
-    @pytest.mark.xfail(reason="load_config doesn't check file existence before from_yaml")
     def test_missing_file_raises(self):
         """Missing config file should raise."""
         with pytest.raises(FileNotFoundError):
@@ -149,21 +132,19 @@ class TestBackendConfigValidation:
 
     def test_valid_backend_names(self):
         """Valid backend names should be accepted."""
-        for name in ["metal", "numpy", "cuda"]:
+        for name in ["", "auto", "metal", "numpy"]:
             config = RFSNConfig(backend={"name": name})
             assert config.backend.name == name
 
-    @pytest.mark.xfail(reason="Backend validation not yet implemented")
     def test_invalid_backend_raises(self):
         """Invalid backend name should raise ValidationError."""
         with pytest.raises(ValidationError):
             RFSNConfig(backend={"name": "invalid_backend"})
 
-    @pytest.mark.xfail(reason="Backend fallback option not yet implemented")
-    def test_backend_fallback_boolean(self):
-        """Backend fallback should be boolean."""
-        config = RFSNConfig(backend={"fallback": True})
-        assert config.backend.fallback is True
+    def test_cuda_not_accepted_as_backend(self):
+        """CUDA backend is not implemented and should not be a valid name."""
+        with pytest.raises(ValidationError):
+            RFSNConfig(backend={"name": "cuda"})
 
 
 class TestSparseAttentionConfigValidation:

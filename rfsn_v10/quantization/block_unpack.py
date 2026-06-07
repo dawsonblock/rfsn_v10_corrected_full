@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Any
 
-import mlx.core as mx
+from rfsn_v10.compat import mx
 import numpy as np
 
 from rfsn_v10.bitpack import BitPackedQuantizer

@@ -10,9 +10,11 @@ Correct use case:
 - Positional information is already baked into keys, e.g. RoPE-applied keys
 - Prefill uses dense attention because physical compaction breaks causal alignment
 
-NOTE: The dense fallback path uses mx.fast.scaled_dot_product_attention without
-a causal mask. Callers handling autoregressive prefill must supply their own
-causal masking. This module is designed for decode, not prefill.
+All dense fallback paths route through
+:func:`rfsn_v10.attention_reference.causal_attention_dense` which always
+applies a causal mask for T_q > 1.  Direct calls to
+``mx.fast.scaled_dot_product_attention`` without masking are forbidden on
+the prefill path.
 """
 
 from __future__ import annotations
@@ -20,6 +22,7 @@ from __future__ import annotations
 import math
 from typing import Literal
 
+from .attention_reference import causal_attention_dense
 from .compat import mx
 from .memory_guard import MemoryGuard
 
@@ -119,42 +122,14 @@ class AdaptiveBlockSparseAttention:
     ) -> tuple[mx.array, int, str]:
         """Causal dense attention fallback.
 
-        Uses :func:`mx.fast.scaled_dot_product_attention` for the decode
-        case (``T_q == 1``) where no causal mask is required because all KV
-        tokens are strictly in the past.  For prefill (``T_q > 1``) a manual
-        causal-masked attention is computed so queries cannot attend to
-        future positions.
+        Routes through :func:`~rfsn_v10.attention_reference.causal_attention_dense`
+        which is the single authoritative implementation.  Causal masking is
+        always applied for T_q > 1 (prefill); T_q == 1 (decode) skips the
+        mask because all KV tokens are strictly in the past.
         """
-        B, H, T_q, D = queries.shape
         T_k = keys.shape[2]
         num_blocks = max(1, AdaptiveBlockSparseAttention._ceil_div(T_k, block_size))
-
-        if T_q == 1:
-            # Decode path: single query token attending to past KV.
-            # No causal mask required.
-            out = mx.fast.scaled_dot_product_attention(
-                queries,
-                keys,
-                values,
-                scale=scale,
-            )
-            return out, num_blocks, mode
-
-        # Prefill path: apply causal mask manually.
-        scores = queries @ keys.transpose(0, 1, 3, 2) * scale  # [B, H, T_q, T_k]
-        # Build causal mask: query at position i may attend to keys at j <= i.
-        # When T_q == T_k (standard prefill), this is a lower-triangular mask.
-        # When T_q < T_k (partial prefill), queries start at position T_k - T_q.
-        q_positions = mx.arange(T_q, dtype=mx.int32).reshape(1, 1, T_q, 1)
-        k_positions = mx.arange(T_k, dtype=mx.int32).reshape(1, 1, 1, T_k)
-        # Allow attending to keys at positions <= query position offset
-        offset = T_k - T_q
-        causal_mask = (k_positions <= (q_positions + offset)).astype(scores.dtype)
-        scores = scores * causal_mask + (1.0 - causal_mask) * mx.array(
-            -1e9, dtype=scores.dtype
-        )
-        weights = mx.softmax(scores, axis=-1)
-        out = weights @ values
+        out = causal_attention_dense(queries, keys, values, scale=scale, backend="mlx")
         return out, num_blocks, mode
 
     @staticmethod

@@ -384,8 +384,34 @@ def test_retrieve_block_packed_size_validation(kv_manager):
 
 
 # --- Polar quantization tests ---
+# These tests exercise experimental features.  The RFSN_EXPERIMENTAL_POLAR and
+# RFSN_EXPERIMENTAL_QJL env vars must be set to allow RFSNTurboQuantKVManager
+# to instantiate with these modes.
 
-def test_polar_quantization_roundtrip(tmp_path):
+
+@pytest.fixture()
+def experimental_polar_env(monkeypatch):
+    """Enable experimental polar/isoquant mode for the test."""
+    monkeypatch.setenv("RFSN_EXPERIMENTAL_POLAR", "true")
+    # Reset global config so it picks up the new env var
+    import rfsn_v10.config as _cfg
+    _cfg._config = None
+    yield
+    _cfg._config = None
+
+
+@pytest.fixture()
+def experimental_qjl_env(monkeypatch):
+    """Enable experimental QJL mode for the test."""
+    monkeypatch.setenv("RFSN_EXPERIMENTAL_QJL", "true")
+    monkeypatch.setenv("RFSN_EXPERIMENTAL_POLAR", "true")
+    import rfsn_v10.config as _cfg
+    _cfg._config = None
+    yield
+    _cfg._config = None
+
+
+def test_polar_quantization_roundtrip(tmp_path, experimental_polar_env):
     manager = RFSNTurboQuantKVManager(
         k_bits=6,
         v_bits=4,
@@ -407,7 +433,7 @@ def test_polar_quantization_roundtrip(tmp_path):
     assert cosine_similarity(v, v_rec) > 0.90
 
 
-def test_polar_quantization_retrieve_blocks(tmp_path):
+def test_polar_quantization_retrieve_blocks(tmp_path, experimental_polar_env):
     manager = RFSNTurboQuantKVManager(
         k_bits=6,
         v_bits=4,
@@ -429,7 +455,7 @@ def test_polar_quantization_retrieve_blocks(tmp_path):
     assert v_rec.shape[2] == 128
 
 
-def test_polar_quantization_invalid_head_dim(tmp_path):
+def test_polar_quantization_invalid_head_dim(tmp_path, experimental_polar_env):
     manager = RFSNTurboQuantKVManager(
         quant_mode="hybrid_polar_cartesian",
         max_memory_gb=0.5,
@@ -443,7 +469,7 @@ def test_polar_quantization_invalid_head_dim(tmp_path):
         manager.store("polar_bad_dim", k, v, 64)
 
 
-def test_polar_estimate_bytes_is_positive(tmp_path):
+def test_polar_estimate_bytes_is_positive(tmp_path, experimental_polar_env):
     manager = RFSNTurboQuantKVManager(
         quant_mode="hybrid_polar_cartesian",
         max_memory_gb=0.5,
@@ -456,7 +482,7 @@ def test_polar_estimate_bytes_is_positive(tmp_path):
 
 # --- IsoQuant tests ---
 
-def test_isoquant_cartesian_roundtrip(tmp_path):
+def test_isoquant_cartesian_roundtrip(tmp_path, experimental_polar_env):
     manager = RFSNTurboQuantKVManager(
         quant_mode="isoquant_cartesian",
         k_bits=8,
@@ -477,7 +503,7 @@ def test_isoquant_cartesian_roundtrip(tmp_path):
     assert cosine_similarity(v, v_rec) > 0.75
 
 
-def test_isoquant_hybrid_roundtrip(tmp_path):
+def test_isoquant_hybrid_roundtrip(tmp_path, experimental_polar_env):
     manager = RFSNTurboQuantKVManager(
         quant_mode="isoquant_hybrid",
         k_bits=6,
@@ -497,7 +523,7 @@ def test_isoquant_hybrid_roundtrip(tmp_path):
     assert cosine_similarity(v, v_rec) > 0.85
 
 
-def test_isoquant_invalid_head_dim(tmp_path):
+def test_isoquant_invalid_head_dim(tmp_path, experimental_polar_env):
     manager = RFSNTurboQuantKVManager(
         quant_mode="isoquant_cartesian",
         max_memory_gb=0.5,
@@ -509,7 +535,7 @@ def test_isoquant_invalid_head_dim(tmp_path):
         manager.store("isoquant_bad_dim", k, v, 64)
 
 
-def test_isoquant_retrieve_blocks(tmp_path):
+def test_isoquant_retrieve_blocks(tmp_path, experimental_polar_env):
     manager = RFSNTurboQuantKVManager(
         quant_mode="isoquant_cartesian",
         k_bits=8,
@@ -533,7 +559,7 @@ def test_isoquant_retrieve_blocks(tmp_path):
 
 # --- QJL tests ---
 
-def test_qjl_sketch_created(tmp_path):
+def test_qjl_sketch_created(tmp_path, experimental_qjl_env):
     manager = RFSNTurboQuantKVManager(
         quant_mode="cartesian",
         k_bits=8,
@@ -555,7 +581,7 @@ def test_qjl_sketch_created(tmp_path):
     assert cache.v_qjl.proj_dim == 32
 
 
-def test_qjl_sketch_with_isoquant(tmp_path):
+def test_qjl_sketch_with_isoquant(tmp_path, experimental_qjl_env):
     manager = RFSNTurboQuantKVManager(
         quant_mode="isoquant_cartesian",
         k_bits=8,
@@ -577,7 +603,7 @@ def test_qjl_sketch_with_isoquant(tmp_path):
     assert cache.k_qjl.proj_dim == 16
 
 
-def test_isoquant_memory_estimate_includes_overhead(tmp_path):
+def test_isoquant_memory_estimate_includes_overhead(tmp_path, experimental_polar_env):
     manager = RFSNTurboQuantKVManager(
         quant_mode="isoquant_cartesian",
         use_isoquant=True,

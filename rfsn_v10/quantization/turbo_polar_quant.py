@@ -9,7 +9,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 
-import mlx.core as mx
+from rfsn_v10.compat import mx
 
 from rfsn_v10.quantization.grouped_cartesian import GroupedCartesianQuantizer
 from rfsn_v10.quantization.polar_quant import PolarQuantizer

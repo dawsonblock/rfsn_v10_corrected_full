@@ -2,12 +2,13 @@
 
 Tests verify:
 - TLS enforcement (4-1)
-- SHA-256 prompt hashing (4-2)
+- HMAC-SHA256 prompt hashing (4-2)
 - Retry queue with SIGTERM flush (4-3)
 """
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
 import os
 import tempfile
@@ -17,6 +18,15 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from rfsn_v10.clickhouse_client import ClickHouseClient
+
+
+def _expected_hmac(text: str, secret: str = "") -> str:
+    """Compute the expected HMAC-SHA256 hash used by the client."""
+    return hmac.new(
+        secret.encode("utf-8"),
+        text.encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
 
 
 class TestTLSEnforcement:
@@ -105,9 +115,9 @@ class TestPromptHashing:
         assert "user_message" in ClickHouseClient._SENSITIVE_KEYS
 
     def test_hash_sensitive_values(self):
-        """Sensitive values should be SHA-256 hashed."""
+        """Sensitive values should be HMAC-SHA256 hashed."""
         original = "secret user prompt"
-        expected_hash = hashlib.sha256(original.encode()).hexdigest()
+        expected_hash = _expected_hmac(original)
 
         event = {"prompt": original, "model": "llama-7b"}
         result = ClickHouseClient._hash_sensitive_values(event)
@@ -120,7 +130,7 @@ class TestPromptHashing:
         """Empty string should hash correctly."""
         event = {"prompt": ""}
         result = ClickHouseClient._hash_sensitive_values(event)
-        expected = hashlib.sha256(b"").hexdigest()
+        expected = _expected_hmac("")
         assert result["prompt"] == expected
 
     def test_non_sensitive_fields_preserved(self):

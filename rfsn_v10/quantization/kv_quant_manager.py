@@ -11,7 +11,7 @@ import math
 from dataclasses import dataclass
 from typing import Any, Literal
 
-import mlx.core as mx
+from rfsn_v10.compat import mx
 
 from .hybrid_polar_cartesian import HybridPolarCartesianQuantizer
 from .qjl_score_correction import QJLScoreCorrector, QJLSketch

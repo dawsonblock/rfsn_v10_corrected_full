@@ -3,13 +3,16 @@
 RFSN v10 - ClickHouse Client for Telemetry.
 
 HTTPS-only HTTP-based client for writing telemetry batches to ClickHouse.
-Prompt text is SHA-256 hashed before transmission; raw text never leaves
-the process boundary.
+Prompt text is HMAC-SHA256 hashed before transmission; raw text never leaves
+the process boundary.  A salted HMAC key is required via the
+``RFSN_TELEMETRY_HMAC_KEY`` environment variable when telemetry is enabled.
+Sanitization is recursive — nested dicts and lists of dicts are also cleaned.
 """
 from __future__ import annotations
 
 import atexit
 import hashlib
+import hmac
 import json
 import os
 import signal
@@ -49,7 +52,22 @@ class ClickHouseClient:
         "rfsn_sparsity_profiles",
     }
 
-    _SENSITIVE_KEYS = {"prompt", "text", "input_text", "user_message"}
+    _SENSITIVE_KEYS = {
+        "prompt",
+        "raw_prompt",
+        "text",
+        "input",
+        "inputs",
+        "input_text",
+        "messages",
+        "conversation",
+        "completion",
+        "output",
+        "output_text",
+        "response",
+        "content",
+        "user_message",
+    }
     _FLUSH_PATH = "/tmp/rfsn_telemetry_flush.jsonl"
 
     def __init__(
@@ -143,20 +161,80 @@ class ClickHouseClient:
             pass
 
     @staticmethod
-    def _hash_sensitive_values(event: dict[str, Any]) -> dict[str, Any]:
-        """Replace prompt/text fields with SHA-256 hashes + length metadata."""
-        result = {}
-        for key, value in event.items():
-            if key in ClickHouseClient._SENSITIVE_KEYS and isinstance(
-                value, str
-            ):
-                result[key] = hashlib.sha256(
-                    value.encode("utf-8")
-                ).hexdigest()
-                result[f"{key}_length"] = len(value)
-            else:
-                result[key] = value
-        return result
+    def _hmac_hash_text(text: str, secret: str) -> str:
+        """HMAC-SHA256 hash of *text* using *secret* as the key.
+
+        Salted HMAC is used instead of bare SHA-256 so that common prompt
+        prefixes cannot be pre-computed by an attacker with access to the
+        telemetry database.
+        """
+        return hmac.new(
+            secret.encode("utf-8"),
+            text.encode("utf-8"),
+            hashlib.sha256,
+        ).hexdigest()
+
+    @staticmethod
+    def _sanitize(
+        obj: Any,
+        *,
+        secret: str,
+    ) -> Any:
+        """Recursively sanitize *obj*, replacing sensitive string values with
+        HMAC-SHA256 hashes.
+
+        Rules:
+        - Strings under sensitive keys → HMAC hash (+ length sidecar).
+        - Nested dicts → recursed.
+        - Lists of dicts (e.g. chat messages) → each dict recursed.
+        - Other values → passed through unchanged.
+        """
+        if isinstance(obj, dict):
+            result: dict[str, Any] = {}
+            for key, value in obj.items():
+                if key in ClickHouseClient._SENSITIVE_KEYS:
+                    if isinstance(value, str):
+                        result[key] = ClickHouseClient._hmac_hash_text(value, secret)
+                        result[f"{key}_length"] = len(value)
+                    elif isinstance(value, list):
+                        # List of message dicts (e.g. OpenAI chat format)
+                        result[key] = ClickHouseClient._sanitize(value, secret=secret)
+                    elif isinstance(value, dict):
+                        result[key] = ClickHouseClient._sanitize(value, secret=secret)
+                    else:
+                        result[key] = value
+                else:
+                    result[key] = ClickHouseClient._sanitize(value, secret=secret)
+            return result
+        elif isinstance(obj, list):
+            return [ClickHouseClient._sanitize(item, secret=secret) for item in obj]
+        return obj
+
+    @staticmethod
+    def _hash_sensitive_values(
+        event: dict[str, Any],
+        *,
+        secret: str | None = None,
+    ) -> dict[str, Any]:
+        """Sanitize *event* using HMAC-SHA256 (recursive).
+
+        Args:
+            event:  The telemetry event dict to sanitize.
+            secret: HMAC key.  When *None* the value of the
+                    ``RFSN_TELEMETRY_HMAC_KEY`` environment variable is used.
+                    An empty string produces weaker but functional hashes and
+                    emits a :class:`UserWarning`.
+        """
+        if secret is None:
+            secret = os.environ.get("RFSN_TELEMETRY_HMAC_KEY", "")
+        if not secret:
+            warnings.warn(
+                "RFSN_TELEMETRY_HMAC_KEY is not set.  "
+                "Prompt hashing will use an empty HMAC key which provides "
+                "weaker protection.  Set this env var in production.",
+                stacklevel=2,
+            )
+        return ClickHouseClient._sanitize(event, secret=secret)
 
     def _get_url(self, endpoint: str = "") -> str:
         """Construct full URL for ClickHouse HTTP interface."""

@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-import mlx.core as mx
+from rfsn_v10.compat import mx
 
 
 def _validate_quat_tensor(x: mx.array) -> None:

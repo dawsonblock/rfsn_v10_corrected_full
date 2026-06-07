@@ -1,4 +1,4 @@
-FROM python:3.12-slim
+FROM python:3.11-slim
 
 LABEL maintainer="RFSN Contributors"
 LABEL description="RFSN v10 - Quantized KV-cache + decode-time sparse-attention runtime"

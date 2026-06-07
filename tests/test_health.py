@@ -118,8 +118,14 @@ class TestHealthChecker:
         assert checker.get_overall_status() == HealthStatus.UNHEALTHY
 
     def test_overall_status_no_results(self):
+        """A checker that has not yet run any checks must report UNHEALTHY.
+
+        A system that has not been checked cannot be declared healthy — this
+        was a false-healthy bug that allowed the service to report 'healthy'
+        before any health checks ran.
+        """
         checker = HealthChecker()
-        assert checker.get_overall_status() == HealthStatus.HEALTHY
+        assert checker.get_overall_status() == HealthStatus.UNHEALTHY
 
     def test_run_all_checks(self):
         checker = HealthChecker()

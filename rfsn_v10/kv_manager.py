@@ -28,17 +28,31 @@ from .kernels import (
     packed_dequant_wht_sign_metal,
     wht64_metal,
 )
-from .quantization.hybrid_polar_cartesian import (
-    HybridPolarCartesianQuantizer,
-)
-from .quantization.isoquant_precondition import (
-    IsoQuantMetadata,
-    IsoQuantPreconditioner,
-)
-from .quantization.qjl_score_correction import (
-    QJLScoreCorrector,
-    QJLSketch,
-)
+
+# Experimental quantization backends — loaded lazily to avoid importing MLX
+# at package level on systems that do not have MLX installed.
+# TYPE_CHECKING guard keeps mypy/pyright happy without forcing a real import.
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .quantization.hybrid_polar_cartesian import HybridPolarCartesianQuantizer
+    from .quantization.isoquant_precondition import IsoQuantMetadata, IsoQuantPreconditioner
+    from .quantization.qjl_score_correction import QJLScoreCorrector, QJLSketch
+
+
+def _get_hybrid_polar_cartesian():
+    from .quantization.hybrid_polar_cartesian import HybridPolarCartesianQuantizer
+    return HybridPolarCartesianQuantizer
+
+
+def _get_isoquant():
+    from .quantization.isoquant_precondition import IsoQuantMetadata, IsoQuantPreconditioner
+    return IsoQuantMetadata, IsoQuantPreconditioner
+
+
+def _get_qjl():
+    from .quantization.qjl_score_correction import QJLScoreCorrector, QJLSketch
+    return QJLScoreCorrector, QJLSketch
 
 
 @dataclass
@@ -130,6 +144,19 @@ class RFSNTurboQuantKVManager:
             raise ValueError(
                 f"quant_mode must be one of {_valid_modes}, got {quant_mode}"
             )
+
+        # Experimental quant modes require explicit opt-in.
+        _experimental_modes = {"hybrid_polar_cartesian", "isoquant", "isoquant_cartesian", "isoquant_hybrid"}
+        if quant_mode in _experimental_modes or use_isoquant or use_qjl_score_correction:
+            try:
+                from .config import require_experimental
+                if quant_mode in _experimental_modes or use_isoquant:
+                    require_experimental("polar")
+                if use_qjl_score_correction:
+                    require_experimental("qjl")
+            except RuntimeError:
+                raise
+
         if not (2 <= k_bits <= 8):
             raise ValueError(f"k_bits must be between 2 and 8, got {k_bits}")
         if not (2 <= v_bits <= 8):
@@ -190,6 +217,7 @@ class RFSNTurboQuantKVManager:
 
     def _ensure_polar_quantizers(self, feature_dim: int) -> None:
         """Lazily create polar quantizers with the correct feature_dim."""
+        HybridPolarCartesianQuantizer = _get_hybrid_polar_cartesian()
         if self._k_quant_polar is None:
             self._k_quant_polar = HybridPolarCartesianQuantizer(
                 feature_dim=feature_dim,
@@ -215,6 +243,7 @@ class RFSNTurboQuantKVManager:
         self, feature_dim: int
     ) -> None:
         """Lazily create IsoQuant preconditioner with the correct feature_dim."""
+        _, IsoQuantPreconditioner = _get_isoquant()
         if self._isoquant_preconditioner is None:
             self._isoquant_preconditioner = IsoQuantPreconditioner(
                 feature_dim=feature_dim,
@@ -223,6 +252,7 @@ class RFSNTurboQuantKVManager:
 
     def _ensure_qjl_corrector(self, feature_dim: int) -> None:
         """Lazily create QJL score corrector with the correct feature_dim."""
+        QJLScoreCorrector, _ = _get_qjl()
         if self._qjl_corrector is None:
             self._qjl_corrector = QJLScoreCorrector(
                 feature_dim=feature_dim,
