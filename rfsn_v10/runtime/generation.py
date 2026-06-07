@@ -14,12 +14,17 @@ Apple Silicon or ``transformers`` models on any platform.
 """
 from __future__ import annotations
 
+import threading
 import time
 from dataclasses import dataclass, field
 from typing import Any, AsyncIterator, Iterator
 
 from ..config import RFSNConfig, load_config
 from ..kv_manager import RFSNTurboQuantKVManager
+
+
+# Thread-local storage for RFSNRuntime SDPA patching context.
+_rfsn_thread_local = threading.local()
 
 
 try:
@@ -30,10 +35,12 @@ except ImportError:
 
 try:
     from mlx_lm.utils import generate as _mlx_generate
+    from mlx_lm.utils import stream_generate as _mlx_stream_generate
     MLX_LM_AVAILABLE = True
 except ImportError:
     MLX_LM_AVAILABLE = False
     _mlx_generate = None  # type: ignore[assignment]
+    _mlx_stream_generate = None  # type: ignore[assignment]
 
 
 try:
@@ -41,6 +48,131 @@ try:
     TRANSFORMERS_AVAILABLE = True
 except ImportError:
     TRANSFORMERS_AVAILABLE = False
+
+
+def _rfsn_sdpa_wrapper(
+    original_sdpa,
+    queries,
+    keys,
+    values,
+    cache,
+    scale,
+    mask,
+    sinks=None,
+):
+    """Intercept SDPA for decode steps and route through RFSNRuntime when active."""
+    runtime = getattr(_rfsn_thread_local, "runtime", None)
+    layer_id = getattr(_rfsn_thread_local, "layer_id", "unknown")
+    # Only intercept single-token decode steps with an active runtime.
+    if (
+        runtime is not None
+        and cache is not None
+        and queries is not None
+        and queries.ndim == 4
+        and queries.shape[2] == 1
+        and queries.shape[1] == keys.shape[1]  # same head count (no GQA)
+    ):
+        try:
+            output, _info = runtime.execute_decode_step(
+                skill_pattern="decode",
+                layer_id=layer_id,
+                batch_id="batch_0",
+                queries=queries,
+                keys=keys,
+                values=values,
+            )
+            return output
+        except Exception:
+            # Telemetry / audit failures should not crash generation.
+            pass
+    # Fallback to original SDPA.
+    if sinks is not None:
+        return original_sdpa(queries, keys, values, cache, scale, mask, sinks)
+    return original_sdpa(queries, keys, values, cache, scale, mask)
+
+
+class _RFSNSDPAPatcher:
+    """Context manager that patches mlx_lm SDPA for RFSNRuntime decode steps."""
+
+    def __init__(self, runtime) -> None:
+        self.runtime = runtime
+        self._original: Any = None
+
+    def __enter__(self):
+        try:
+            import mlx_lm.models.base as base_module
+
+            self._original = base_module.scaled_dot_product_attention
+            original = self._original
+
+            def _patched(queries, keys, values, cache, scale, mask, sinks=None):
+                return _rfsn_sdpa_wrapper(
+                    original, queries, keys, values, cache, scale, mask, sinks
+                )
+
+            base_module.scaled_dot_product_attention = _patched
+            _rfsn_thread_local.runtime = self.runtime
+        except Exception:
+            # If patching fails, silently degrade to upstream path.
+            pass
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        try:
+            if self._original is not None:
+                import mlx_lm.models.base as base_module
+
+                base_module.scaled_dot_product_attention = self._original
+        except Exception:
+            pass
+        _rfsn_thread_local.runtime = None
+        return False
+
+
+def _wrap_layers_for_rfsn(model: Any) -> None:
+    """Wrap model attention layers to set layer_id before each forward."""
+    inner = model
+    if hasattr(model, "model"):
+        inner = model.model
+    if not hasattr(inner, "layers"):
+        return
+    for idx, layer in enumerate(inner.layers):
+        if not hasattr(layer, "self_attn"):
+            continue
+        attn = layer.self_attn
+        if hasattr(attn, "_rfsn_original_call"):
+            continue
+        original = attn.__call__
+        attn._rfsn_original_call = original
+
+        def _make_wrapper(orig, lid):
+            def wrapper(x, mask=None, cache=None):
+                old = getattr(_rfsn_thread_local, "layer_id", None)
+                _rfsn_thread_local.layer_id = lid
+                try:
+                    return orig(x, mask, cache)
+                finally:
+                    _rfsn_thread_local.layer_id = old
+
+            return wrapper
+
+        attn.__call__ = _make_wrapper(original, f"layer_{idx}")
+
+
+def _unwrap_layers_for_rfsn(model: Any) -> None:
+    """Restore original attention layer call methods."""
+    inner = model
+    if hasattr(model, "model"):
+        inner = model.model
+    if not hasattr(inner, "layers"):
+        return
+    for layer in inner.layers:
+        if not hasattr(layer, "self_attn"):
+            continue
+        attn = layer.self_attn
+        if hasattr(attn, "_rfsn_original_call"):
+            attn.__call__ = attn._rfsn_original_call
+            delattr(attn, "_rfsn_original_call")
 
 
 @dataclass
@@ -242,7 +374,8 @@ class RFSNGenerator:
         telemetry: list[dict] = []
 
         if MLX_LM_AVAILABLE:
-            text = self._generate_mlx(prompt, cfg)
+            text, tokens = self._generate_mlx_collect(prompt, cfg)
+            telemetry = self.get_telemetry()
         elif TRANSFORMERS_AVAILABLE:
             text = self._generate_torch(prompt, cfg)
         else:
@@ -262,19 +395,21 @@ class RFSNGenerator:
             telemetry=telemetry,
         )
 
+    def _generate_mlx_collect(
+        self, prompt: str, cfg: GenerationConfig
+    ) -> tuple[str, list[int]]:
+        """Generate via ``mlx_lm`` stream and collect tokens."""
+        text = ""
+        tokens: list[int] = []
+        for response in self._mlx_gen_iter(prompt, cfg):
+            text += response.text
+            tokens.append(response.token)
+        return text, tokens
+
     def _generate_mlx(self, prompt: str, cfg: GenerationConfig) -> str:
-        """Generate via ``mlx_lm.utils.generate``."""
-        assert MLX_LM_AVAILABLE and _mlx_generate is not None
-        return _mlx_generate(
-            self.model,
-            self.tokenizer,
-            prompt=prompt,
-            max_tokens=cfg.max_new_tokens,
-            temp=cfg.temperature,
-            top_p=cfg.top_p,
-            repetition_penalty=cfg.repetition_penalty,
-            verbose=False,
-        )
+        """Generate via ``mlx_lm`` (non-streaming)."""
+        text, _tokens = self._generate_mlx_collect(prompt, cfg)
+        return text
 
     def _generate_torch(self, prompt: str, cfg: GenerationConfig) -> str:
         """Generate via ``transformers`` pipeline."""
@@ -298,11 +433,14 @@ class RFSNGenerator:
 
     def _stream_mlx(self, prompt: str, cfg: GenerationConfig) -> Iterator[str]:
         """Stream generation via ``mlx_lm``, yielding individual tokens."""
-        assert MLX_LM_AVAILABLE and _mlx_generate is not None
-        # mlx_lm.generate does not natively stream token-by-token,
-        # so we call it once and then yield words for a basic streaming feel.
-        # TODO: integrate with mlx_lm's streaming API once available.
-        text = _mlx_generate(
+        for response in self._mlx_gen_iter(prompt, cfg):
+            yield response.text
+
+    def _mlx_gen_iter(self, prompt: str, cfg: GenerationConfig):
+        """Yield ``GenerationResponse`` from ``mlx_lm``, optionally via
+        RFSNRuntime."""
+        assert MLX_LM_AVAILABLE and _mlx_stream_generate is not None
+        gen_iter = _mlx_stream_generate(
             self.model,
             self.tokenizer,
             prompt=prompt,
@@ -310,13 +448,16 @@ class RFSNGenerator:
             temp=cfg.temperature,
             top_p=cfg.top_p,
             repetition_penalty=cfg.repetition_penalty,
-            verbose=False,
         )
-        # Yield word-by-word for a streaming feel
-        import re
-        for chunk in re.split(r"(\s+)", text):
-            if chunk:
-                yield chunk
+        if self._runtime is not None and self.enable_sparse_decode:
+            with _RFSNSDPAPatcher(self._runtime):
+                _wrap_layers_for_rfsn(self.model)
+                try:
+                    yield from gen_iter
+                finally:
+                    _unwrap_layers_for_rfsn(self.model)
+        else:
+            yield from gen_iter
 
     # ------------------------------------------------------------------
     # Telemetry

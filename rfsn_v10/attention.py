@@ -32,6 +32,7 @@ ExecutionMode = Literal[
     "dense_short_context",
     "dense_prefill",
     "dense_not_strictly_past",
+    "dense_ragged_batch",
 ]
 
 
@@ -358,7 +359,7 @@ class AdaptiveBlockSparseAttention:
         # - For B > 1, padding would create ragged compact tensors, so fallback dense.
         if pad_len > 0 and B > 1:
             return AdaptiveBlockSparseAttention._dense_masked(
-                queries, keys, values, scale, block_size, "dense_requested",
+                queries, keys, values, scale, block_size, "dense_ragged_batch",
             )
 
         if B == 1:

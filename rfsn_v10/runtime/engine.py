@@ -318,7 +318,7 @@ class RFSNRuntime:
             if execution_mode.startswith("dense_"):
                 attn_output = sparse_output
                 dense_success = True
-                fallback_used = execution_mode not in {"dense_requested"}
+                fallback_used = execution_mode not in {"dense_requested", "dense_ragged_batch"}
         except Exception as e:
             termination_reason = f"sparse_failed: {e}"
 

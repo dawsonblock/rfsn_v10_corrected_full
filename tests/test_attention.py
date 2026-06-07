@@ -129,6 +129,21 @@ def test_sparse_attention_reservation_counts_clip_safely():
     assert active == 2
 
 
+def test_sparse_attention_ragged_batch_fallback_mode():
+    # B>1 with padding should fall back to dense with mode "dense_ragged_batch"
+    q = mx.random.normal((2, 4, 1, 64))
+    k = mx.random.normal((2, 4, 130, 64))
+    v = mx.random.normal((2, 4, 130, 64))
+
+    out, active, mode = AdaptiveBlockSparseAttention.execute(
+        q, k, v, top_k_ratio=0.5
+    )
+    mx.eval(out)
+
+    assert out.shape == q.shape
+    assert mode == "dense_ragged_batch"
+
+
 def test_sparse_attention_rejects_bad_rank():
     q = mx.random.normal((1, 4, 64))
     k = mx.random.normal((1, 4, 512, 64))
