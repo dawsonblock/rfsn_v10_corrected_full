@@ -187,50 +187,6 @@ def step_benchmark_smoke(_cpu_only: bool) -> GateResult:
     )
 
 
-def step_packaging_smoke(_cpu_only: bool) -> GateResult:
-    """Build wheel and verify subpackages are present."""
-    import tempfile
-    import os
-
-    with tempfile.TemporaryDirectory(prefix="rfsn_pkg_") as tmpdir:
-        # Build
-        rc, out = _run(
-            [sys.executable, "-m", "build", "--wheel", "--outdir", tmpdir],
-        )
-        if rc != 0:
-            return GateResult(
-                step="packaging_smoke", passed=False,
-                message=f"build failed:\n{out[-1000:]}"
-            )
-
-        # Find wheel
-        wheels = list(Path(tmpdir).glob("*.whl"))
-        if not wheels:
-            return GateResult(
-                step="packaging_smoke", passed=False,
-                message="No wheel produced"
-            )
-
-        # Verify wheel contains expected subpackages by listing the zip
-        import zipfile
-        wheel = wheels[0]
-        with zipfile.ZipFile(wheel) as zf:
-            names = zf.namelist()
-        required = [
-            "rfsn_v10/__init__.py",
-            "rfsn_v10/kernels/__init__.py",
-            "rfsn_v10/runtime/__init__.py",
-        ]
-        missing = [r for r in required if not any(n.endswith(r) for n in names)]
-        if missing:
-            return GateResult(
-                step="packaging_smoke", passed=False,
-                message=f"Wheel missing subpackages: {missing}"
-            )
-
-    return GateResult(step="packaging_smoke", passed=True)
-
-
 def step_build_install(_cpu_only: bool) -> GateResult:
     """Build wheel, install it, and verify subpackage imports work from the wheel.
 
@@ -341,8 +297,7 @@ GATE_STEPS: list[Callable[[bool], GateResult]] = [
     step_sdpa_enforcement,
     step_mlx_tests,
     step_benchmark_smoke,
-    step_packaging_smoke,
-    step_build_install,   # must be last — temporarily installs wheel into env
+    step_build_install,   # builds wheel, verifies subpackages, installs — must be last
 ]
 
 

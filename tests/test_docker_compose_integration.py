@@ -11,7 +11,7 @@ Tests verify:
 
 Requirements:
     - Docker and docker-compose installed
-    - Ports 8080 and 8123 available
+    - Ports 8000 and 8123 available
 
 These tests are SKIPPED by default.  Set ``RFSN_INTEGRATION_TESTS=1`` in the
 environment to opt in.  They are tagged ``@pytest.mark.integration`` so they
@@ -174,7 +174,9 @@ class TestDockerComposeServices:
         time.sleep(5)
 
         try:
-            req = urllib.request.Request("http://localhost:8080/health")
+            server_port = os.getenv("RFSN_SERVER_PORT", "8000")
+            url = f"http://localhost:{server_port}/health"
+            req = urllib.request.Request(url)
             with urllib.request.urlopen(req, timeout=5) as response:
                 data = json.loads(response.read())
                 assert data.get("status") in ["healthy", "ok", "ready"]

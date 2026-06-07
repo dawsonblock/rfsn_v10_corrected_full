@@ -247,10 +247,10 @@ Results are written to `benchmarks/results/run_all_<timestamp>.json` and `benchm
 ## Docker
 
 ```bash
-docker build -t rfsn-qjl17 .
+docker build -t rfsn-qjl .
 
-# Health check (CLI-only; no HTTP server)
-docker run --rm rfsn-qjl17 python -m rfsn_v10 healthcheck
+# Health check (Dockerfile default CMD now runs healthcheck)
+docker run --rm rfsn-qjl
 
 # With ClickHouse (production compose)
 cp .env.example .env   # fill CLICKHOUSE_PASSWORD

@@ -85,6 +85,7 @@ include = ["rfsn_v10*", "agent_core*", "tools*"]
 [tool.setuptools_scm]
 write_to = "rfsn_v10/_version.py"
 version_scheme = "release-branch-semver"
+fallback_version = "10.1.0.dev0"
 
 [tool.pytest.ini_options]
 addopts = "-q --tb=short"

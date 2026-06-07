@@ -24,8 +24,8 @@ COPY tools/ ./tools/
 COPY benchmarks/ ./benchmarks/
 COPY tests/ ./tests/
 
-# Install package with all production + MLX dependencies
-RUN pip install --no-cache-dir -e ".[production,mlx]"
+# Install package with production dependencies only (MLX is Apple Silicon native)
+RUN pip install --no-cache-dir -e ".[production]"
 
 # Create cache directory and fix permissions
 RUN mkdir -p /app/.cache /app/artifacts && chown -R rfsn:rfsn /app
@@ -46,6 +46,6 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
 # Expose inference server port
 EXPOSE 8000
 
-# Default: run the inference server (set RFSN_MODEL_ID env var)
-# Override with docker-compose or CLI for other modes
-CMD ["python", "-m", "rfsn_v10.server"]
+# Default: run healthcheck and exit (suitable for CI gates).
+# Override with docker-compose or CLI to start the inference server.
+CMD ["python", "-m", "rfsn_v10", "healthcheck"]

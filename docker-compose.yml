@@ -13,6 +13,7 @@ services:
       - ./artifacts:/app/artifacts
       - ./results:/app/results
       - rfsn_cache:/app/.cache
+    command: ["python", "-m", "rfsn_v10.server"]
     environment:
       - RFSN_LOG_LEVEL=INFO
       - RFSN_CACHE_DIR=/app/.cache
