@@ -6,7 +6,7 @@
 |-------|-------|
 | Release name | `rfsn_v10_qjl_alpha_candidate_3` |
 | Git branch | `qjl-beta-repair-finalization` |
-| Git commit | `4ddebf2` (beta: production inference server + telemetry reconciliation) |
+| Git commit | `3fdedd2` (beta: integrity checker passing) |
 | Broken snapshot tag | `qjl-beta-repair-broken-snapshot` (preserved, do not delete) |
 | Build date | 2026-06-07 |
 | Python requirement | `>=3.11,<3.13` |
