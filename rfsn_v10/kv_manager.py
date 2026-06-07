@@ -330,17 +330,18 @@ class RFSNTurboQuantKVManager:
                 return x * signs
 
         # Vectorized deterministic hash-like mixing (SplitMix-style)
-        seed_u32 = mx.array(seed & 0xFFFFFFFF, dtype=mx.uint32)
+        import numpy as np
+        seed_u32 = mx.array(np.uint32(int(seed) & 0xFFFFFFFF))
         if indices is not None:
             idx = indices.reshape(-1).astype(mx.uint32)
         else:
             idx = mx.arange(n, dtype=mx.uint32)
-        z = idx ^ seed_u32
-        z = z + mx.array(0x9E3779B9, dtype=mx.uint32)
-        z = (z ^ (z >> 16)) * mx.array(0x85EBCA6B, dtype=mx.uint32)
-        z = (z ^ (z >> 13)) * mx.array(0xC2B2AE35, dtype=mx.uint32)
-        z = z ^ (z >> 16)
-        parity = z & mx.array(1, dtype=mx.uint32)
+        z = mx.bitwise_xor(idx, seed_u32)
+        z = z + mx.array(np.uint32(0x9E3779B9))
+        z = mx.bitwise_xor(z, z >> 16) * mx.array(np.uint32(0x85EBCA6B))
+        z = mx.bitwise_xor(z, z >> 13) * mx.array(np.uint32(0xC2B2AE35))
+        z = mx.bitwise_xor(z, z >> 16)
+        parity = z & mx.array(np.uint32(1))
         signs = mx.where(
             parity == 0,
             mx.array(1.0, dtype=x.dtype),

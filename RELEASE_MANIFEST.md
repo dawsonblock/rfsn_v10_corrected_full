@@ -6,7 +6,7 @@
 |-------|-------|
 | Release name | `rfsn_v10_qjl_alpha_candidate_3` |
 | Git branch | `qjl-beta-repair-finalization` |
-| Git commit | `99c48cf` (beta: Python 3.11 in Docker, all gates passing) |
+| Git commit | `2d3afc2` (beta: Python 3.11.9, deep analysis fixes, all gates passing) |
 | Broken snapshot tag | `qjl-beta-repair-broken-snapshot` (preserved, do not delete) |
 | Build date | 2026-06-07 |
 | Python requirement | `>=3.11,<3.13` |
