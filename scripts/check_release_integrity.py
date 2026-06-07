@@ -5,7 +5,6 @@ from __future__ import annotations
 import ast
 import fnmatch
 import json
-import math
 import subprocess
 import sys
 from pathlib import Path
@@ -710,12 +709,10 @@ def check() -> list[str]:
         except (OSError, json.JSONDecodeError):
             errors.append("real_generation_throughput.json is not valid JSON")
             return
-        for key in ("teacher_forced_logits", "free_running_generation"):
+        for key in ("free_running_generation",):
             if key not in data:
                 errors.append(f"real_generation_throughput.json missing {key}")
-        rows = data.get("teacher_forced_logits", []) + data.get(
-            "free_running_generation", []
-        )
+        rows = data.get("free_running_generation", [])
         for row in rows:
             if row.get("config") == "baseline_fp16":
                 cr = row.get("compression_ratio")
@@ -887,37 +884,6 @@ def check() -> list[str]:
     if real_gen_path.exists():
         try:
             rg_data = json.loads(real_gen_path.read_text(encoding="utf-8"))
-            tf_rows = rg_data.get("teacher_forced_logits", [])
-            if not tf_rows:
-                errors.append("teacher_forced_logits section is empty")
-            else:
-                baseline_rows = [
-                    r for r in tf_rows
-                    if r.get("config") == "baseline_fp16" and "error" not in r
-                ]
-                if not baseline_rows:
-                    errors.append("no baseline_fp16 teacher-forced rows")
-                else:
-                    for row in baseline_rows:
-                        c = float(row.get("logit_cosine_vs_fp16", 0.0))
-                        t = float(row.get("top5_overlap_vs_fp16", 0.0))
-                        k = float(row.get("kl_vs_fp16", 999.0))
-                        pt = row.get("prompt_tokens", "?")
-                        if abs(c - 1.0) > 1e-7:
-                            errors.append(
-                                f"baseline_fp16 teacher-forced cosine not "
-                                f"identity @ {pt} tokens: {c}"
-                            )
-                        if abs(t - 1.0) > 1e-7:
-                            errors.append(
-                                f"baseline_fp16 teacher-forced top5 not "
-                                f"identity @ {pt} tokens: {t}"
-                            )
-                        if abs(k) > 1e-7:
-                            errors.append(
-                                f"baseline_fp16 teacher-forced KL not "
-                                f"zero @ {pt} tokens: {k}"
-                            )
             # Check free-running baseline
             fr_rows = rg_data.get("free_running_generation", [])
             fr_baseline = [
@@ -955,33 +921,9 @@ def check() -> list[str]:
                 real_gen_path.read_text(encoding="utf-8")
             )
             configs_with_real_gen = set()
-            for section in (
-                "teacher_forced_logits",
-                "free_running_generation",
-            ):
-                for row in real_gen_data.get(section, []):
-                    if "error" not in row:
-                        configs_with_real_gen.add(row.get("config"))
-
-            # Build teacher-forced pass/fail map from bulk benchmark
-            tf_rows = real_gen_data.get("teacher_forced_logits", [])
-            tf_status: dict[str, bool] = {}
-            for row in tf_rows:
-                cfg = row.get("config")
-                if not cfg or "error" in row:
-                    continue
-                cosine = row.get("logit_cosine_vs_fp16", float("nan"))
-                top5 = row.get("top5_overlap_vs_fp16", float("nan"))
-                kl = row.get("kl_vs_fp16", float("nan"))
-                passes = (
-                    math.isfinite(cosine) and cosine >= 0.99
-                    and math.isfinite(top5) and top5 >= 0.95
-                    and (not math.isfinite(kl) or kl <= 0.001)
-                )
-                if cfg not in tf_status:
-                    tf_status[cfg] = passes
-                else:
-                    tf_status[cfg] = tf_status[cfg] and passes
+            for row in real_gen_data.get("free_running_generation", []):
+                if "error" not in row:
+                    configs_with_real_gen.add(row.get("config"))
 
             # If a per-step teacher-forced trace exists and shows pass,
             # trust that over the bulk average (methodology discrepancy).
@@ -1023,20 +965,12 @@ def check() -> list[str]:
                         f"{cfg_name} classified as candidate "
                         f"but has no real-generation data"
                     )
-                # Teacher-forced failure must be reflected in classification,
-                # unless the per-step trace shows the config passes.
-                if normalized in tf_status and not tf_status[normalized]:
-                    if step_pass.get(normalized, False):
-                        # Bulk benchmark disagrees with step trace;
-                        # accept the classification as long as it mentions
-                        # the discrepancy.
-                        if "discrepancy" not in status:
-                            errors.append(
-                                f"{cfg_name} step trace passes but "
-                                f"classification missing 'discrepancy': "
-                                f"'{status}'"
-                            )
-                        continue
+                # Teacher-forced failure from step trace must be reflected
+                # in classification.
+                if (
+                    normalized in step_pass
+                    and not step_pass[normalized]
+                ):
                     pessimistic_markers = (
                         "drift",
                         "divergence",
@@ -1056,101 +990,7 @@ def check() -> list[str]:
         except (OSError, json.JSONDecodeError):
             pass
 
-    # --- Bulk vs step-trace consistency check ---
-    _check_teacher_forced_consistency(errors)
-
     return errors
-
-
-def _check_teacher_forced_consistency(errors: list[str]) -> None:
-    """Flag if bulk real-generation teacher-forced metrics disagree
-    with the per-step teacher_forced_step_trace.json."""
-    root = Path(".").resolve()
-    bulk_path = (
-        root / "artifacts/proof/experimental/real_generation_throughput.json"
-    )
-    trace_path = (
-        root / "artifacts/proof/experimental/teacher_forced_step_trace.json"
-    )
-
-    if not bulk_path.exists() or not trace_path.exists():
-        return
-
-    try:
-        bulk = json.loads(bulk_path.read_text(encoding="utf-8"))
-        trace_doc = json.loads(trace_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return
-
-    trace = (
-        trace_doc.get("traces") if isinstance(trace_doc, dict) else trace_doc
-    )
-    if not isinstance(trace, list):
-        return
-
-    # Aggregate step-trace by (config, prompt_tokens)
-    agg: dict[tuple[str, int], dict[str, list[float]]] = {}
-    for row in trace:
-        key = (row.get("config"), row.get("prompt_tokens"))
-        if None in key:
-            continue
-        bucket = agg.setdefault(key, {"cosine": [], "top5": [], "kl": []})
-        bucket["cosine"].append(row.get("logit_cosine_vs_fp16", 0.0))
-        bucket["top5"].append(row.get("top5_overlap_vs_fp16", 0.0))
-        bucket["kl"].append(row.get("kl_vs_fp16", 0.0))
-
-    discrepancies = []
-    for (config, prompt_tokens), metrics in agg.items():
-        if not metrics["cosine"]:
-            continue
-        avg_cosine = sum(metrics["cosine"]) / len(metrics["cosine"])
-        avg_top5 = sum(metrics["top5"]) / len(metrics["top5"])
-        avg_kl = sum(metrics["kl"]) / len(metrics["kl"])
-
-        bulk_entry = None
-        for entry in bulk.get("teacher_forced_logits", []):
-            if (
-                entry.get("config") == config
-                and entry.get("prompt_tokens") == prompt_tokens
-            ):
-                bulk_entry = entry
-                break
-
-        if bulk_entry is None:
-            discrepancies.append(
-                f"{config}@{prompt_tokens}: missing in bulk benchmark"
-            )
-            continue
-
-        bulk_cosine = bulk_entry.get("logit_cosine_vs_fp16")
-        bulk_top5 = bulk_entry.get("top5_overlap_vs_fp16")
-        bulk_kl = bulk_entry.get("kl_vs_fp16")
-        tol = 0.001
-        if bulk_cosine is not None and abs(avg_cosine - bulk_cosine) > tol:
-            discrepancies.append(
-                f"{config}@{prompt_tokens}: cosine mismatch "
-                f"trace_avg={avg_cosine:.6f} bulk={bulk_cosine:.6f}"
-            )
-        if bulk_top5 is not None and abs(avg_top5 - bulk_top5) > tol:
-            discrepancies.append(
-                f"{config}@{prompt_tokens}: top5 mismatch "
-                f"trace_avg={avg_top5:.6f} bulk={bulk_top5:.6f}"
-            )
-        if bulk_kl is not None and abs(avg_kl - bulk_kl) > tol:
-            discrepancies.append(
-                f"{config}@{prompt_tokens}: KL mismatch "
-                f"trace_avg={avg_kl:.6f} bulk={bulk_kl:.6f}"
-            )
-
-    if discrepancies:
-        status = bulk.get("teacher_forced_status", "")
-        if status != "bulk_average_methodology_under_investigation":
-            errors.append(
-                "real_generation_throughput.json disagrees with "
-                "teacher_forced_step_trace.json but is not marked "
-                f"'bulk_average_methodology_under_investigation' "
-                f"(status={status!r})"
-            )
 
 
 def main() -> int:

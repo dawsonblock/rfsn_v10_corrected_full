@@ -12,18 +12,13 @@ MLX import on non-MLX systems.
 
 from __future__ import annotations
 
+from .adaptive_controller import AdaptiveQuantController
 from .audit import (
     AuditEvent,
     AuditMetrics,
     audit_decode_step,
     check_drift,
     log_audit_event,
-)
-from .experimental_quant_runtime import (
-    ExperimentalQuantRuntime,
-    ExperimentalQuantState,
-    LayerQuantPolicy,
-    QuantTelemetryEvent,
 )
 from .scoring_modes import (
     score_attention_fp16,
@@ -48,9 +43,35 @@ __all__ = [
     "log_audit_event",
     # adaptive_controller
     "AdaptiveQuantController",
-    # experimental_quant_runtime
+    # experimental_quant_runtime (lazy)
     "ExperimentalQuantRuntime",
     "ExperimentalQuantState",
     "LayerQuantPolicy",
     "QuantTelemetryEvent",
 ]
+
+_LAZY_RUNTIME_NAMES = {
+    "ExperimentalQuantRuntime",
+    "ExperimentalQuantState",
+    "LayerQuantPolicy",
+    "QuantTelemetryEvent",
+}
+
+
+def __getattr__(name: str):
+    if name in _LAZY_RUNTIME_NAMES:
+        from .experimental_quant_runtime import (
+            ExperimentalQuantRuntime,
+            ExperimentalQuantState,
+            LayerQuantPolicy,
+            QuantTelemetryEvent,
+        )
+        value = {
+            "ExperimentalQuantRuntime": ExperimentalQuantRuntime,
+            "ExperimentalQuantState": ExperimentalQuantState,
+            "LayerQuantPolicy": LayerQuantPolicy,
+            "QuantTelemetryEvent": QuantTelemetryEvent,
+        }[name]
+        globals()[name] = value
+        return value
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
