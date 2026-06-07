@@ -1,3 +1,6 @@
+# pylint: disable=redefined-outer-name
+# Pytest fixture parameters intentionally shadow the fixture function names;
+# Pylint W0621 is a known false positive for this pattern.
 """Docker Compose integration tests.
 
 Tests verify:
@@ -50,7 +53,11 @@ def docker_compose():
             check=True,
             timeout=10,
         )
-    except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired):
+    except (
+        subprocess.CalledProcessError,
+        FileNotFoundError,
+        subprocess.TimeoutExpired,
+    ):
         pytest.skip("Docker Compose not available")
 
     # Start services — hard timeout so a broken Docker daemon never hangs CI.
