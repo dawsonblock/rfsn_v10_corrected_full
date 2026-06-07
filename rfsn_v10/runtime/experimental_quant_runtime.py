@@ -28,24 +28,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-# Optional MLX with pytest.importorskip fallback pattern
 try:
     import mlx.core as mx
 except ImportError:  # pragma: no cover
-    try:
-        import pytest
-
-        mx = pytest.importorskip("mlx.core")
-    except ImportError:
-
-        class _MissingMLX:
-            def __getattr__(self, name: str) -> Any:
-                raise AttributeError(
-                    f"mlx.core is not installed; "
-                    f"attribute '{name}' unavailable"
-                )
-
-        mx = _MissingMLX()  # type: ignore[misc,assignment]
+    from rfsn_v10.compat import mx
 
 from ..kv_manager import RFSNTurboQuantKVManager
 from .adaptive_controller import AdaptiveQuantController

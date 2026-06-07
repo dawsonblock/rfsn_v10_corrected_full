@@ -22,7 +22,7 @@ _LAZY_IMPORTS = {
     "KernelRouteError": ".kernels",
 }
 
-__all__ = [
+__all__ = [  # noqa: F822
     "MLX_AVAILABLE",
     "BitPackedQuantizer",
     "RFSNTurboQuantKVManager",

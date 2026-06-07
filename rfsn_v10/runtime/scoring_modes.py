@@ -17,24 +17,10 @@ import math
 from collections.abc import Callable
 from typing import Any
 
-# Optional MLX with pytest.importorskip fallback pattern
 try:
     import mlx.core as mx
 except ImportError:  # pragma: no cover
-    try:
-        import pytest
-
-        mx = pytest.importorskip("mlx.core")
-    except Exception:  # pylint: disable=broad-except
-
-        class _MissingMLX:
-            def __getattr__(self, name: str) -> Any:
-                raise AttributeError(
-                    f"mlx.core is not installed; "
-                    f"attribute '{name}' unavailable"
-                )
-
-        mx = _MissingMLX()  # type: ignore[misc,assignment]
+    from rfsn_v10.compat import mx
 
 
 def score_attention_fp16(

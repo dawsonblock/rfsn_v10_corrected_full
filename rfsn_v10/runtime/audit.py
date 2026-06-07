@@ -13,24 +13,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-# Optional MLX with pytest.importorskip fallback pattern
 try:
     import mlx.core as mx
 except ImportError:  # pragma: no cover
-    try:
-        import pytest
-
-        mx = pytest.importorskip("mlx.core")
-    except Exception:
-
-        class _MissingMLX:
-            def __getattr__(self, name: str) -> Any:
-                raise AttributeError(
-                    "mlx.core is not installed; "
-                    f"attribute '{name}' unavailable"
-                )
-
-        mx = _MissingMLX()  # type: ignore[misc,assignment]
+    from rfsn_v10.compat import mx
 
 DEFAULT_AUDIT_INTERVAL: int = 32
 DEFAULT_AUDIT_LOG_PATH: Path = Path("artifacts/runtime_logs/audit.jsonl")

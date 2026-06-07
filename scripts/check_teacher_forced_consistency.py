@@ -78,9 +78,9 @@ def main() -> int:
             )
             continue
 
-        bulk_cosine = bulk_entry.get("cosine_similarity")
-        bulk_top5 = bulk_entry.get("top5_overlap")
-        bulk_kl = bulk_entry.get("kl_divergence")
+        bulk_cosine = bulk_entry.get("logit_cosine_vs_fp16")
+        bulk_top5 = bulk_entry.get("top5_overlap_vs_fp16")
+        bulk_kl = bulk_entry.get("kl_vs_fp16")
 
         # Allow small tolerance for floating-point differences
         tol = 0.001
