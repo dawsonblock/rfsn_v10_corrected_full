@@ -214,3 +214,4 @@ class QuantizedKVManager:
         return self.qjl.corrected_attention_scores(
             queries, k_rec, packet.k_qjl
         )
+FULL CODE FOR kv_quant_manager.py
