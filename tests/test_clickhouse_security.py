@@ -10,10 +10,9 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import signal
 import tempfile
 import time
-from urllib import error
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -45,7 +44,9 @@ class TestTLSEnforcement:
 
     def test_http_rejected_for_remote_host(self):
         """HTTP should be rejected for non-localhost hosts."""
-        with pytest.raises(ValueError, match="HTTP is only allowed for localhost"):
+        with pytest.raises(
+            ValueError, match="HTTP is only allowed for localhost"
+        ):
             ClickHouseClient(
                 host="clickhouse.example.com",
                 port=8123,
@@ -79,12 +80,18 @@ class TestTLSEnforcement:
             auth_token="test-token"
         )
 
-        # Mock the request to capture headers
-        captured_headers = {}
-        original_urlopen = client._execute_query.__func__
+        with patch(
+            "rfsn_v10.clickhouse_client.request.urlopen"
+        ) as mock_urlopen:
+            mock_response = MagicMock()
+            mock_response.status = 200
+            mock_urlopen.return_value.__enter__.return_value = mock_response
 
-        # The auth token should be stored
-        assert client.auth_token == "test-token"
+            client._execute_query("SELECT 1")
+
+            call_args = mock_urlopen.call_args
+            req = call_args[0][0]
+            assert req.headers.get("Rfsn-auth") == "test-token"
 
 
 class TestPromptHashing:
@@ -195,33 +202,36 @@ class TestRetryQueue:
         """Backoff in _write_events should follow exponential pattern."""
         client = ClickHouseClient(host="localhost", secure=False)
 
-        # Test the backoff calculation: min(2 ** attempt, 30)
-        test_cases = [
-            (0, 1),   # 2^0 = 1
-            (1, 2),   # 2^1 = 2
-            (2, 4),   # 2^2 = 4
-            (3, 8),   # 2^3 = 8
-            (4, 16),  # 2^4 = 16
-            (5, 30),  # 2^5 = 32, but capped at 30
-            (10, 30), # Always capped at 30
-        ]
+        with patch(
+            "rfsn_v10.clickhouse_client.time.sleep"
+        ) as mock_sleep, patch.object(
+            client, "_execute_query", side_effect=RuntimeError("fail")
+        ):
+            client._write_events(
+                "rfsn_attention_events", [{"test": "data"}]
+            )
 
-        for attempt, expected_max in test_cases:
-            backoff = min(2 ** attempt, 30)
-            assert backoff <= 30  # Never exceeds 30
-            if attempt < 5:
-                assert backoff == 2 ** attempt
+        assert mock_sleep.call_count == 5
+        mock_sleep.assert_any_call(1)
+        mock_sleep.assert_any_call(2)
+        mock_sleep.assert_any_call(4)
+        mock_sleep.assert_any_call(8)
+        mock_sleep.assert_any_call(16)
 
     def test_failed_events_queued(self):
         """Failed events should be added to pending queue."""
         client = ClickHouseClient(host="localhost", secure=False)
 
-        # Manually add events to simulate failed writes
-        event = {"model": "test", "latency_ms": 100}
-        client._pending_queue.append(event)
+        with patch.object(
+            client, "_execute_query", side_effect=RuntimeError("fail")
+        ):
+            client._write_events(
+                "rfsn_attention_events", [{"model": "test", "latency_ms": 100}]
+            )
 
         assert len(client._pending_queue) == 1
-        assert client._pending_queue[0] == event
+        assert client._pending_queue[0]["model"] == "test"
+        assert client._pending_queue[0]["_table"] == "rfsn_attention_events"
 
     def test_drain_pending_queue_empty(self):
         """Draining empty queue should not error."""
@@ -253,15 +263,15 @@ class TestSIGTERMHandling:
             {"event_id": 2, "data": "test2"}
         ]
 
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.jsonl', delete=False) as f:
+        with tempfile.NamedTemporaryFile(
+            mode='w', suffix='.jsonl', delete=False
+        ) as f:
             flush_path = f.name
-            # Write something to clear the file first
             f.write("")
 
         try:
-            # Use the default flush method
-            original_flush_path = client._FLUSH_PATH
-            client._FLUSH_PATH = flush_path
+            original_flush_path = client._flush_path
+            client._flush_path = flush_path
 
             client._flush_queue_to_disk()
 
@@ -276,8 +286,7 @@ class TestSIGTERMHandling:
             # Queue should be cleared after flush
             assert len(client._pending_queue) == 0
 
-            # Restore original path
-            client._FLUSH_PATH = original_flush_path
+            client._flush_path = original_flush_path
         finally:
             if os.path.exists(flush_path):
                 os.unlink(flush_path)
@@ -287,15 +296,16 @@ class TestSIGTERMHandling:
         client = ClickHouseClient(host="localhost", secure=False)
 
         # Create a flush file with old events
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.jsonl', delete=False) as f:
+        with tempfile.NamedTemporaryFile(
+            mode='w', suffix='.jsonl', delete=False
+        ) as f:
             f.write(json.dumps({"old_event": 1}) + '\n')
             f.write(json.dumps({"old_event": 2}) + '\n')
             flush_path = f.name
 
         try:
-            # Set client flush path and replay
-            original_path = client._FLUSH_PATH
-            client._FLUSH_PATH = flush_path
+            original_path = client._flush_path
+            client._flush_path = flush_path
             client._replay_flushed_events()
 
             # Events should be in queue
@@ -303,39 +313,23 @@ class TestSIGTERMHandling:
             assert client._pending_queue[0]["old_event"] == 1
 
             # Restore path
-            client._FLUSH_PATH = original_path
-
-            # Clean up
+            client._flush_path = original_path
+        finally:
             if os.path.exists(flush_path):
                 os.unlink(flush_path)
-        except Exception:
-            if os.path.exists(flush_path):
-                os.unlink(flush_path)
-            raise
 
     def test_flush_empty_queue(self):
         """Flushing empty queue should not create file."""
         client = ClickHouseClient(host="localhost", secure=False)
         client._pending_queue = []
 
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.jsonl', delete=False) as f:
-            flush_path = f.name
-
-        try:
-            original_path = client._FLUSH_PATH
-            client._FLUSH_PATH = flush_path
+        with tempfile.TemporaryDirectory() as tmpdir:
+            flush_path = os.path.join(tmpdir, "nonexistent.jsonl")
+            client._flush_path = flush_path
 
             client._flush_queue_to_disk()
 
-            # File should be empty or not modified
-            with open(flush_path) as f_read:
-                content = f_read.read()
-            assert content == ""  # Empty queue = no writes
-
-            client._FLUSH_PATH = original_path
-        finally:
-            if os.path.exists(flush_path):
-                os.unlink(flush_path)
+            assert not os.path.exists(flush_path)
 
 
 class TestIntegrationSecurity:

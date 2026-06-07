@@ -15,8 +15,19 @@ import os
 import signal
 import time
 import warnings
+import weakref
 from typing import Any
 from urllib import error, request
+
+_active_clients: set[weakref.ref[ClickHouseClient]] = set()
+
+
+def _sigterm_dispatcher(_signum, _frame) -> None:
+    """Dispatch SIGTERM to all active ClickHouseClient instances."""
+    for ref in list(_active_clients):
+        client = ref()
+        if client is not None:
+            client._flush_queue_to_disk()
 
 
 class ClickHouseClient:
@@ -83,6 +94,7 @@ class ClickHouseClient:
         self._pending_queue: list[dict[str, Any]] = []
         self._max_retries = 5
         self._flush_interval = 1.0
+        self._flush_path = self._FLUSH_PATH
 
         # Register SIGTERM handler to flush queue to disk
         self._register_flush_handlers()
@@ -92,23 +104,24 @@ class ClickHouseClient:
         if create_tables:
             self._create_tables_if_not_exist()
 
+    def _sigterm_handler(self, _signum, _frame) -> None:
+        self._flush_queue_to_disk()
+
     def _register_flush_handlers(self) -> None:
         """Register atexit and SIGTERM handlers for queue flush."""
         atexit.register(self._flush_queue_to_disk)
+        _active_clients.add(weakref.ref(self))
         try:
-            signal.signal(signal.SIGTERM, self._sigterm_handler)
+            signal.signal(signal.SIGTERM, _sigterm_dispatcher)
         except (ValueError, OSError):
             pass  # May fail in threads or restricted environments
-
-    def _sigterm_handler(self, _signum, _frame) -> None:
-        self._flush_queue_to_disk()
 
     def _flush_queue_to_disk(self) -> None:
         """Write pending queue to local JSONL file."""
         if not self._pending_queue:
             return
         try:
-            with open(self._FLUSH_PATH, "a", encoding="utf-8") as f:
+            with open(self._flush_path, "a", encoding="utf-8") as f:
                 for event in self._pending_queue:
                     f.write(json.dumps(event, default=str) + "\n")
             self._pending_queue.clear()
@@ -117,15 +130,15 @@ class ClickHouseClient:
 
     def _replay_flushed_events(self) -> None:
         """Read previously flushed events and add them to the queue."""
-        if not os.path.exists(self._FLUSH_PATH):
+        if not os.path.exists(self._flush_path):
             return
         try:
-            with open(self._FLUSH_PATH, "r", encoding="utf-8") as f:
+            with open(self._flush_path, encoding="utf-8") as f:
                 for line in f:
                     line = line.strip()
                     if line:
                         self._pending_queue.append(json.loads(line))
-            os.remove(self._FLUSH_PATH)
+            os.remove(self._flush_path)
         except (OSError, json.JSONDecodeError):
             pass
 
@@ -170,6 +183,7 @@ class ClickHouseClient:
 
         try:
             with request.urlopen(req, timeout=10) as response:
+                response.read()  # consume body
                 if response.status != 200:
                     raise RuntimeError(
                         f"ClickHouse error: {response.status} "
@@ -341,6 +355,8 @@ class ClickHouseClient:
             except (error.URLError, RuntimeError):
                 backoff = min(2 ** attempt, 30)
                 time.sleep(backoff)
+        for ev in hashed:
+            ev["_table"] = table
         self._pending_queue.extend(hashed)
 
     def _drain_pending_queue(self) -> None:
@@ -358,7 +374,7 @@ class ClickHouseClient:
         try:
             self._execute_query(query)
             self._pending_queue.clear()
-        except Exception:
+        except (error.URLError, RuntimeError):
             pass
 
     def write_attention_events(self, events: list[dict[str, Any]]) -> None:
@@ -380,8 +396,11 @@ class ClickHouseClient:
 
     def close(self) -> None:
         """Close the client and cleanup resources."""
-        # Nothing to close for HTTP client, but keep for interface consistency
-        pass
+        atexit.unregister(self._flush_queue_to_disk)
+        for ref in list(_active_clients):
+            if ref() is self:
+                _active_clients.discard(ref)
+                break
 
     def ping(self) -> bool:
         """Check if ClickHouse is reachable."""
