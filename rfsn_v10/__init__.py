@@ -22,22 +22,7 @@ _LAZY_IMPORTS = {
     "KernelRouteError": ".kernels",
 }
 
-__all__ = [  # noqa: F822
-    "MLX_AVAILABLE",
-    "BitPackedQuantizer",
-    "RFSNTurboQuantKVManager",
-    "TurboQuantKVCache",
-    "AdaptiveBlockSparseAttention",
-    "ExecutionMode",
-    "RFSNRuntime",
-    "TelemetryEvent",
-    "AdaptiveSparsityController",
-    "AdaptiveDecision",
-    "MemoryGuard",
-    "AsyncWriter",
-    "ClickHouseClient",
-    "KernelRouteError",
-]
+__all__ = ["MLX_AVAILABLE", *_LAZY_IMPORTS.keys()]
 
 
 def __getattr__(name: str):
