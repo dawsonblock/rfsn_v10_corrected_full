@@ -17,7 +17,9 @@ services:
       - RFSN_CACHE_DIR=/app/.cache
       - RFSN_METRICS_ENABLED=true
       - RFSN_BACKEND=numpy
-      - CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASSWORD:-}
+      # CLICKHOUSE_PASSWORD is required — no default. Set it in a .env file.
+      # Use docker-compose.dev.yml override to allow empty password locally.
+      - CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASSWORD}
     # No ports: rfsn is a CLI tool, not an HTTP service
     depends_on:
       clickhouse:

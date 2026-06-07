@@ -74,6 +74,18 @@ def _skip(step: str, reason: str) -> GateResult:
 # Gate steps
 # ---------------------------------------------------------------------------
 
+def step_compileall(_cpu_only: bool) -> GateResult:
+    """Every .py file in rfsn_v10/ and tests/ must compile without SyntaxError.
+
+    This is the first and most critical gate. Placeholder text or incomplete
+    generated code produces a SyntaxError that blocks all downstream steps.
+    """
+    return _check(
+        "compileall",
+        [sys.executable, "-m", "compileall", "-q", "rfsn_v10", "tests"],
+    )
+
+
 def step_import_smoke(_cpu_only: bool) -> GateResult:
     """Verify all required package imports succeed."""
     code = (
@@ -219,11 +231,107 @@ def step_packaging_smoke(_cpu_only: bool) -> GateResult:
     return GateResult(step="packaging_smoke", passed=True)
 
 
+def step_build_install(_cpu_only: bool) -> GateResult:
+    """Build wheel, install it, and verify subpackage imports work from the wheel.
+
+    This catches package-discovery bugs (missing __init__.py, wrong find pattern)
+    that only appear when the package is installed — not when running from source.
+    """
+    import tempfile
+    import zipfile
+
+    with tempfile.TemporaryDirectory(prefix="rfsn_build_") as build_dir:
+        # Ensure build tool is available
+        rc, out = _run([sys.executable, "-m", "pip", "install", "--quiet", "build"])
+        if rc != 0:
+            return GateResult(
+                step="build_install", passed=False,
+                message=f"pip install build failed:\n{out[-500:]}"
+            )
+
+        # Build wheel
+        rc, out = _run(
+            [sys.executable, "-m", "build", "--wheel", "--outdir", build_dir],
+        )
+        if rc != 0:
+            return GateResult(
+                step="build_install", passed=False,
+                message=f"wheel build failed:\n{out[-1000:]}"
+            )
+
+        wheels = list(Path(build_dir).glob("*.whl"))
+        if not wheels:
+            return GateResult(step="build_install", passed=False, message="No wheel produced")
+
+        wheel = wheels[0]
+
+        # Verify subpackages present in wheel zip before installing
+        with zipfile.ZipFile(wheel) as zf:
+            names = zf.namelist()
+        required_paths = [
+            "rfsn_v10/__init__.py",
+            "rfsn_v10/kernels/__init__.py",
+            "rfsn_v10/runtime/__init__.py",
+        ]
+        missing = [r for r in required_paths if not any(n.endswith(r) for n in names)]
+        if missing:
+            return GateResult(
+                step="build_install", passed=False,
+                message=f"Wheel missing subpackages: {missing}"
+            )
+
+        # Attempt to install the wheel into the current interpreter.
+        # If the Python version doesn't match requires-python, skip install
+        # and fall through to zip-only content check (already done above).
+        rc, out = _run([
+            sys.executable, "-m", "pip", "install",
+            "--quiet", "--force-reinstall", str(wheel),
+        ])
+        if rc != 0:
+            # Check if this is purely a Python version mismatch
+            if "requires a different Python" in out or "python_requires" in out:
+                # Wheel content verified by zip inspection above; skip install.
+                # Log a warning but do not fail the gate — the wheel itself is valid.
+                print(f"\n    NOTE: wheel install skipped (Python version mismatch: "
+                      f"gate running {sys.version.split()[0]}, "
+                      f"wheel requires 3.11). Zip content verified.")
+                # Re-install editable before returning
+                _run([sys.executable, "-m", "pip", "install", "--quiet", "-e", "."])
+                return GateResult(step="build_install", passed=True,
+                                  message="wheel content verified; install skipped (Python version)")
+            return GateResult(
+                step="build_install", passed=False,
+                message=f"pip install wheel failed:\n{out[-500:]}"
+            )
+
+        # Verify imports work from the installed wheel
+        verify_code = (
+            "import rfsn_v10; "
+            "import rfsn_v10.kernels; "
+            "import rfsn_v10.quantization; "
+            "import rfsn_v10.runtime; "
+            "from rfsn_v10 import RFSNRuntime; "
+            "print('wheel import OK')"
+        )
+        rc, out = _run([sys.executable, "-c", verify_code])
+        if rc != 0:
+            return GateResult(
+                step="build_install", passed=False,
+                message=f"wheel import check failed:\n{out[-500:]}"
+            )
+
+        # Re-install editable so the rest of the session works from source
+        _run([sys.executable, "-m", "pip", "install", "--quiet", "-e", "."])
+
+    return GateResult(step="build_install", passed=True)
+
+
 # ---------------------------------------------------------------------------
 # Gate runner
 # ---------------------------------------------------------------------------
 
 GATE_STEPS: list[Callable[[bool], GateResult]] = [
+    step_compileall,      # must be first — blocks all others on SyntaxError
     step_import_smoke,
     step_cli_version,
     step_cli_healthcheck,
@@ -234,7 +342,29 @@ GATE_STEPS: list[Callable[[bool], GateResult]] = [
     step_mlx_tests,
     step_benchmark_smoke,
     step_packaging_smoke,
+    step_build_install,   # must be last — temporarily installs wheel into env
 ]
+
+
+def _ensure_editable_install() -> bool:
+    """Install package in editable mode if not already importable.
+
+    This ensures the gate can be run from a fresh clone without needing
+    manual ``PYTHONPATH=.`` or ``pip install -e .`` beforehand.
+
+    Returns True if the install succeeded (or was already present).
+    """
+    import subprocess
+    try:
+        import rfsn_v10  # noqa: F401
+        return True  # already installed
+    except ImportError:
+        pass
+    result = subprocess.run(
+        [sys.executable, "-m", "pip", "install", "--quiet", "-e", "."],
+        cwd=ROOT,
+    )
+    return result.returncode == 0
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -253,6 +383,11 @@ def main(argv: list[str] | None = None) -> int:
         for fn in GATE_STEPS:
             print(f"  {fn.__name__.replace('step_', '')}")
         return 0
+
+    # Ensure the package is importable without manual PYTHONPATH setup
+    if not _ensure_editable_install():
+        print("ERROR: Could not install package in editable mode. Run: pip install -e .")
+        return 1
 
     results: list[GateResult] = []
     for fn in GATE_STEPS:

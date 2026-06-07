@@ -1,12 +1,20 @@
-# RFSN v10 — Beta Repair Build
+# RFSN v10 — Alpha Repair Build
 
 ## Status
 
-**Beta candidate.** Repair plan (Phases 0–13) applied to the alpha.
+**Strong alpha candidate.** Repair plan (Phases 0–13) applied. Not yet beta: compile
+and full packaging gates must pass on a clean build before the classifier can advance.
+
+To verify the current state locally:
+
+```bash
+python -m compileall -q rfsn_v10 tests          # must produce no output
+python scripts/release_gate.py --cpu-only        # must print: Gate: 9 passed, 0 failed
+```
 
 | Path | Status |
 |------|--------|
-| Stable runtime (MLX 8-bit KV compression) | Beta — validated on Apple Silicon, quality gates passing |
+| Stable runtime (MLX 8-bit KV compression) | Alpha — validated on Apple Silicon, quality gates passing |
 | Package installation (subpackages) | Fixed — `rfsn_v10.kernels`, `rfsn_v10.runtime` install correctly |
 | CLI health check (`python -m rfsn_v10 healthcheck`) | Working |
 | Sparse decode | Disabled by default — not end-to-end proven |

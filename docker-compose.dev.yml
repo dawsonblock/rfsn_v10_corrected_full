@@ -10,6 +10,11 @@ version: '3.8'
 # attack surface.
 
 services:
+  rfsn:
+    environment:
+      # Dev override: allow empty/default password locally
+      - CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASSWORD:-dev_only_not_for_production}
+
   clickhouse:
     ports:
       - "8123:8123"
