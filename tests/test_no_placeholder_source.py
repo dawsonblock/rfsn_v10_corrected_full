@@ -9,6 +9,7 @@ feature or replace the file with a valid disabled stub.
 """
 from __future__ import annotations
 
+import ast
 from pathlib import Path
 
 # Patterns that indicate a file is a placeholder and not real Python.
@@ -25,9 +26,6 @@ FORBIDDEN_PATTERNS = [
     "TODO: IMPLEMENT",
 ]
 
-# This file is the source-guard test itself — skip it to avoid self-match.
-_THIS_FILE = "test_no_placeholder_source.py"
-
 # Directories to skip (build artifacts, dependencies, etc.)
 SKIP_DIRS = {
     ".venv", "venv", "dist", "build", ".eggs", "__pycache__", "node_modules",
@@ -37,24 +35,34 @@ SKIP_DIRS = {
 def test_no_generated_placeholder_text_in_python_sources():
     """Every .py file must be valid Python, not placeholder text."""
     root = Path(__file__).resolve().parents[1]
+    this_file = Path(__file__).resolve()
     offenders = []
 
     for path in sorted(root.rglob("*.py")):
-        # Skip excluded directories and this file itself
-        if any(part in SKIP_DIRS for part in path.parts):
+        rel = path.relative_to(root)
+
+        # Skip excluded directories (anchored to repo root)
+        # and this file itself
+        if any(part in SKIP_DIRS for part in rel.parts):
             continue
-        if path.name == _THIS_FILE:
+        if path == this_file:
             continue
 
         try:
-            text = path.read_text(encoding="utf-8", errors="replace")
-        except OSError:
+            text = path.read_text(encoding="utf-8")
+        except OSError as exc:
+            offenders.append(f"{rel}: unreadable ({exc})")
+            continue
+
+        # Validate that the file is syntactically valid Python
+        try:
+            ast.parse(text)
+        except SyntaxError as exc:
+            offenders.append(f"{rel}:{exc.lineno}: SyntaxError: {exc.msg}")
             continue
 
         for pattern in FORBIDDEN_PATTERNS:
             if pattern in text:
-                # Report relative path for readability
-                rel = path.relative_to(root)
                 # Find the first matching line for context
                 for lineno, line in enumerate(text.splitlines(), 1):
                     if pattern in line:
