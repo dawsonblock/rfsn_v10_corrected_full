@@ -8,10 +8,10 @@ without mlx installed.
 from __future__ import annotations
 
 from .layer_policy import (  # noqa: I001
+    KNOWN_MODES,
     LayerPolicy,
     load_policy,
     validate_layer_policy,
-    KNOWN_MODES,
 )
 
 __all__ = [

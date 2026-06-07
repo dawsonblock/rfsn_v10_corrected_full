@@ -6,16 +6,11 @@ enforcement without requiring MLX.
 """
 from __future__ import annotations
 
-import json
-
-import pytest
-
 from rfsn_v10.disk_persistence import (
     CacheMetadata,
     CachePersistenceManager,
     WriteAheadLog,
 )
-
 
 # ------------------------------------------------------------------
 # CacheMetadata

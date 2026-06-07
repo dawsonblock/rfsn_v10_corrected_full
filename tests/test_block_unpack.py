@@ -12,8 +12,7 @@ import pytest
 
 mx = pytest.importorskip("mlx.core")
 
-from rfsn_v10.quantization.block_unpack import unpack_blocks, dequantize_full, dequantize_kv_blocks
-
+from rfsn_v10.quantization.block_unpack import dequantize_full, dequantize_kv_blocks, unpack_blocks
 
 # ------------------------------------------------------------------
 # Helpers

@@ -17,9 +17,9 @@ from dataclasses import dataclass
 
 import mlx.core as mx
 
+from .grouped_cartesian import GroupedCartesianQuantizer, PackedCartesianCodes
 from .isoquant_precondition import IsoQuantMetadata, IsoQuantPreconditioner
 from .polar_quant import PackedPolarCodes, PolarQuantizer
-from .grouped_cartesian import PackedCartesianCodes, GroupedCartesianQuantizer
 
 
 @dataclass
@@ -161,5 +161,14 @@ class HybridPolarCartesianQuantizer:
             total += self.cartesian.estimate_bytes(packed.cartesian)
         # IsoQuant metadata is tiny but count it honestly:
         # q_l + q_r = 8 floats.
+        total += 8 * 4
+        return total
+
+    def estimate_bytes_for_shape(self, shape: tuple[int, ...]) -> int:
+        """Analytical byte estimate without materialising arrays."""
+        total = 0
+        if self.polar_enabled:
+            total += self.polar.estimate_bytes_for_shape(shape)
+        total += self.cartesian.estimate_bytes_for_shape(shape)
         total += 8 * 4
         return total

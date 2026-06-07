@@ -11,7 +11,6 @@ import pytest
 from rfsn_v10.compat import (
     MLX_AVAILABLE,
     ensure_mlx_available,
-    mx,
 )
 
 

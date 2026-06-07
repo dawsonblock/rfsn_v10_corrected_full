@@ -9,8 +9,6 @@ from __future__ import annotations
 import json
 import logging
 
-import pytest
-
 from rfsn_v10.logging import (
     JSONFormatter,
     MetricsLogger,
@@ -18,7 +16,6 @@ from rfsn_v10.logging import (
     get_logger,
     setup_logging,
 )
-
 
 # ------------------------------------------------------------------
 # JSONFormatter

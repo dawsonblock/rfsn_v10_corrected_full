@@ -9,7 +9,7 @@ sparse quality from the current 0.50-0.88 range to the target 0.90+.
 from __future__ import annotations
 
 import math
-from typing import Literal, Optional, Tuple
+from typing import Literal
 
 from .compat import mx
 from .memory_guard import MemoryGuard
@@ -104,7 +104,7 @@ class ImprovedBlockSelection:
         reserved_sink_blocks: int,
         reserved_recent_blocks: int,
         num_blocks: int,
-        quality_history: Optional[list[float]] = None,
+        quality_history: list[float] | None = None,
     ) -> list[int]:
         """Select blocks with quality-aware scheduling.
 
@@ -178,7 +178,7 @@ class QualityAwareSparseAttention:
         if len(self.quality_history[layer_id]) > 10:
             self.quality_history[layer_id] = self.quality_history[layer_id][-10:]
 
-    def _get_layer_quality(self, layer_id: str) -> Optional[float]:
+    def _get_layer_quality(self, layer_id: str) -> float | None:
         """Get recent average quality for a layer."""
         if layer_id not in self.quality_history or not self.quality_history[layer_id]:
             return None
@@ -194,8 +194,8 @@ class QualityAwareSparseAttention:
         kv_is_strictly_past: bool = True,
         reserved_sink_blocks: int = 1,
         reserved_recent_blocks: int = 2,
-        memory_guard: Optional[MemoryGuard] = None,  # noqa: ARG002
-    ) -> Tuple[mx.array, int, ExecutionMode, dict]:
+        memory_guard: MemoryGuard | None = None,  # noqa: ARG002
+    ) -> tuple[mx.array, int, ExecutionMode, dict]:
         """
         Execute quality-aware sparse attention.
 

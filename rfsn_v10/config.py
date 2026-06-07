@@ -8,21 +8,22 @@ and YAML file loading for production deployment.
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
 
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, field_validator
 
 
 class LoggingConfig(BaseModel):
     """Logging configuration."""
 
     level: str = Field(default="INFO", description="Log level")
-    format: str = Field(default="json", description="Log format (json or text)")
-    file: Optional[str] = Field(default=None, description="Log file path")
+    format: str = Field(
+        default="json", description="Log format (json or text)"
+    )
+    file: str | None = Field(default=None, description="Log file path")
 
-    @validator("level")
+    @field_validator("level")
+    @classmethod
     def validate_level(cls, v):
         valid_levels = ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
         if v.upper() not in valid_levels:
@@ -33,17 +34,29 @@ class LoggingConfig(BaseModel):
 class MemoryConfig(BaseModel):
     """Memory management configuration."""
 
-    max_gb: float = Field(default=8.0, ge=0.1, description="Maximum memory in GB")
-    quota_gb: float = Field(default=10.0, ge=0.1, description="Disk quota in GB")
-    enable_leak_detection: bool = Field(default=True, description="Enable leak detection")
+    max_gb: float = Field(
+        default=8.0, ge=0.1, description="Maximum memory in GB"
+    )
+    quota_gb: float = Field(
+        default=10.0, ge=0.1, description="Disk quota in GB"
+    )
+    enable_leak_detection: bool = Field(
+        default=True, description="Enable leak detection"
+    )
 
 
 class CacheConfig(BaseModel):
     """Cache configuration."""
 
-    directory: str = Field(default="~/.cache/rfsn", description="Cache directory")
-    enable_persistence: bool = Field(default=True, description="Enable disk persistence")
-    enable_wal: bool = Field(default=True, description="Enable write-ahead logging")
+    directory: str = Field(
+        default="~/.cache/rfsn", description="Cache directory"
+    )
+    enable_persistence: bool = Field(
+        default=True, description="Enable disk persistence"
+    )
+    enable_wal: bool = Field(
+        default=True, description="Enable write-ahead logging"
+    )
 
 
 class SparseAttentionConfig(BaseModel):
@@ -69,11 +82,15 @@ class RFSNConfig(BaseModel):
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
     memory: MemoryConfig = Field(default_factory=MemoryConfig)
     cache: CacheConfig = Field(default_factory=CacheConfig)
-    sparse_attention: SparseAttentionConfig = Field(default_factory=SparseAttentionConfig)
-    quantization: QuantizationConfig = Field(default_factory=QuantizationConfig)
+    sparse_attention: SparseAttentionConfig = Field(
+        default_factory=SparseAttentionConfig
+    )
+    quantization: QuantizationConfig = Field(
+        default_factory=QuantizationConfig
+    )
 
     @classmethod
-    def from_env(cls) -> "RFSNConfig":
+    def from_env(cls) -> RFSNConfig:
         """Load configuration from environment variables."""
         return cls(
             logging=LoggingConfig(
@@ -84,17 +101,23 @@ class RFSNConfig(BaseModel):
             memory=MemoryConfig(
                 max_gb=float(os.getenv("RFSN_MAX_MEMORY_GB", "8.0")),
                 quota_gb=float(os.getenv("RFSN_QUOTA_GB", "10.0")),
-                enable_leak_detection=os.getenv("RFSN_ENABLE_LEAK_DETECTION", "true").lower() == "true",
+                enable_leak_detection=(
+                    os.getenv("RFSN_ENABLE_LEAK_DETECTION", "true").lower() == "true"
+                ),
             ),
             cache=CacheConfig(
                 directory=os.getenv("RFSN_CACHE_DIR", "~/.cache/rfsn"),
-                enable_persistence=os.getenv("RFSN_ENABLE_PERSISTENCE", "true").lower() == "true",
-                enable_wal=os.getenv("RFSN_ENABLE_WAL", "true").lower() == "true",
+                enable_persistence=(
+                    os.getenv("RFSN_ENABLE_PERSISTENCE", "true").lower() == "true"
+                ),
+                enable_wal=(
+                    os.getenv("RFSN_ENABLE_WAL", "true").lower() == "true"
+                ),
             ),
         )
 
     @classmethod
-    def from_yaml(cls, path: str) -> "RFSNConfig":
+    def from_yaml(cls, path: str) -> RFSNConfig:
         """Load configuration from YAML file."""
         import yaml
 
@@ -102,7 +125,7 @@ class RFSNConfig(BaseModel):
         if not config_path.exists():
             raise FileNotFoundError(f"Config file not found: {path}")
 
-        with open(config_path, "r") as f:
+        with open(config_path) as f:
             data = yaml.safe_load(f)
 
         return cls(**data)
@@ -115,10 +138,10 @@ class RFSNConfig(BaseModel):
         config_path.parent.mkdir(parents=True, exist_ok=True)
 
         with open(config_path, "w") as f:
-            yaml.dump(self.dict(), f, default_flow_style=False)
+            yaml.dump(self.model_dump(), f, default_flow_style=False)
 
 
-def load_config(path: Optional[str] = None) -> RFSNConfig:
+def load_config(path: str | None = None) -> RFSNConfig:
     """Load configuration from file or environment.
 
     Args:
@@ -133,7 +156,7 @@ def load_config(path: Optional[str] = None) -> RFSNConfig:
 
 
 # Global config instance
-_config: Optional[RFSNConfig] = None
+_config: RFSNConfig | None = None
 
 
 def get_config() -> RFSNConfig:

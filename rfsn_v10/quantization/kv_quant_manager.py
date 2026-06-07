@@ -7,10 +7,9 @@ This manager is for experimental IsoQuant + Polar/Hybrid validation.
 """
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import Any, Literal
-
-import math
 
 import mlx.core as mx
 

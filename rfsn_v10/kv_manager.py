@@ -15,11 +15,19 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from threading import RLock, get_ident
-from typing import Any, Optional
-
-from .compat import mx
+from typing import Any
 
 from .bitpack import BitPackedQuantizer
+from .compat import mx
+from .kernels import (
+    KernelRouteError,
+    apply_hash_signs_metal,
+    apply_hash_signs_with_indices_metal,
+    maybe_supports_metal_kernels,
+    packed_dequant_metal,
+    packed_dequant_wht_sign_metal,
+    wht64_metal,
+)
 from .quantization.hybrid_polar_cartesian import (
     HybridPolarCartesianQuantizer,
 )
@@ -30,15 +38,6 @@ from .quantization.isoquant_precondition import (
 from .quantization.qjl_score_correction import (
     QJLScoreCorrector,
     QJLSketch,
-)
-from .kernels import (
-    KernelRouteError,
-    apply_hash_signs_metal,
-    apply_hash_signs_with_indices_metal,
-    maybe_supports_metal_kernels,
-    packed_dequant_metal,
-    packed_dequant_wht_sign_metal,
-    wht64_metal,
 )
 
 
@@ -96,10 +95,10 @@ class RFSNTurboQuantKVManager:
         self,
         k_bits: int = 8,
         v_bits: int = 3,
-        use_wht: Optional[bool] = None,
-        use_incoherent_signs: Optional[bool] = None,
-        use_incoherent: Optional[bool] = None,
-        use_custom_kernel: Optional[bool] = None,
+        use_wht: bool | None = None,
+        use_incoherent_signs: bool | None = None,
+        use_incoherent: bool | None = None,
+        use_custom_kernel: bool | None = None,
         prefer_metal_kernels: bool = False,
         prefer_fused_kernel: bool = True,
         strict_metal: bool = False,
@@ -257,7 +256,7 @@ class RFSNTurboQuantKVManager:
         self,
         x: mx.array,
         seed: int,
-        indices: Optional[mx.array] = None,
+        indices: mx.array | None = None,
     ) -> mx.array:
         """Apply deterministic sign preconditioning (self-inverse).
 
@@ -362,9 +361,9 @@ class RFSNTurboQuantKVManager:
     def estimate_compressed_bytes_for_shape(
         self,
         shape: tuple,
-        k_bits: Optional[int] = None,
-        v_bits: Optional[int] = None,
-        group_size: Optional[int] = None,
+        k_bits: int | None = None,
+        v_bits: int | None = None,
+        group_size: int | None = None,
     ) -> int:
         """Estimate compressed KV cache footprint for a given KV shape.
 
@@ -386,13 +385,10 @@ class RFSNTurboQuantKVManager:
             self._ensure_polar_quantizers(shape[-1])
             assert self._k_quant_polar is not None
             assert self._v_quant_polar is not None
-            dummy_k = mx.zeros(shape, dtype=mx.float32)
-            dummy_v = mx.zeros(shape, dtype=mx.float32)
-            k_packed = self._k_quant_polar.quantize(dummy_k)
-            v_packed = self._v_quant_polar.quantize(dummy_v)
+            # Analytical estimate avoids materialising dummy GPU arrays.
             total = (
-                self._k_quant_polar.estimate_bytes(k_packed)
-                + self._v_quant_polar.estimate_bytes(v_packed)
+                self._k_quant_polar.estimate_bytes_for_shape(shape)
+                + self._v_quant_polar.estimate_bytes_for_shape(shape)
             )
             if self.use_isoquant:
                 total += 32  # isoquant_meta overhead (approx)
@@ -574,10 +570,10 @@ class RFSNTurboQuantKVManager:
         shape: tuple,
         bits: int,
         seed: int,
-        use_wht: Optional[bool] = None,
-        use_incoherent_signs: Optional[bool] = None,
+        use_wht: bool | None = None,
+        use_incoherent_signs: bool | None = None,
         out_dtype=None,
-        use_incoherent: Optional[bool] = None,
+        use_incoherent: bool | None = None,
     ) -> mx.array:
         """Packed-dequant-WHT reconstruction: unpack → dequant →
         reshape → WHT → optional signs.
@@ -1261,7 +1257,7 @@ class RFSNTurboQuantKVManager:
         self,
         skill_pattern: str,
         out_dtype=None,
-    ) -> Optional[tuple[mx.array, mx.array]]:
+    ) -> tuple[mx.array, mx.array] | None:
         """Retrieve and dequantize KV cache.
 
         Returns None if the cache key is not found.
@@ -1420,7 +1416,7 @@ class RFSNTurboQuantKVManager:
         block_indices: list[int],
         block_size: int = 64,
         out_dtype=None,
-    ) -> Optional[tuple[mx.array, mx.array]]:
+    ) -> tuple[mx.array, mx.array] | None:
         """Retrieve selected token blocks from a compressed KV cache.
 
         For block-aware cache entries, non-contiguous block selections

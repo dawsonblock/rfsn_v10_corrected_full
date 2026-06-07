@@ -6,14 +6,11 @@ and recommendation logic without requiring MLX.
 """
 from __future__ import annotations
 
-import pytest
-
 from rfsn_v10.adaptive_batch import (
     AdaptiveBatchConfig,
     AdaptiveBatchSizer,
     PerformancePredictor,
 )
-
 
 # ------------------------------------------------------------------
 # AdaptiveBatchConfig

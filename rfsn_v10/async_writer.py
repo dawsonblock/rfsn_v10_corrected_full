@@ -11,7 +11,6 @@ import queue
 import threading
 import time
 from dataclasses import dataclass, field
-from typing import Optional, List, Callable
 from datetime import datetime, timezone
 
 from .clickhouse_client import ClickHouseClient
@@ -21,14 +20,14 @@ from .clickhouse_client import ClickHouseClient
 class TelemetryBatch:
     """Batch of telemetry events to write together."""
     task_id: str
-    events: List[dict] = field(default_factory=list)
+    events: list[dict] = field(default_factory=list)
     timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 class AsyncWriter:
     """
     Background telemetry writer with batching, retries, and backpressure handling.
-    
+
     Features:
     - Batches writes by task_id for ordering
     - Retries transient errors with exponential backoff
@@ -36,7 +35,7 @@ class AsyncWriter:
     - Flushes on shutdown with timeout
     - Emits warnings on backpressure
     """
-    
+
     def __init__(
         self,
         client: ClickHouseClient,
@@ -65,23 +64,23 @@ class AsyncWriter:
         self.max_retries = max_retries
         self.retry_backoff_sec = retry_backoff_sec
         self.backpressure_policy = backpressure_policy.upper()
-        
+
         # Threading primitives
-        self._queue: queue.Queue[Optional[TelemetryBatch]] = queue.Queue(maxsize=max_queue_size)
-        self._worker_thread: Optional[threading.Thread] = None
+        self._queue: queue.Queue[TelemetryBatch | None] = queue.Queue(maxsize=max_queue_size)
+        self._worker_thread: threading.Thread | None = None
         self._stop_event = threading.Event()
-        self._flush_timer: Optional[threading.Timer] = None
-        self._current_batch: Optional[TelemetryBatch] = None
+        self._flush_timer: threading.Timer | None = None
+        self._current_batch: TelemetryBatch | None = None
         self._lock = threading.RLock()
-        
+
         # Statistics
         self._events_written = 0
         self._events_dropped = 0
         self._write_failures = 0
         self._last_warning_time = 0.0
-        
+
         self._start()
-    
+
     def _start(self) -> None:
         """Start the background worker thread."""
         self._worker_thread = threading.Thread(
@@ -91,24 +90,24 @@ class AsyncWriter:
         )
         self._worker_thread.start()
         self._schedule_flush()
-    
+
     def _schedule_flush(self) -> None:
         """Schedule the next periodic flush."""
         if self._stop_event.is_set():
             return
-            
+
         self._flush_timer = threading.Timer(
             self.flush_interval_sec,
             self._flush_timeout
         )
         self._flush_timer.daemon = True
         self._flush_timer.start()
-    
+
     def _flush_timeout(self) -> None:
         """Called when flush interval expires."""
         self._flush_current_batch()
         self._schedule_flush()
-    
+
     def _flush_current_batch(self) -> None:
         """Flush the current batch if it has events."""
         with self._lock:
@@ -140,7 +139,7 @@ class AsyncWriter:
                         # Default policy: discard the current batch.
                         self._events_dropped += len(batch_to_write.events)
                         self._warn_backpressure("queue full during batch flush")
-    
+
     def _warn_backpressure(self, reason: str) -> None:
         """Emit a backpressure warning, rate-limited to once per 10 seconds."""
         now = time.time()
@@ -148,18 +147,18 @@ class AsyncWriter:
             import warnings
             warnings.warn(f"Telemetry backpressure: {reason}")
             self._last_warning_time = now
-    
+
     def write(self, task_id: str, event: dict) -> None:
         """
         Write a telemetry event (non-blocking).
-        
+
         Args:
             task_id: Identifier for ordering preservation.
             event: Telemetry event dictionary to write.
         """
         # Check if we need to start a new batch for this task_id
         with self._lock:
-            if (self._current_batch is None or 
+            if (self._current_batch is None or
                 self._current_batch.task_id != task_id or
                 len(self._current_batch.events) >= self.batch_size):
                 self._flush_current_batch()
@@ -168,13 +167,13 @@ class AsyncWriter:
                     events=[],
                     timestamp=datetime.now(timezone.utc),
                 )
-            
+
             self._current_batch.events.append(event)
-            
+
             # If batch is full, flush it immediately
             if len(self._current_batch.events) >= self.batch_size:
                 self._flush_current_batch()
-    
+
     def _worker_loop(self) -> None:
         """Main worker loop: processes batches from the queue."""
         while True:
@@ -183,7 +182,7 @@ class AsyncWriter:
                 batch = self._queue.get(timeout=0.1)
                 if batch is None:  # Sentinel value for shutdown
                     break
-                    
+
                 self._write_batch_with_retries(batch)
                 self._queue.task_done()
             except queue.Empty:
@@ -195,12 +194,12 @@ class AsyncWriter:
                 # Log but don't crash the worker thread
                 import warnings
                 warnings.warn(f"Telemetry worker error: {e}")
-    
+
     def _write_batch_with_retries(self, batch: TelemetryBatch) -> None:
         """Write a batch with retry logic for transient errors."""
         if not batch.events:
             return
-            
+
         delay = self.retry_backoff_sec
         for attempt in range(self.max_retries + 1):
             try:
@@ -217,24 +216,24 @@ class AsyncWriter:
                         f"Failed to write telemetry batch after {self.max_retries + 1} attempts: {e}"
                     )
                     return
-                
+
                 # Transient error - wait and retry
                 time.sleep(delay)
                 delay *= 2  # Exponential backoff
-    
+
     def flush(self, timeout_sec: float = 10.0) -> None:
         """
         Flush all pending telemetry and stop the writer.
-        
+
         Args:
             timeout_sec: Maximum time to wait for flush completion.
         """
         self.stop(timeout_sec)
-    
+
     def stop(self, timeout_sec: float = 10.0) -> None:
         """
         Stop the background worker and flush remaining events.
-        
+
         Args:
             timeout_sec: Maximum time to wait for shutdown.
         """
@@ -243,11 +242,11 @@ class AsyncWriter:
 
         deadline = time.monotonic() + timeout_sec
         self._stop_event.set()
-        
+
         # Cancel flush timer
         if self._flush_timer:
             self._flush_timer.cancel()
-        
+
         # Flush current batch
         with self._lock:
             if self._current_batch and self._current_batch.events:
@@ -263,21 +262,21 @@ class AsyncWriter:
                 if remaining <= 0:
                     break
                 time.sleep(min(0.05, remaining))
-        
+
         # Wait for worker to finish processing the sentinel and any queued items
         if self._worker_thread:
             remaining = max(0.0, deadline - time.monotonic())
             self._worker_thread.join(timeout=remaining)
-        
+
         # Close client
         self.client.close()
-    
+
     def get_stats(self) -> dict:
         """Return writer statistics."""
         with self._lock:
             queue_size = self._queue.qsize()
             current_batch_size = len(self._current_batch.events) if self._current_batch else 0
-            
+
             return {
                 "events_written": self._events_written,
                 "events_dropped": self._events_dropped,

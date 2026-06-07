@@ -179,7 +179,11 @@ def dequantize_k_blocks(
         flat = codes.astype(mx.float32).reshape(-1)
         qmax = (1 << (packet.k_bits - 1)) - 1 if packet.k_bits <= 16 else 127
         q_signed = flat - float(qmax)
-        scale = packet.k_scales[soff] if packet.k_scales.ndim == 0 else packet.k_scales[soff : soff + 1]
+        if packet.k_scales.ndim == 0:
+            scale = packet.k_scales[soff]
+        else:
+            scale_end = packet.k_block_scale_offsets[bid + 1]
+            scale = packet.k_scales[soff:scale_end]
         restored = q_signed * scale
         out_blocks.append(restored)
     return mx.concatenate(out_blocks)
@@ -209,7 +213,11 @@ def dequantize_v_blocks(
         flat = codes.astype(mx.float32).reshape(-1)
         qmax = (1 << (packet.v_bits - 1)) - 1 if packet.v_bits <= 16 else 127
         q_signed = flat - float(qmax)
-        scale = packet.v_scales[soff] if packet.v_scales.ndim == 0 else packet.v_scales[soff : soff + 1]
+        if packet.v_scales.ndim == 0:
+            scale = packet.v_scales[soff]
+        else:
+            scale_end = packet.v_block_scale_offsets[bid + 1]
+            scale = packet.v_scales[soff:scale_end]
         restored = q_signed * scale
         out_blocks.append(restored)
     return mx.concatenate(out_blocks)

@@ -8,8 +8,6 @@ from __future__ import annotations
 
 import json
 
-import pytest
-
 from rfsn_v10.metrics import (
     Metric,
     MetricsCollector,
@@ -17,7 +15,6 @@ from rfsn_v10.metrics import (
     get_metrics_collector,
     setup_default_metrics,
 )
-
 
 # ------------------------------------------------------------------
 # Metric dataclass

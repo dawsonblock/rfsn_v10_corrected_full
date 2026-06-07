@@ -11,7 +11,7 @@ import json
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any
 
 # Optional MLX with pytest.importorskip fallback pattern
 try:
@@ -50,7 +50,7 @@ class AuditMetrics:
     logit_cosine: float = 1.0
     top5_overlap: float = 1.0
     kl_divergence: float = 0.0
-    nll_delta: Optional[float] = None
+    nll_delta: float | None = None
     has_nan_inf: bool = False
     step_num: int = 0
     timestamp: float = field(default_factory=time.time)
@@ -62,8 +62,8 @@ class AuditEvent:
 
     event_type: str = "audit_decode_step"
     step_num: int = 0
-    metrics: Dict[str, Any] = field(default_factory=dict)
-    fallback_recommendation: Optional[str] = None
+    metrics: dict[str, Any] = field(default_factory=dict)
+    fallback_recommendation: str | None = None
     timestamp: float = field(default_factory=time.time)
 
 
@@ -131,9 +131,9 @@ def audit_decode_step(
     reference_logits: mx.array,
     step_num: int,
     audit_interval: int = DEFAULT_AUDIT_INTERVAL,
-    labels: Optional[mx.array] = None,
-    log_path: Optional[Path] = None,
-) -> Optional[AuditMetrics]:
+    labels: mx.array | None = None,
+    log_path: Path | None = None,
+) -> AuditMetrics | None:
     """Compare compressed-path logits against a reference and log drift.
 
     Args:
@@ -164,7 +164,7 @@ def audit_decode_step(
     p_comp = _softmax_stable(compressed_logits)
     kl = _kl_div(p_ref, p_comp)
 
-    nll_delta: Optional[float] = None
+    nll_delta: float | None = None
     if labels is not None:
         # NLL for a single next-token prediction
         # labels shape assumed to be [B] or [B, 1] with token ids
@@ -218,7 +218,7 @@ def check_drift(
     max_kl: float = DEFAULT_MAX_KL,
     min_top5_overlap: float = DEFAULT_MIN_TOP5_OVERLAP,
     fallback_mode: str = DEFAULT_FALLBACK_MODE,
-) -> Optional[str]:
+) -> str | None:
     """Return a fallback recommendation based on drift thresholds.
 
     Rules (in priority order):
@@ -251,7 +251,7 @@ def check_drift(
 
 
 def log_audit_event(
-    event: AuditEvent, log_path: Optional[Path] = None
+    event: AuditEvent, log_path: Path | None = None
 ) -> None:
     """Append an audit event to the JSONL audit log.
 

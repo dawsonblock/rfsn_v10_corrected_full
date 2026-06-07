@@ -11,7 +11,6 @@ import json
 from pathlib import Path
 from typing import Any
 
-
 KNOWN_MODES = frozenset(
     {
         "baseline_fp16",
@@ -58,9 +57,12 @@ class LayerPolicy:
             ValueError: On invalid layer_id or unknown mode.
         """
         if not isinstance(layer_id, int):
-            raise ValueError(f"layer_id must be int, got {type(layer_id).__name__}")
+            got = type(layer_id).__name__
+            raise ValueError(f"layer_id must be int, got {got}")
         if layer_id < 0:
-            raise ValueError(f"layer_id must be non-negative, got {layer_id}")
+            raise ValueError(
+                f"layer_id must be non-negative, got {layer_id}"
+            )
         mode = kwargs.get("mode", "")
         if mode not in KNOWN_MODES:
             raise ValueError(f"Unknown mode: {mode!r}")
@@ -78,9 +80,12 @@ class LayerPolicy:
             Dict with at least a "mode" key.
         """
         if not isinstance(layer_id, int):
-            raise ValueError(f"layer_id must be int, got {type(layer_id).__name__}")
+            got = type(layer_id).__name__
+            raise ValueError(f"layer_id must be int, got {got}")
         if layer_id < 0:
-            raise ValueError(f"layer_id must be non-negative, got {layer_id}")
+            raise ValueError(
+                f"layer_id must be non-negative, got {layer_id}"
+            )
         explicit = self._layers.get(layer_id)
         if explicit is not None:
             return dict(explicit)
@@ -129,12 +134,13 @@ def validate_layer_policy(policy: dict[str, Any]) -> list[str]:
     for cfg_name, cfg in [("default", default), *_layers_iter]:
         if not isinstance(cfg, dict):
             continue
-        bits = cfg.get("bits") or cfg.get("cartesian_bits")
-        if bits is not None and bits not in _TRUE_BITPACK_BITS:
-            errors.append(
-                f"{cfg_name}: bits={bits} exceeds 8-bit pack limit; "
-                f"uses raw uint32 fallback — cannot be memory-optimized"
-            )
+        for key in ("bits", "cartesian_bits"):
+            val = cfg.get(key)
+            if val is not None and val not in _TRUE_BITPACK_BITS:
+                errors.append(
+                    f"{cfg_name}: {key}={val} exceeds 8-bit pack limit; "
+                    f"uses raw uint32 fallback — cannot be memory-optimized"
+                )
 
     return errors
 
@@ -158,6 +164,11 @@ def load_policy(path: str | Path) -> LayerPolicy:
     data = json.loads(p.read_text(encoding="utf-8"))
     if not isinstance(data, dict):
         raise ValueError("Policy JSON must be a dict")
+    validation_errors = validate_layer_policy(data)
+    if validation_errors:
+        raise ValueError(
+            "Invalid layer policy: " + "; ".join(validation_errors)
+        )
     default = data.get("default")
     if default is None:
         raise ValueError("Policy missing 'default' key")
@@ -171,8 +182,10 @@ def load_policy(path: str | Path) -> LayerPolicy:
         for layer_id_str, cfg in layers.items():
             try:
                 layer_id = int(layer_id_str)
-            except (ValueError, TypeError):
-                raise ValueError(f"Invalid layer ID: {layer_id_str!r}")
+            except (ValueError, TypeError) as exc:
+                raise ValueError(
+                    f"Invalid layer ID: {layer_id_str!r}"
+                ) from exc
             if not isinstance(cfg, dict):
                 raise ValueError(f"Layer {layer_id}: config must be a dict")
             policy.set_layer(layer_id, **cfg)

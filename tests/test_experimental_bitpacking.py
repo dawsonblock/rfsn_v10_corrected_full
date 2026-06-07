@@ -12,13 +12,12 @@ import pytest
 
 mx = pytest.importorskip("mlx.core")
 
-from rfsn_v10.quantization.polar_quant import PolarQuantizer
 from rfsn_v10.quantization.grouped_cartesian import GroupedCartesianQuantizer
 from rfsn_v10.quantization.hybrid_polar_cartesian import (
     HybridPolarCartesianQuantizer,
 )
+from rfsn_v10.quantization.polar_quant import PolarQuantizer
 from rfsn_v10.quantization.turbo_polar_quant import TurboPolarQuantizer
-
 
 # ------------------------------------------------------------------
 # Helpers
@@ -280,5 +279,10 @@ class TestTurboPolarQuantizer:
         rk, rv = q.dequantize(packed)
         assert rk.shape == k.shape
         assert rv.shape == v.shape
-        # Verify estimate_bytes still works (stores as uint32, no packing gain)
-        assert q.estimate_bytes(packed) > 0
+        # Verify estimate_bytes reflects raw uint32 storage (no packing gain)
+        estimated = q.estimate_bytes(packed)
+        radius_n_values = packed.k_polar.packed_radius_codes.n_values
+        raw_radius_bytes = radius_n_values * 4
+        assert estimated >= raw_radius_bytes, (
+            f"estimated={estimated} should cover raw uint32 bytes {raw_radius_bytes}"
+        )

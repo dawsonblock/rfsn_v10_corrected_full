@@ -11,10 +11,8 @@ import pytest
 mx = pytest.importorskip("mlx.core")
 
 from rfsn_v10.quantization.polar_quant import (
-    GroupQuantMeta,
     PackedCodeBuffer,
     PolarQuantizer,
-    UniformQuantMeta,
     _pack_code_buffer,
     _unpack_code_buffer,
     dequantize_group_unsigned,

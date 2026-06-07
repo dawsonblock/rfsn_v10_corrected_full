@@ -1,4 +1,4 @@
-FROM python:3.11-slim
+FROM python:3.12-slim
 
 LABEL maintainer="RFSN Contributors"
 LABEL description="RFSN v10 - Quantized KV-cache + decode-time sparse-attention runtime"
@@ -6,16 +6,19 @@ LABEL description="RFSN v10 - Quantized KV-cache + decode-time sparse-attention 
 WORKDIR /app
 
 # Install system dependencies
-RUN apt-get update && apt-get install -y \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
+    ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements
-COPY pyproject.toml .
-COPY README.md .
+# Create non-root user
+RUN groupadd -r rfsn && useradd -r -g rfsn rfsn
 
-# Install Python dependencies
-RUN pip install --no-cache-dir -e ".[mlx,production]"
+# Copy build metadata first for layer caching
+COPY pyproject.toml README.md ./
+
+# Install Python dependencies (editable so local changes are reflected)
+RUN pip install --no-cache-dir -e ".[production]"
 
 # Copy source code
 COPY rfsn_v10/ ./rfsn_v10/
@@ -24,13 +27,20 @@ COPY tools/ ./tools/
 COPY benchmarks/ ./benchmarks/
 COPY tests/ ./tests/
 
-# Create cache directory
-RUN mkdir -p /app/.cache
+# Re-install to pick up any source changes
+RUN pip install --no-cache-dir -e ".[production]"
+
+# Create cache directory and fix permissions
+RUN mkdir -p /app/.cache /app/artifacts && chown -R rfsn:rfsn /app
 
 # Set environment variables
-ENV PYTHONPATH=/app
+ENV PYTHONUNBUFFERED=1
 ENV RFSN_CACHE_DIR=/app/.cache
 ENV RFSN_LOG_LEVEL=INFO
+ENV RFSN_TELEMETRY_DIR=/app/artifacts/runtime_logs
+
+# Switch to non-root user
+USER rfsn
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \

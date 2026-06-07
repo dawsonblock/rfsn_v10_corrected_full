@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from pathlib import Path
-
 from agent_core.orchestrator import Orchestrator
 from agent_core.patch_manager import PatchManager
 from agent_core.schemas import PatchPlan

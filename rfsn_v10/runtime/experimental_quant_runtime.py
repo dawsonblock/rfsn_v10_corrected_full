@@ -15,13 +15,13 @@ Supported quant modes:
 
 from __future__ import annotations
 
+import fcntl
 import json
-import math
 import time
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Dict, Optional
+from typing import Any
 
 # Optional MLX with pytest.importorskip fallback pattern
 try:
@@ -31,24 +31,27 @@ except ImportError:  # pragma: no cover
         import pytest
 
         mx = pytest.importorskip("mlx.core")
-    except Exception:
+    except ImportError:
 
         class _MissingMLX:
             def __getattr__(self, name: str) -> Any:
                 raise AttributeError(
-                    f"mlx.core is not installed; attribute '{name}' unavailable"
+                    f"mlx.core is not installed; "
+                    f"attribute '{name}' unavailable"
                 )
 
         mx = _MissingMLX()  # type: ignore[misc,assignment]
 
 from ..kv_manager import RFSNTurboQuantKVManager
+from .adaptive_controller import AdaptiveQuantController
+from .audit import AuditMetrics, audit_decode_step, check_drift
 from .scoring_modes import (
     score_attention_fp16,
     score_attention_packed_block,
     score_attention_prepared,
+    score_attention_quantized_metal,
     score_attention_reconstructed,
 )
-from .audit import audit_decode_step, check_drift, AuditMetrics
 
 DEFAULT_TELEMETRY_DIR: Path = Path("artifacts/runtime_logs")
 DEFAULT_QUANT_MODE: str = "stable_k8_v5_gs64"
@@ -72,7 +75,8 @@ class LayerQuantPolicy:
 
 @dataclass
 class QuantTelemetryEvent:
-    """Single decode-step telemetry record for the experimental quant runtime."""
+    """Single decode-step telemetry record for the experimental
+    quant runtime."""
 
     task_id: str
     model_id: str
@@ -82,8 +86,8 @@ class QuantTelemetryEvent:
     compressed_bytes: int
     dequant_time_ms: float
     tokens_per_sec: float
-    fallback_event: Optional[str]
-    quality_audit: Optional[Dict[str, Any]]
+    fallback_event: str | None
+    quality_audit: dict[str, Any] | None
     timestamp: float = field(default_factory=time.time)
 
 
@@ -95,7 +99,7 @@ class ExperimentalQuantState:
     total_dequant_time_ms: float = 0.0
     total_tokens: int = 0
     fallback_count: int = 0
-    audit_samples: list[Dict[str, Any]] = field(default_factory=list)
+    audit_samples: list[dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass
@@ -112,13 +116,16 @@ class PreparedCache:
     k_scales: Any = None
     v_scales: Any = None
     block_offsets: list[int] = field(default_factory=list)
-    dequantized_k: Optional[mx.array] = None
-    dequantized_v: Optional[mx.array] = None
+    dequantized_k: mx.array | None = None
+    dequantized_v: mx.array | None = None
     hits: int = 0
     misses: int = 0
 
     def is_valid_for(self, skill_pattern: str) -> bool:
-        return self.skill_pattern == skill_pattern and self.k_packed is not None
+        return (
+            self.skill_pattern == skill_pattern
+            and self.dequantized_k is not None
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -126,11 +133,13 @@ class PreparedCache:
 # ---------------------------------------------------------------------------
 
 
-def _load_layer_policy(path: Path | str | None) -> Dict[str, LayerQuantPolicy]:
+def _load_layer_policy(
+    path: Path | str | None,
+) -> dict[str, LayerQuantPolicy]:
     """Load a JSON layer policy into a mapping of layer_id → policy."""
     if path is None:
         return {}
-    with open(path, "r", encoding="utf-8") as fh:
+    with open(path, encoding="utf-8") as fh:
         raw = json.load(fh)
     if not isinstance(raw, dict):
         return {}
@@ -138,7 +147,7 @@ def _load_layer_policy(path: Path | str | None) -> Dict[str, LayerQuantPolicy]:
     layers = raw.get("layers", raw) if "default" in raw else raw
     if not isinstance(layers, dict):
         return {}
-    policy: Dict[str, LayerQuantPolicy] = {}
+    policy: dict[str, LayerQuantPolicy] = {}
     for layer_id, cfg in layers.items():
         if not isinstance(cfg, dict):
             continue
@@ -156,10 +165,10 @@ def _load_layer_policy(path: Path | str | None) -> Dict[str, LayerQuantPolicy]:
 def _estimate_compressed_bytes(
     manager: RFSNTurboQuantKVManager,
     keys: mx.array,
-    values: mx.array,
+    _values: mx.array,
 ) -> int:
     """Rough byte estimate for a stored KV pair."""
-    bsz, num_h, t_len, head_dim = keys.shape
+    _bsz, num_h, t_len, head_dim = keys.shape
     # Packed words + scales; this is a coarse over-estimate.
     k_cpw = 32 // manager.k_bits
     v_cpw = 32 // manager.v_bits
@@ -193,7 +202,14 @@ def _log_telemetry_event(
         "timestamp": event.timestamp,
     }
     with path.open("a", encoding="utf-8") as fh:
-        fh.write(json.dumps(record, ensure_ascii=False, default=str) + "\n")
+        fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
+        try:
+            fh.write(
+                json.dumps(record, ensure_ascii=False, default=str)
+                + "\n"
+            )
+        finally:
+            fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
 
 
 def _log_fallback_event(
@@ -211,7 +227,14 @@ def _log_fallback_event(
         "timestamp": time.time(),
     }
     with path.open("a", encoding="utf-8") as fh:
-        fh.write(json.dumps(record, ensure_ascii=False, default=str) + "\n")
+        fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
+        try:
+            fh.write(
+                json.dumps(record, ensure_ascii=False, default=str)
+                + "\n"
+            )
+        finally:
+            fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
 
 
 # ---------------------------------------------------------------------------
@@ -220,9 +243,12 @@ def _log_fallback_event(
 
 
 def _adaptive_bits(seq_len: int) -> tuple[int, int, int]:
-    """Return (k_bits, v_bits, group_size) based on sequence length heuristic."""
+    """Return (k_bits, v_bits, group_size) based on
+    sequence length heuristic."""
     if seq_len <= 0:
-        raise ValueError(f"seq_len must be positive, got {seq_len}")
+        raise ValueError(
+            f"seq_len must be positive, got {seq_len}"
+        )
     if seq_len <= 512:
         return 8, 5, 64
     elif seq_len <= 2048:
@@ -241,7 +267,8 @@ class ExperimentalQuantRuntime:
 
     Args:
         base_manager: Existing KV manager to wrap (mutations are avoided).
-        quant_mode: One of ``stable_k8_v5_gs64``, ``adaptive``, ``experimental_hybrid``.
+        quant_mode: One of ``stable_k8_v5_gs64``, ``adaptive``,
+            ``experimental_hybrid``.
         layer_policy_path: Optional JSON path for per-layer quant configs.
         model_id: Identifier for telemetry.
         telemetry_dir: Directory for JSONL output.
@@ -249,18 +276,28 @@ class ExperimentalQuantRuntime:
 
     def __init__(
         self,
-        base_manager: Optional[RFSNTurboQuantKVManager] = None,
+        base_manager: RFSNTurboQuantKVManager | None = None,
         quant_mode: str = DEFAULT_QUANT_MODE,
-        layer_policy_path: Optional[str] = None,
+        layer_policy_path: str | None = None,
         model_id: str = "experimental",
         telemetry_dir: str = str(DEFAULT_TELEMETRY_DIR),
+        enable_live_adjust: bool = False,
     ):
         if quant_mode not in (
             "stable_k8_v5_gs64",
             "adaptive",
             "experimental_hybrid",
+            "live_adaptive",
         ):
             raise ValueError(f"Unsupported quant_mode: {quant_mode}")
+        if enable_live_adjust and quant_mode not in (
+            "adaptive",
+            "live_adaptive",
+        ):
+            raise ValueError(
+                "enable_live_adjust requires quant_mode 'adaptive' or "
+                "'live_adaptive'"
+            )
 
         self.quant_mode = quant_mode
         self.model_id = model_id
@@ -276,10 +313,15 @@ class ExperimentalQuantRuntime:
             base_manager = self._make_manager_for_mode(quant_mode)
         self.base_manager = base_manager
 
+        # Live auto-adjust controller
+        self._live_controller: AdaptiveQuantController | None = None
+        if enable_live_adjust:
+            self._live_controller = AdaptiveQuantController()
+
         # Runtime state
         self.state = ExperimentalQuantState()
         self._step_num = 0
-        self._prepared_cache: Dict[str, PreparedCache] = {}
+        self._prepared_cache: dict[str, PreparedCache] = {}
 
         # Log startup
         self._log_startup()
@@ -331,7 +373,10 @@ class ExperimentalQuantRuntime:
             "timestamp": time.time(),
         }
         with path.open("a", encoding="utf-8") as fh:
-            fh.write(json.dumps(record, ensure_ascii=False, default=str) + "\n")
+            fh.write(
+                json.dumps(record, ensure_ascii=False, default=str)
+                + "\n"
+            )
 
     # ------------------------------------------------------------------
     # Per-layer manager resolution
@@ -341,6 +386,7 @@ class ExperimentalQuantRuntime:
         """Return a manager instance respecting layer policy, if any."""
         if layer_id in self.layer_policy:
             policy = self.layer_policy[layer_id]
+            base = self.base_manager
             return RFSNTurboQuantKVManager(
                 k_bits=policy.k_bits,
                 v_bits=policy.v_bits,
@@ -348,6 +394,12 @@ class ExperimentalQuantRuntime:
                 use_wht=policy.use_wht,
                 use_incoherent_signs=policy.use_incoherent_signs,
                 quant_mode=policy.quant_mode,
+                max_memory_gb=base.max_memory_gb,
+                max_pinned_memory_gb=base.max_pinned_memory_gb,
+                cache_dir=str(base.cache_dir),
+                prefer_metal_kernels=base.prefer_metal_kernels,
+                strict_metal=base.strict_metal,
+                validate_metal_codes=base.validate_metal_codes,
             )
         return self.base_manager
 
@@ -363,10 +415,10 @@ class ExperimentalQuantRuntime:
         keys: mx.array,
         values: mx.array,
         token_count: int,
-        reference_logits: Optional[mx.array] = None,
-        block_indices: Optional[list[int]] = None,
+        reference_logits: mx.array | None = None,
+        block_indices: list[int] | None = None,
         scoring_mode: str = "reconstructed",
-    ) -> tuple[mx.array, Dict[str, Any]]:
+    ) -> tuple[mx.array, dict[str, Any]]:
         """Run one experimental decode step with quant KV and telemetry.
 
         Args:
@@ -376,9 +428,12 @@ class ExperimentalQuantRuntime:
             keys:            [B, H, T_k, D]  (full-precision input)
             values:          [B, H, T_k, D]  (full-precision input)
             token_count:     Number of tokens represented by *keys* / *values*.
-            reference_logits: Optional reference logits for audit comparison.
-            block_indices:   If provided, use packed-block scoring (sparse blocks).
-            scoring_mode:    One of ``fp16``, ``reconstructed``, ``prepared``, ``packed_block``.
+            reference_logits: Optional reference logits for audit
+                comparison.
+            block_indices:   If provided, use packed-block scoring
+                (sparse blocks).
+            scoring_mode:    One of ``fp16``, ``reconstructed``,
+                ``prepared``, ``packed_block``.
 
         Returns:
             (attention_output, info_dict)
@@ -396,14 +451,38 @@ class ExperimentalQuantRuntime:
         effective_k_bits = manager.k_bits
         effective_v_bits = manager.v_bits
         effective_group_size = manager.group_size
+        controller_adjusted = False
         if self.quant_mode == "adaptive":
             seq_len = keys.shape[2]
-            effective_k_bits, effective_v_bits, effective_group_size = _adaptive_bits(
-                seq_len
+            effective_k_bits, effective_v_bits, effective_group_size = (
+                _adaptive_bits(seq_len)
             )
             # Spawn a temporary manager with adaptive bits.
             # This overrides any layer-specific policy, so reflect that in
             # telemetry.
+            policy_applied = False
+            manager = RFSNTurboQuantKVManager(
+                k_bits=effective_k_bits,
+                v_bits=effective_v_bits,
+                group_size=effective_group_size,
+                quant_mode="cartesian",
+            )
+        elif self.quant_mode == "live_adaptive":
+            if self._live_controller is not None:
+                (
+                    effective_k_bits,
+                    effective_v_bits,
+                    effective_group_size,
+                ) = self._live_controller.get_effective_bits()
+                controller_adjusted = True
+            else:
+                # Fallback to length-based heuristic if controller missing.
+                seq_len = keys.shape[2]
+                (
+                    effective_k_bits,
+                    effective_v_bits,
+                    effective_group_size,
+                ) = _adaptive_bits(seq_len)
             policy_applied = False
             manager = RFSNTurboQuantKVManager(
                 k_bits=effective_k_bits,
@@ -444,7 +523,7 @@ class ExperimentalQuantRuntime:
             k_rec, v_rec = retrieved
             attn_output = score_attention_reconstructed(
                 queries,
-                keys,  # packet placeholders (not used when dequant_fn ignores them)
+                keys,  # packet placeholders
                 values,
                 dequant_fn=lambda _kp, _vp: (k_rec, v_rec),
             )
@@ -458,7 +537,9 @@ class ExperimentalQuantRuntime:
                 retrieved = manager.retrieve(skill_pattern)
                 dequant_time_ms = (time.monotonic() - t_deq) * 1000.0
                 if retrieved is None:
-                    raise RuntimeError("retrieve() returned None after store()")
+                    raise RuntimeError(
+                        "retrieve() returned None after store()"
+                    )
                 k_prep, v_prep = retrieved
                 prep = PreparedCache(
                     skill_pattern=skill_pattern,
@@ -472,8 +553,12 @@ class ExperimentalQuantRuntime:
                 v_prep = prep.dequantized_v
                 prep.hits += 1
                 if k_prep is None or v_prep is None:
-                    raise RuntimeError("PreparedCache has stale dequantized blocks")
-            attn_output = score_attention_prepared(queries, k_prep, v_prep)
+                    raise RuntimeError(
+                        "PreparedCache has stale dequantized blocks"
+                    )
+            attn_output = score_attention_prepared(
+                queries, k_prep, v_prep
+            )
 
         elif scoring_mode == "packed_block":
             if block_indices is None:
@@ -500,6 +585,26 @@ class ExperimentalQuantRuntime:
                 block_dequant_fn=lambda _kp, _vp, _bi: (k_blk, v_blk),
             )
 
+        elif scoring_mode == "quantized_metal":
+            # Fused Metal kernel: never materialises full K/V tensors
+            cache = manager.active_caches.get(skill_pattern)
+            if cache is None:
+                raise RuntimeError(
+                    "quantized_metal requires active cache for skill_pattern"
+                )
+            t_deq = time.monotonic()
+            attn_output = score_attention_quantized_metal(
+                queries,
+                packed_k=cache.k_packed,
+                packed_v=cache.v_packed,
+                scales_k=cache.k_scales,
+                scales_v=cache.v_scales,
+                n_keys=cache.k_n_values,
+                bits=cache.k_bits,
+                group_size=manager.group_size,
+            )
+            dequant_time_ms = (time.monotonic() - t_deq) * 1000.0
+
         else:
             raise ValueError(f"Unknown scoring_mode: {scoring_mode}")
 
@@ -510,9 +615,9 @@ class ExperimentalQuantRuntime:
         # ------------------------------------------------------------------
         # 4. Audit (if reference logits provided)
         # ------------------------------------------------------------------
-        fallback_event: Optional[str] = None
-        quality_audit: Optional[Dict[str, Any]] = None
-        audit_metrics: Optional[AuditMetrics] = None
+        fallback_event: str | None = None
+        quality_audit: dict[str, Any] | None = None
+        audit_metrics: AuditMetrics | None = None
 
         if reference_logits is not None:
             # We treat attn_output as a proxy for "compressed logits" in this
@@ -539,6 +644,15 @@ class ExperimentalQuantRuntime:
                     )
                     self.state.fallback_count += 1
 
+                # Feed metrics to the live controller if enabled.
+                if (
+                    self._live_controller is not None
+                    and audit_metrics is not None
+                ):
+                    self._live_controller.update(
+                        audit_metrics, self._step_num
+                    )
+
         # ------------------------------------------------------------------
         # 5. Telemetry
         # ------------------------------------------------------------------
@@ -560,7 +674,7 @@ class ExperimentalQuantRuntime:
         )
         _log_telemetry_event(event, self.telemetry_dir)
 
-        info: Dict[str, Any] = {
+        info: dict[str, Any] = {
             "task_id": task_id,
             "quant_mode": self.quant_mode,
             "layer_policy_applied": policy_applied,
@@ -572,18 +686,23 @@ class ExperimentalQuantRuntime:
             "tokens_per_sec": tokens_per_sec,
             "fallback_event": fallback_event,
             "audit_metrics": quality_audit,
+            "controller_adjusted": controller_adjusted,
         }
+        if self._live_controller is not None:
+            info["controller_state"] = self._live_controller.state_dict()
         return attn_output, info
 
     # ------------------------------------------------------------------
     # Quality audit sample export
     # ------------------------------------------------------------------
 
-    def export_quality_audit_samples(self, limit: int = 100) -> list[Dict[str, Any]]:
+    def export_quality_audit_samples(
+        self, limit: int = 100
+    ) -> list[dict[str, Any]]:
         """Return the most recent *limit* quality audit samples."""
         # Samples are stored in the JSONL files; this helper returns an
         # in-memory snapshot gathered from telemetry parsing for convenience.
-        samples: list[Dict[str, Any]] = []
+        samples: list[dict[str, Any]] = []
         path = self.telemetry_dir / "experimental_quant_telemetry.jsonl"
         if not path.exists():
             return samples
@@ -601,7 +720,7 @@ class ExperimentalQuantRuntime:
     # State inspection
     # ------------------------------------------------------------------
 
-    def get_state_summary(self) -> Dict[str, Any]:
+    def get_state_summary(self) -> dict[str, Any]:
         """Return a snapshot of the runtime state."""
         elapsed = max(self.state.total_dequant_time_ms, 1e-6)
         return {

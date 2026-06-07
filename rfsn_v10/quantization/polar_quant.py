@@ -278,6 +278,18 @@ class PolarQuantizer:
         radius_group_size: int = 64,
         adaptive_angle_range: bool = False,
     ):
+        if not (1 <= angle_bits <= 16):
+            raise ValueError(
+                f"angle_bits must be in [1, 16], got {angle_bits}"
+            )
+        if not (1 <= radius_bits <= 16):
+            raise ValueError(
+                f"radius_bits must be in [1, 16], got {radius_bits}"
+            )
+        if radius_group_size <= 0:
+            raise ValueError(
+                f"radius_group_size must be positive, got {radius_group_size}"
+            )
         self.levels = levels
         self.angle_bits = angle_bits
         self.radius_bits = radius_bits
@@ -358,4 +370,26 @@ class PolarQuantizer:
         scale_bytes = int(packed.radius_meta.scale.size) * 4
         # Angle metadata: 4 floats per meta
         meta_bytes = len(packed.angle_metas) * 4 * 4
+        return angle_bytes + radius_bytes + scale_bytes + meta_bytes
+
+    def estimate_bytes_for_shape(self, shape: tuple[int, ...]) -> int:
+        """Analytical byte estimate without materialising arrays."""
+        n = math.prod(shape)
+        angle_bytes = 0
+        cpw = 32 // self.angle_bits
+        for _ in range(self.levels):
+            if self.angle_bits <= 8:
+                words = (n + cpw - 1) // cpw
+            else:
+                words = n
+            angle_bytes += words * 4
+        if self.radius_bits <= 8:
+            cpw_r = 32 // self.radius_bits
+            radius_words = (n + cpw_r - 1) // cpw_r
+        else:
+            radius_words = n
+        radius_bytes = radius_words * 4
+        groups = (n + self.radius_group_size - 1) // self.radius_group_size
+        scale_bytes = groups * 4
+        meta_bytes = self.levels * 4 * 4
         return angle_bytes + radius_bytes + scale_bytes + meta_bytes

@@ -49,7 +49,7 @@ class BitPackedQuantizer:
             x_rounded = mx.round(x)
             if not mx.all(x == x_rounded).item():
                 raise ValueError(
-                    f"Float codes must be integer-valued, got non-integer values"
+                    "Float codes must be integer-valued, got non-integer values"
                 )
             x = x_rounded.astype(mx.int32)
 

@@ -8,11 +8,9 @@ import pytest
 
 mx = pytest.importorskip("mlx.core")
 
-from rfsn_v10.bitpack import BitPackedQuantizer
-from rfsn_v10.kv_manager import RFSNTurboQuantKVManager
-from rfsn_v10.attention import AdaptiveBlockSparseAttention
-from rfsn_v10.runtime import RFSNRuntime, TelemetryEvent
 import rfsn_v10.runtime as runtime_module
+from rfsn_v10.kv_manager import RFSNTurboQuantKVManager
+from rfsn_v10.runtime import RFSNRuntime
 
 
 @pytest.fixture

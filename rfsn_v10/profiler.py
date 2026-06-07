@@ -9,9 +9,10 @@ from __future__ import annotations
 
 import json
 import time
-from dataclasses import dataclass, field
-from typing import Any, Callable, Optional
 from collections import defaultdict
+from collections.abc import Callable
+from dataclasses import dataclass, field
+from typing import Any
 
 
 @dataclass
@@ -67,11 +68,11 @@ class RFSNProfiler:
         self.stats: dict[str, ProfileStats] = defaultdict(ProfileStats)
         self._active_scopes: dict[str, float] = {}
 
-    def start(self, name: str, metadata: Optional[dict[str, Any]] = None) -> None:
+    def start(self, name: str, metadata: dict[str, Any] | None = None) -> None:
         """Start profiling a named operation."""
         self._active_scopes[name] = time.perf_counter()
 
-    def end(self, name: str, metadata: Optional[dict[str, Any]] = None) -> None:
+    def end(self, name: str, metadata: dict[str, Any] | None = None) -> None:
         """End profiling a named operation."""
         if name not in self._active_scopes:
             return
@@ -88,11 +89,11 @@ class RFSNProfiler:
         self.events.append(event)
         self.stats[name].add_event(event)
 
-    def profile(self, name: str, metadata: Optional[dict[str, Any]] = None):
+    def profile(self, name: str, metadata: dict[str, Any] | None = None):
         """Context manager for profiling a block of code."""
 
         class ProfileContext:
-            def __init__(self, profiler: RFSNProfiler, n: str, meta: Optional[dict]):
+            def __init__(self, profiler: RFSNProfiler, n: str, meta: dict | None):
                 self.profiler = profiler
                 self.name = n
                 self.metadata = meta
@@ -159,7 +160,7 @@ class MemoryAccessProfiler:
         block_idx: int,
         access_type: str,
         size_bytes: int,
-        timestamp: Optional[float] = None,
+        timestamp: float | None = None,
     ) -> None:
         """Log a memory access event."""
         if timestamp is None:
@@ -233,7 +234,7 @@ def profile_kernel_execution(
     latencies = []
     for i in range(iterations):
         with profiler.profile(f"kernel_iteration_{i}"):
-            result = kernel_func(*args, **kwargs)
+            kernel_func(*args, **kwargs)
         latencies.append(profiler.stats[f"kernel_iteration_{i}"].avg_duration_ms)
 
     return {

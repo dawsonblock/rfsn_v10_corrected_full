@@ -12,6 +12,7 @@ For bits=5:
 """
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 
 import mlx.core as mx
@@ -52,6 +53,8 @@ class GroupedCartesianQuantizer:
     ):
         if not (2 <= bits <= 16):
             raise ValueError(f"bits must be in [2,16]. Got {bits}")
+        if group_size <= 0:
+            raise ValueError(f"group_size must be positive, got {group_size}")
         self.bits = bits
         self.group_size = group_size
         self.eps = eps
@@ -133,4 +136,19 @@ class GroupedCartesianQuantizer:
     def estimate_bytes(self, packed: PackedCartesianCodes) -> int:
         code_bytes = int(packed.packed_codes.packed.size) * 4
         scale_bytes = int(packed.scale.size) * 4
+        return code_bytes + scale_bytes
+
+    def estimate_bytes_for_shape(self, shape: tuple[int, ...]) -> int:
+        """Analytical byte estimate without materialising arrays."""
+        n = math.prod(shape)
+        pad = (self.group_size - (n % self.group_size)) % self.group_size
+        padded = n + pad
+        if self.bits <= 8:
+            cpw = 32 // self.bits
+            words = (padded + cpw - 1) // cpw
+        else:
+            words = padded
+        code_bytes = words * 4
+        groups = padded // self.group_size
+        scale_bytes = groups * 4
         return code_bytes + scale_bytes

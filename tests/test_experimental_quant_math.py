@@ -7,18 +7,18 @@ import pytest
 
 mx = pytest.importorskip("mlx.core")
 
-from rfsn_v10.quantization.isoquant_precondition import (
-    IsoQuantPreconditioner,
-)
-from rfsn_v10.quantization.polar_quant import (
-    iterative_hierarchical_polar_forward,
-    iterative_hierarchical_polar_inverse,
-    PolarQuantizer,
-)
 from rfsn_v10.quantization.hybrid_polar_cartesian import (
     HybridPolarCartesianQuantizer,
 )
+from rfsn_v10.quantization.isoquant_precondition import (
+    IsoQuantPreconditioner,
+)
 from rfsn_v10.quantization.kv_quant_manager import QuantizedKVManager
+from rfsn_v10.quantization.polar_quant import (
+    PolarQuantizer,
+    iterative_hierarchical_polar_forward,
+    iterative_hierarchical_polar_inverse,
+)
 
 
 def _cos(a: mx.array, b: mx.array) -> float:

@@ -8,15 +8,12 @@ from __future__ import annotations
 
 import time
 
-import pytest
-
 from rfsn_v10.model_cache_policy import (
     CachePolicy,
     EvictionStrategy,
     ModelCachePolicyManager,
     get_default_policy_for_model,
 )
-
 
 # ------------------------------------------------------------------
 # CachePolicy

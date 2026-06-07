@@ -15,11 +15,14 @@ Run:
     pytest tests/test_metal_kernel_math.py -v -s
 """
 from __future__ import annotations
+
 import pytest
 
 mx = pytest.importorskip("mlx.core")
 from rfsn_v10.bitpack import BitPackedQuantizer
 from rfsn_v10.kv_manager import RFSNTurboQuantKVManager
+
+
 # ==============================================================================
 # Metrics
 # ==============================================================================

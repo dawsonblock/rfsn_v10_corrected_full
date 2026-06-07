@@ -17,14 +17,12 @@ import math
 import time
 import uuid
 from dataclasses import dataclass
-from typing import Optional
 
-from .compat import mx
-
-from .kv_manager import RFSNTurboQuantKVManager
 from .adaptive_sparsity import AdaptiveSparsityController
-from .memory_guard import MemoryGuard
 from .attention import AdaptiveBlockSparseAttention
+from .compat import mx
+from .kv_manager import RFSNTurboQuantKVManager
+from .memory_guard import MemoryGuard
 
 
 @dataclass
@@ -52,15 +50,15 @@ class TelemetryEvent:
     sparse_success: bool
     dense_success: bool
     audit_enabled: bool
-    audit_cosine: Optional[float]
-    audit_rel_mae: Optional[float]
-    audit_max_abs_error: Optional[float]
-    quant_audit_cosine: Optional[float]
-    quant_audit_rel_mae: Optional[float]
-    quant_audit_max_abs_error: Optional[float]
-    sparse_audit_cosine: Optional[float]
-    sparse_audit_rel_mae: Optional[float]
-    sparse_audit_max_abs_error: Optional[float]
+    audit_cosine: float | None
+    audit_rel_mae: float | None
+    audit_max_abs_error: float | None
+    quant_audit_cosine: float | None
+    quant_audit_rel_mae: float | None
+    quant_audit_max_abs_error: float | None
+    sparse_audit_cosine: float | None
+    sparse_audit_rel_mae: float | None
+    sparse_audit_max_abs_error: float | None
     execution_mode: str
     termination_reason: str
 
@@ -79,9 +77,9 @@ class RFSNRuntime:
         reserved_sink_blocks: int = 1,
         reserved_recent_blocks: int = 2,
         use_compressed_on_miss: bool = False,
-        use_custom_kernel: Optional[bool] = None,
-        adaptive_sparsity_controller: Optional[AdaptiveSparsityController] = None,
-        memory_guard: Optional[MemoryGuard] = None,
+        use_custom_kernel: bool | None = None,
+        adaptive_sparsity_controller: AdaptiveSparsityController | None = None,
+        memory_guard: MemoryGuard | None = None,
     ):
         self.kv_manager = kv_manager
         self.model_id = model_id
@@ -110,9 +108,9 @@ class RFSNRuntime:
         v_bits: int,
         group_size: int,
         format_version: str,
-        use_wht: Optional[bool] = None,
-        use_incoherent_signs: Optional[bool] = None,
-        use_incoherent: Optional[bool] = None,
+        use_wht: bool | None = None,
+        use_incoherent_signs: bool | None = None,
+        use_incoherent: bool | None = None,
     ) -> str:
         if use_wht is None and use_incoherent_signs is None:
             legacy = True if use_incoherent is None else bool(use_incoherent)
@@ -159,9 +157,9 @@ class RFSNRuntime:
         queries: mx.array,
         keys: mx.array,
         values: mx.array,
-        top_k_ratio: Optional[float] = None,
-        reserved_sink_blocks: Optional[int] = None,
-        reserved_recent_blocks: Optional[int] = None,
+        top_k_ratio: float | None = None,
+        reserved_sink_blocks: int | None = None,
+        reserved_recent_blocks: int | None = None,
     ) -> tuple[mx.array, dict]:
         task_id = str(uuid.uuid4())
         t_start = time.monotonic()
@@ -369,31 +367,31 @@ class RFSNRuntime:
                 scale=1.0 / math.sqrt(D),
             )
             mx.eval(original_dense_output)
-            
+
             # Compute dense attention from working keys/values (after storage/retrieval)
             working_dense_output = mx.fast.scaled_dot_product_attention(
                 queries, keys, values,
                 scale=1.0 / math.sqrt(D),
             )
             mx.eval(working_dense_output)
-            
+
             # Quantization error: original dense vs working dense
             quant_audit_cosine = self._cosine_similarity(original_dense_output, working_dense_output)
             quant_audit_rel_mae = self._rel_mae(original_dense_output, working_dense_output)
             quant_audit_max_abs_error = self._max_abs_error(original_dense_output, working_dense_output)
-            
+
             # Sparsity error: working dense vs working sparse (if sparse succeeded)
             if sparse_success and sparse_output is not None:
                 sparse_audit_cosine = self._cosine_similarity(working_dense_output, sparse_output)
                 sparse_audit_rel_mae = self._rel_mae(working_dense_output, sparse_output)
                 sparse_audit_max_abs_error = self._max_abs_error(working_dense_output, sparse_output)
-                
+
                 # For telemetry, we'll report the sparsity error as the main audit metrics
                 # (this maintains backward compatibility with existing telemetry expectations)
                 audit_cosine = sparse_audit_cosine
                 audit_rel_mae = sparse_audit_rel_mae
                 audit_max_abs_error = sparse_audit_max_abs_error
-                
+
                 # We could also store quantization error in separate telemetry fields if needed
                 # For now, we're focusing on getting the basic split working
             else:
@@ -403,7 +401,7 @@ class RFSNRuntime:
                     audit_cosine = self._cosine_similarity(sparse_output, dense_output)
                     audit_rel_mae = self._rel_mae(sparse_output, dense_output)
                     audit_max_abs_error = self._max_abs_error(sparse_output, dense_output)
-        
+
         # Update adaptive sparsity controller if available and in audit mode
         if self.adaptive_sparsity_controller is not None and self.audit_mode:
             adaptive_decision = self.adaptive_sparsity_controller.update(

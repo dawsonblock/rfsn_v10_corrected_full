@@ -6,8 +6,6 @@ and default factory behaviour without requiring MLX.
 """
 from __future__ import annotations
 
-import os
-
 import pytest
 
 from rfsn_v10.config import (
@@ -21,7 +19,6 @@ from rfsn_v10.config import (
     load_config,
     set_config,
 )
-
 
 # ------------------------------------------------------------------
 # LoggingConfig

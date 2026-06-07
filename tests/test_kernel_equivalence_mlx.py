@@ -10,7 +10,6 @@ mx = pytest.importorskip("mlx.core")
 from rfsn_v10.kernels import apply_hash_signs_metal
 from rfsn_v10.kv_manager import RFSNTurboQuantKVManager
 
-
 REQUIRED_SHAPES = [
     (1, 4, 128, 64),
     (1, 8, 512, 64),

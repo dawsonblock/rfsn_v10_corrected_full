@@ -18,7 +18,6 @@ from rfsn_v10.quantization.layer_policy import (
     validate_layer_policy,
 )
 
-
 # ------------------------------------------------------------------
 # LayerPolicy tests
 # ------------------------------------------------------------------
@@ -270,14 +269,14 @@ class TestValidateLayerPolicy:
         assert len(negative_errors) == 1
         assert len(mode_errors) == 0
 
-    def test_bits_zero_skipped(self):
-        """bits=0 is falsy; implementation silently skips the check."""
+    def test_bits_zero_rejected(self):
+        """bits=0 is invalid and must be rejected."""
         policy = {
             "default": {"mode": "k8_v5_gs64", "bits": 0},
         }
         errors = validate_layer_policy(policy)
         bit_errors = [e for e in errors if "8-bit pack limit" in e]
-        assert len(bit_errors) == 0  # bits=0 silently ignored
+        assert len(bit_errors) == 1
 
     def test_bits_nine_rejected(self):
         """bits >= 9 should trigger an error about bit-packing."""
@@ -399,7 +398,7 @@ class TestLoadPolicy:
                 }
             )
         )
-        with pytest.raises(ValueError, match="layer_id"):
+        with pytest.raises(ValueError, match="Negative layer ID"):
             load_policy(str(path))
 
     def test_load_non_dict_layer_config_raises(self, tmp_path):

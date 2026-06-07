@@ -11,7 +11,6 @@ import pytest
 mx = pytest.importorskip("mlx.core")
 
 from rfsn_v10.quantization.grouped_cartesian import (
-    CartesianPacked,
     GroupedCartesianQuantizer,
     PackedCartesianCodes,
 )

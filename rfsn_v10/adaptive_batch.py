@@ -7,9 +7,7 @@ to optimize throughput and latency.
 
 from __future__ import annotations
 
-import math
 from dataclasses import dataclass
-from typing import Optional
 
 
 @dataclass
@@ -27,7 +25,7 @@ class AdaptiveBatchConfig:
 class AdaptiveBatchSizer:
     """Dynamically adjusts batch size based on performance."""
 
-    def __init__(self, config: Optional[AdaptiveBatchConfig] = None):
+    def __init__(self, config: AdaptiveBatchConfig | None = None):
         self.config = config or AdaptiveBatchConfig()
         self.current_batch_size = self.config.initial_batch_size
         self.latency_history: list[float] = []
@@ -109,7 +107,7 @@ class PerformancePredictor:
         if len(self.history) > self.window_size:
             self.history = self.history[-self.window_size:]
 
-    def predict_latency(self, batch_size: int) -> Optional[float]:
+    def predict_latency(self, batch_size: int) -> float | None:
         """Predict latency for a given batch size."""
         if not self.history:
             return None
@@ -131,7 +129,7 @@ class PerformancePredictor:
         predicted = slope * batch_size + intercept
         return max(0.0, predicted)
 
-    def recommend_batch_size(self, target_latency_ms: float) -> Optional[int]:
+    def recommend_batch_size(self, target_latency_ms: float) -> int | None:
         """Recommend batch size for target latency."""
         if not self.history:
             return None

@@ -6,24 +6,21 @@ and error handler aggregation without external dependencies.
 """
 from __future__ import annotations
 
-import pytest
-
 from rfsn_v10.errors import (
+    AttentionException,
     ErrorCode,
     ErrorHandler,
     ErrorSeverity,
-    RFSNError,
-    RFSNException,
-    AttentionException,
-    KVCacheException,
     KernelException,
+    KVCacheException,
     MemoryException,
     PersistenceException,
+    RFSNError,
+    RFSNException,
     ValidationException,
     get_error_handler,
     handle_error,
 )
-
 
 # ------------------------------------------------------------------
 # ErrorCode & ErrorSeverity

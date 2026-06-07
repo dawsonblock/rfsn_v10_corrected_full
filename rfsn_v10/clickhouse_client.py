@@ -8,15 +8,14 @@ Assumes tables are pre-created via DDL scripts.
 from __future__ import annotations
 
 import json
-import time
-from typing import List, Dict, Any, Optional
-from urllib import request, parse, error
+from typing import Any
+from urllib import error, request
 
 
 class ClickHouseClient:
     """
     HTTP-based ClickHouse client for telemetry ingestion.
-    
+
     Features:
     - Simple POST-based inserts
     - JSON format for telemetry events
@@ -31,7 +30,7 @@ class ClickHouseClient:
         "rfsn_failures",
         "rfsn_sparsity_profiles",
     }
-    
+
     def __init__(
         self,
         host: str = "localhost",
@@ -59,18 +58,18 @@ class ClickHouseClient:
         self.database = database
         self.secure = secure
         self.create_tables = create_tables
-        
+
         self._base_url = f"{'https' if secure else 'http'}://{host}:{port}"
         self._session = None  # Could reuse urllib opener for connection pooling
-        
+
         if create_tables:
             self._create_tables_if_not_exist()
-    
+
     def _get_url(self, endpoint: str = "") -> str:
         """Construct full URL for ClickHouse HTTP interface."""
         return f"{self._base_url}/{endpoint.lstrip('/')}"
-    
-    def _execute_query(self, query: str, params: Optional[Dict[str, Any]] = None) -> None:
+
+    def _execute_query(self, query: str, params: dict[str, Any] | None = None) -> None:
         """Execute a ClickHouse query via HTTP POST."""
         data = query.encode('utf-8')
         req = request.Request(
@@ -82,7 +81,7 @@ class ClickHouseClient:
                 'X-ClickHouse-Key': self.password,
             }
         )
-        
+
         try:
             with request.urlopen(req, timeout=10) as response:
                 if response.status != 200:
@@ -91,7 +90,7 @@ class ClickHouseClient:
             raise RuntimeError(f"Failed to connect to ClickHouse: {e.reason}") from e
         except Exception as e:
             raise RuntimeError(f"ClickHouse query failed: {e}") from e
-    
+
     def _create_tables_if_not_exist(self) -> None:
         """Create telemetry tables if they don't exist."""
         tables = {
@@ -204,7 +203,7 @@ class ClickHouseClient:
                 SETTINGS index_granularity = 8192
             """
         }
-        
+
         for table_name, ddl in tables.items():
             try:
                 self._execute_query(ddl)
@@ -212,17 +211,17 @@ class ClickHouseClient:
                 # Log but don't fail - table might already exist or permissions issue
                 import warnings
                 warnings.warn(f"Could not create table {table_name}: {e}")
-    
-    def write_telemetry_batch(self, events: List[Dict[str, Any]]) -> None:
+
+    def write_telemetry_batch(self, events: list[dict[str, Any]]) -> None:
         """
         Write a batch of telemetry events to ClickHouse.
-        
+
         Args:
             events: List of telemetry event dictionaries.
         """
         self.write_attention_events(events)
 
-    def _write_events(self, table: str, events: List[Dict[str, Any]]) -> None:
+    def _write_events(self, table: str, events: list[dict[str, Any]]) -> None:
         if table not in self.ALLOWED_TABLES:
             raise ValueError(f"Table is not allowed for writes: {table}")
         if not events:
@@ -235,26 +234,26 @@ class ClickHouseClient:
         query = f"INSERT INTO {table} FORMAT JSONEachRow\n" + payload
         self._execute_query(query)
 
-    def write_attention_events(self, events: List[Dict[str, Any]]) -> None:
+    def write_attention_events(self, events: list[dict[str, Any]]) -> None:
         self._write_events("rfsn_attention_events", events)
 
-    def write_kv_cache_events(self, events: List[Dict[str, Any]]) -> None:
+    def write_kv_cache_events(self, events: list[dict[str, Any]]) -> None:
         self._write_events("rfsn_kv_cache_events", events)
 
-    def write_audit_events(self, events: List[Dict[str, Any]]) -> None:
+    def write_audit_events(self, events: list[dict[str, Any]]) -> None:
         self._write_events("rfsn_audit_events", events)
 
-    def write_failure_events(self, events: List[Dict[str, Any]]) -> None:
+    def write_failure_events(self, events: list[dict[str, Any]]) -> None:
         self._write_events("rfsn_failures", events)
 
-    def write_sparsity_profile_events(self, events: List[Dict[str, Any]]) -> None:
+    def write_sparsity_profile_events(self, events: list[dict[str, Any]]) -> None:
         self._write_events("rfsn_sparsity_profiles", events)
-    
+
     def close(self) -> None:
         """Close the client and cleanup resources."""
         # Nothing to close for HTTP client, but keep for interface consistency
         pass
-    
+
     def ping(self) -> bool:
         """Check if ClickHouse is reachable."""
         try:

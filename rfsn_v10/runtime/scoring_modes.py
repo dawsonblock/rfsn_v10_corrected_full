@@ -137,11 +137,79 @@ def score_attention_packed_block(
     return score_attention_fp16(queries, keys, values, scale=scale)
 
 
+def score_attention_quantized_metal(
+    queries: mx.array,
+    packed_k: mx.array,
+    packed_v: mx.array,
+    scales_k: mx.array,
+    scales_v: mx.array,
+    n_keys: int,
+    bits: int,
+    group_size: int = 64,
+    scale: float | None = None,
+) -> mx.array:
+    """Fused quantized attention via Metal kernel (decode-step only).
+
+    Args:
+        queries:   [B, H, 1, D] or [H, D] single query token.
+        packed_k:  [H, K_words] uint32 packed key codes.
+        packed_v:  [H, V_words] uint32 packed value codes.
+        scales_k:  [H, K_groups] float32 key scales.
+        scales_v:  [H, V_groups] float32 value scales.
+        n_keys:    Number of key positions (T_k).
+        bits:      Bit width (2-8).
+        group_size: Quant group size.
+        scale:     Attention scale.
+
+    Returns:
+        [B, H, 1, D] attention output.
+    """
+    from ..kernels import quantized_attention_decode_metal
+
+    # Support [B, H, 1, D] by squeezing / unsqueezing
+    orig_shape = queries.shape
+    if queries.ndim == 4:
+        queries = queries[:, :, 0, :]  # [B, H, D]
+        # Flatten batch+heads for the kernel
+        bsz, n_h, d_head = queries.shape
+        queries = queries.reshape(bsz * n_h, d_head)
+    elif queries.ndim == 3:
+        queries = queries[:, 0, :]  # [B, D]
+        bsz, d_head = queries.shape
+        queries = queries.reshape(bsz, d_head)
+    else:
+        bsz = 1
+
+    out = quantized_attention_decode_metal(
+        queries=queries,
+        packed_k=packed_k,
+        packed_v=packed_v,
+        scales_k=scales_k,
+        scales_v=scales_v,
+        n_keys=n_keys,
+        bits=bits,
+        group_size=group_size,
+        scale=scale,
+    )
+
+    if len(orig_shape) == 4:
+        bsz = orig_shape[0]
+        n_h = orig_shape[1]
+        d_head = orig_shape[3]
+        out = out.reshape(bsz, n_h, 1, d_head)
+    elif len(orig_shape) == 3:
+        bsz = orig_shape[0]
+        d_head = orig_shape[2]
+        out = out.reshape(bsz, 1, d_head)
+    return out
+
+
 def score_attention_score_corrected(
     queries: mx.array,
     keys_packet: Any,
     values_packet: Any,
     correction_fn: Callable[..., mx.array] | None = None,
+    scale: float = 1.0,
     **kwargs: Any,
 ) -> mx.array:
     """QJL or residual score correction path.
@@ -153,6 +221,7 @@ def score_attention_score_corrected(
         correction_fn: callable that takes
                        ``(queries, keys_packet, **kwargs)`` and returns
                        corrected scores of shape ``[B, H, T_q, T_k]``.
+        scale:         scalar applied to scores before softmax.
         **kwargs:      forwarded to *correction_fn*.
 
     Raises:
@@ -162,7 +231,7 @@ def score_attention_score_corrected(
         raise ValueError(
             "score_attention_score_corrected requires correction_fn"
         )
-    scores = correction_fn(queries, keys_packet, **kwargs)
+    scores = correction_fn(queries, keys_packet, **kwargs) * scale
     # Stable softmax
     scores = scores - mx.max(scores, axis=-1, keepdims=True)
     weights = mx.exp(scores)

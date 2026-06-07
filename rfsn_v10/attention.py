@@ -18,10 +18,9 @@ causal masking. This module is designed for decode, not prefill.
 from __future__ import annotations
 
 import math
-from typing import Literal, Optional, Tuple
+from typing import Literal
 
 from .compat import mx
-
 from .memory_guard import MemoryGuard
 
 ExecutionMode = Literal[
@@ -63,8 +62,8 @@ class AdaptiveBlockSparseAttention:
         top_k_ratio: float,
         block_size: int,
         consensus_mix: float,
-        memory_guard: Optional[MemoryGuard] = None,
-    ) -> Tuple[int, int, int, int, int]:
+        memory_guard: MemoryGuard | None = None,
+    ) -> tuple[int, int, int, int, int]:
         if len(queries.shape) != 4:
             raise ValueError(f"queries must be [B,H,T_q,D], got {queries.shape}")
         if len(keys.shape) != 4:
@@ -117,7 +116,7 @@ class AdaptiveBlockSparseAttention:
         scale: float,
         block_size: int,
         mode: str,
-    ) -> Tuple[mx.array, int, str]:
+    ) -> tuple[mx.array, int, str]:
         T_k = keys.shape[2]
         num_blocks = max(1, AdaptiveBlockSparseAttention._ceil_div(T_k, block_size))
         out = mx.fast.scaled_dot_product_attention(
@@ -189,8 +188,8 @@ class AdaptiveBlockSparseAttention:
         allow_budget_overflow: bool = False,
         recent_bias: float = 0.05,
         sink_bias: float = 0.10,
-        memory_guard: Optional[MemoryGuard] = None,
-    ) -> Tuple[mx.array, int, ExecutionMode]:
+        memory_guard: MemoryGuard | None = None,
+    ) -> tuple[mx.array, int, ExecutionMode]:
         """
         Execute hardware-aware block-sparse scaled dot-product attention.
 

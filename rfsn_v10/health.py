@@ -7,9 +7,10 @@ Provides health status monitoring and readiness checks for production deployment
 from __future__ import annotations
 
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Callable, Optional, Dict
+from typing import Any
 
 
 class HealthStatus(Enum):
@@ -44,14 +45,14 @@ class HealthChecker:
     """Health check manager."""
 
     def __init__(self):
-        self.checks: Dict[str, Callable[[], HealthCheckResult]] = {}
-        self.last_results: Dict[str, HealthCheckResult] = {}
+        self.checks: dict[str, Callable[[], HealthCheckResult]] = {}
+        self.last_results: dict[str, HealthCheckResult] = {}
 
     def register(self, name: str, check_func: Callable[[], HealthCheckResult]) -> None:
         """Register a health check."""
         self.checks[name] = check_func
 
-    def run_check(self, name: str) -> Optional[HealthCheckResult]:
+    def run_check(self, name: str) -> HealthCheckResult | None:
         """Run a specific health check."""
         if name not in self.checks:
             return None
@@ -70,7 +71,7 @@ class HealthChecker:
             self.last_results[name] = result
             return result
 
-    def run_all_checks(self) -> Dict[str, HealthCheckResult]:
+    def run_all_checks(self) -> dict[str, HealthCheckResult]:
         """Run all registered health checks."""
         results = {}
         for name in self.checks:
@@ -91,7 +92,7 @@ class HealthChecker:
         else:
             return HealthStatus.DEGRADED
 
-    def get_health_report(self) -> Dict[str, Any]:
+    def get_health_report(self) -> dict[str, Any]:
         """Get comprehensive health report."""
         return {
             "overall_status": self.get_overall_status().value,
@@ -211,7 +212,7 @@ def check_disk_space(cache_dir: str, threshold_gb: float = 1.0) -> HealthCheckRe
         )
 
 
-def setup_default_health_checker(cache_dir: Optional[str] = None) -> HealthChecker:
+def setup_default_health_checker(cache_dir: str | None = None) -> HealthChecker:
     """Setup health checker with default checks."""
     checker = HealthChecker()
 
@@ -223,10 +224,10 @@ def setup_default_health_checker(cache_dir: Optional[str] = None) -> HealthCheck
 
 
 # Singleton instance
-_health_checker: Optional[HealthChecker] = None
+_health_checker: HealthChecker | None = None
 
 
-def get_health_checker(cache_dir: Optional[str] = None) -> HealthChecker:
+def get_health_checker(cache_dir: str | None = None) -> HealthChecker:
     """Get the global health checker instance."""
     global _health_checker
     if _health_checker is None:

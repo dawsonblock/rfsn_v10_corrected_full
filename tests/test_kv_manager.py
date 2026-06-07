@@ -11,7 +11,7 @@ import pytest
 
 mx = pytest.importorskip("mlx.core")
 
-from rfsn_v10.kv_manager import RFSNTurboQuantKVManager, TurboQuantKVCache
+from rfsn_v10.kv_manager import RFSNTurboQuantKVManager
 
 
 def cosine_similarity(a: mx.array, b: mx.array) -> float:

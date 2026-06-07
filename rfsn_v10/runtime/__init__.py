@@ -34,13 +34,6 @@ AdaptiveBlockSparseAttention = _runtime_original.AdaptiveBlockSparseAttention
 # ---------------------------------------------------------------------------
 # Experimental runtime exports
 # ---------------------------------------------------------------------------
-from .scoring_modes import (
-    score_attention_fp16,
-    score_attention_packed_block,
-    score_attention_prepared,
-    score_attention_reconstructed,
-    score_attention_score_corrected,
-)
 from .audit import (
     AuditEvent,
     AuditMetrics,
@@ -53,6 +46,13 @@ from .experimental_quant_runtime import (
     ExperimentalQuantState,
     LayerQuantPolicy,
     QuantTelemetryEvent,
+)
+from .scoring_modes import (
+    score_attention_fp16,
+    score_attention_packed_block,
+    score_attention_prepared,
+    score_attention_reconstructed,
+    score_attention_score_corrected,
 )
 
 __all__ = [

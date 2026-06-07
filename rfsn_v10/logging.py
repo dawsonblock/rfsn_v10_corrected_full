@@ -7,12 +7,12 @@ and integration with error handling.
 
 from __future__ import annotations
 
-import logging
 import json
+import logging
 import sys
 from datetime import datetime
-from typing import Any, Optional
 from pathlib import Path
+from typing import Any
 
 
 class JSONFormatter(logging.Formatter):
@@ -45,7 +45,7 @@ class RFSNLogger:
         self,
         name: str = "rfsn",
         level: int = logging.INFO,
-        log_file: Optional[str] = None,
+        log_file: str | None = None,
         enable_json: bool = True,
     ):
         self.logger = logging.getLogger(name)
@@ -79,7 +79,7 @@ class RFSNLogger:
         self,
         level: int,
         message: str,
-        context: Optional[dict[str, Any]] = None,
+        context: dict[str, Any] | None = None,
     ) -> None:
         """Log a message with optional context."""
         if context:
@@ -88,30 +88,30 @@ class RFSNLogger:
         else:
             self.logger.log(level, message)
 
-    def debug(self, message: str, context: Optional[dict[str, Any]] = None) -> None:
+    def debug(self, message: str, context: dict[str, Any] | None = None) -> None:
         """Log debug message."""
         self._log(logging.DEBUG, message, context)
 
-    def info(self, message: str, context: Optional[dict[str, Any]] = None) -> None:
+    def info(self, message: str, context: dict[str, Any] | None = None) -> None:
         """Log info message."""
         self._log(logging.INFO, message, context)
 
-    def warning(self, message: str, context: Optional[dict[str, Any]] = None) -> None:
+    def warning(self, message: str, context: dict[str, Any] | None = None) -> None:
         """Log warning message."""
         self._log(logging.WARNING, message, context)
 
-    def error(self, message: str, context: Optional[dict[str, Any]] = None) -> None:
+    def error(self, message: str, context: dict[str, Any] | None = None) -> None:
         """Log error message."""
         self._log(logging.ERROR, message, context)
 
-    def critical(self, message: str, context: Optional[dict[str, Any]] = None) -> None:
+    def critical(self, message: str, context: dict[str, Any] | None = None) -> None:
         """Log critical message."""
         self._log(logging.CRITICAL, message, context)
 
     def exception(
         self,
         message: str,
-        context: Optional[dict[str, Any]] = None,
+        context: dict[str, Any] | None = None,
         exc_info: Any = None,
     ) -> None:
         """Log exception with traceback."""
@@ -125,7 +125,7 @@ _loggers: dict[str, RFSNLogger] = {}
 def get_logger(
     name: str = "rfsn",
     level: int = logging.INFO,
-    log_file: Optional[str] = None,
+    log_file: str | None = None,
     enable_json: bool = True,
 ) -> RFSNLogger:
     """Get or create a logger instance."""
@@ -145,7 +145,7 @@ class MetricsLogger:
         self,
         name: str,
         value: float,
-        tags: Optional[dict[str, str]] = None,
+        tags: dict[str, str] | None = None,
     ) -> None:
         """Log a metric."""
         context = {"metric_name": name, "metric_value": value}
@@ -157,7 +157,7 @@ class MetricsLogger:
         self,
         name: str,
         increment: int = 1,
-        tags: Optional[dict[str, str]] = None,
+        tags: dict[str, str] | None = None,
     ) -> None:
         """Log a counter increment."""
         context = {"counter_name": name, "increment": increment}
@@ -169,7 +169,7 @@ class MetricsLogger:
         self,
         name: str,
         value: float,
-        tags: Optional[dict[str, str]] = None,
+        tags: dict[str, str] | None = None,
     ) -> None:
         """Log a histogram value."""
         context = {"histogram_name": name, "value": value}
@@ -180,7 +180,7 @@ class MetricsLogger:
 
 def setup_logging(
     level: str = "INFO",
-    log_file: Optional[str] = None,
+    log_file: str | None = None,
     enable_json: bool = True,
 ) -> RFSNLogger:
     """Setup global logging configuration."""

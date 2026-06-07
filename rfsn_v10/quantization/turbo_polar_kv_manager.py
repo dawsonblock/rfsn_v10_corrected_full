@@ -12,7 +12,7 @@ class TurboPolarKVManager:
         self,
         feature_dim: int = 64,
         k_angle_bits: int = 8,
-        k_radius_bits: int = 9,
+        k_radius_bits: int = 8,
         v_bits: int = 7,
         group_size: int = 64,
         adaptive_angle_range: bool = False,

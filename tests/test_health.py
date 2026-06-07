@@ -6,8 +6,6 @@ health check behaviour without requiring MLX or external services.
 """
 from __future__ import annotations
 
-import pytest
-
 from rfsn_v10.health import (
     HealthChecker,
     HealthCheckResult,
@@ -17,7 +15,6 @@ from rfsn_v10.health import (
     get_health_checker,
     setup_default_health_checker,
 )
-
 
 # ------------------------------------------------------------------
 # HealthStatus

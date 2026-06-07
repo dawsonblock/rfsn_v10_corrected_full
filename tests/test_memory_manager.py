@@ -8,8 +8,6 @@ from __future__ import annotations
 
 import time
 
-import pytest
-
 from rfsn_v10.memory_manager import (
     MemoryAllocation,
     MemoryLeakDetector,
@@ -19,7 +17,6 @@ from rfsn_v10.memory_manager import (
     PredictiveEvictionPolicy,
     TenantId,
 )
-
 
 # ------------------------------------------------------------------
 # TenantId & MemoryRegion
