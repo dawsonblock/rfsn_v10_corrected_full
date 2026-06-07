@@ -1,6 +1,6 @@
-# RFSN v10 — Beta Build
+# RFSN v10 Main 28 — Beta Build
 
-## Status
+## Status: RFSN v10 Main 28
 
 **Beta candidate.** Telemetry tickets reconciled, production inference server
 (FastAPI + SSE) implemented, compile + packaging + CPU gates passing.
@@ -27,6 +27,9 @@ python scripts/release_gate.py --cpu-only        # must print: Gate: 9 passed, 0
 | End-to-end speedup | Not proven — decode TPS comparable, compression overhead makes total slower at short contexts |
 | Production deployment | **FastAPI server** — `/v1/chat/completions` with SSE streaming |
 | Docker | HTTP service on port 8000 + ClickHouse telemetry |
+| >8-bit compression | Uses raw uint32 fallback — bit-packing is real for 2-8 bit only |
+| Experimental Metal | No Metal kernels exist for the experimental quantization paths |
+| Experimental throughput | No experimental throughput speedup is proven |
 
 ---
 
