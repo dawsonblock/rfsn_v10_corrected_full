@@ -19,9 +19,9 @@ This document contains ruthlessly concrete executable tickets derived from the r
 | 4 | Secure Telemetry | 🔴 ACTIVE | 4 | 4-1, 4-2, 4-3, 4-4 |
 | 5 | Real Tests + Coverage | 🟢 DONE | 4 | None |
 | 6 | Benchmarks | 🟢 DONE | 2 | None |
-| 7 | House-Cleaning | 🟡 VERIFY | 3 | 7-1, 7-2, 7-3 |
+| 7 | House-Cleaning | 🟢 DONE | 3 | None |
 
-**Legend**: 🟢 Done | 🟡 Verify/Audit | 🔴 Active | ⚪ Not Started
+**Legend**: 🟢 Done | 🟡 Verify/Audit | 🔴 Active | ⚪ Not Started | 🚫 Wontfix
 
 ---
 
@@ -292,7 +292,7 @@ cat pyproject.toml | grep -E "requires-python|numpy|mlx|torch"
 - **Owner**: DevOps
 - **Estimate**: 3h
 - **Priority**: P1
-- **Status**: � WONTFIX / SUPERSEDED
+- **Status**: 🟢 WONTFIX / SUPERSEDED
 
 **Description**:  
 Replace shell scripts with Poetry tasks. Remove Homebrew installs from CI.
@@ -318,7 +318,7 @@ Replace shell scripts with Poetry tasks. Remove Homebrew installs from CI.
 - **Owner**: Backend
 - **Estimate**: 3h
 - **Priority**: P0 (Security)
-- **Status**: � COMPLETE
+- **Status**: 🟢 COMPLETE
 
 **Description**:  
 Secure ClickHouse telemetry with HTTPS and custom authentication header.
@@ -351,7 +351,7 @@ pytest tests/test_clickhouse_security.py -v  # passes
 - **Owner**: Backend
 - **Estimate**: 2h
 - **Priority**: P0 (Security)
-- **Status**: � COMPLETE
+- **Status**: 🟢 COMPLETE
 
 **Description**:  
 Hash user prompts before database insert. Never store raw text.
@@ -384,7 +384,7 @@ pytest tests/test_clickhouse_security.py::TestPromptHashing -v  # passes
 - **Owner**: Backend
 - **Estimate**: 4h
 - **Priority**: P0 (Reliability)
-- **Status**: � COMPLETE
+- **Status**: 🟢 COMPLETE
 
 **Description**:  
 Implement retry queue with exponential backoff and graceful shutdown handling.
@@ -635,7 +635,7 @@ git ls-files | grep -E "\.(pyc|pyo)$"  # Should be empty
 - **Owner**: Backend
 - **Estimate**: 3h
 - **Priority**: P1
-- **Status**: � COMPLETE
+- **Status**: 🟢 COMPLETE
 
 **Description**:  
 Single Pydantic-validated config file. Unknown keys raise `ValidationError`.

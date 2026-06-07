@@ -5,7 +5,7 @@ owner: Backend
 estimate: 3h
 priority: P0
 epic: Week 4 - Secure Telemetry
-status: active
+status: complete
 created: 2026-06-07
 labels: [security, telemetry, clickhouse, tls, p0]
 ---

@@ -17,6 +17,9 @@ mx = pytest.importorskip("mlx.core")
 np = pytest.importorskip("numpy")
 torch = pytest.importorskip("torch")
 transformers = pytest.importorskip("transformers")
+# Guard against transformers being installed without torch backend available
+if not transformers.utils.import_utils.is_torch_available():
+    pytest.skip("transformers installed but torch backend not available", allow_module_level=True)
 from transformers import AutoModelForCausalLM, AutoTokenizer  # noqa: E402
 from transformers.cache_utils import DynamicCache  # noqa: E402
 

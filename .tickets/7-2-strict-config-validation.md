@@ -5,7 +5,7 @@ owner: Backend
 estimate: 3h
 priority: P1
 epic: Week 7 - House-Cleaning
-status: not-started
+status: complete
 created: 2026-06-07
 labels: [config, pydantic, validation, p1]
 ---

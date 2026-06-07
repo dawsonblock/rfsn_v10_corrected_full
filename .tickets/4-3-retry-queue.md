@@ -5,7 +5,7 @@ owner: Backend
 estimate: 4h
 priority: P0
 epic: Week 4 - Secure Telemetry
-status: active
+status: complete
 created: 2026-06-07
 labels: [reliability, telemetry, queue, kubernetes, p0]
 ---
