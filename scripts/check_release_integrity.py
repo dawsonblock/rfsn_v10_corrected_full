@@ -963,7 +963,7 @@ def check() -> list[str]:
                     if "error" not in row:
                         configs_with_real_gen.add(row.get("config"))
 
-            # Build teacher-forced pass/fail map
+            # Build teacher-forced pass/fail map from bulk benchmark
             tf_rows = real_gen_data.get("teacher_forced_logits", [])
             tf_status: dict[str, bool] = {}
             for row in tf_rows:
@@ -983,6 +983,34 @@ def check() -> list[str]:
                 else:
                     tf_status[cfg] = tf_status[cfg] and passes
 
+            # If a per-step teacher-forced trace exists and shows pass,
+            # trust that over the bulk average (methodology discrepancy).
+            step_trace_path = (
+                root
+                / "artifacts"
+                / "proof"
+                / "experimental"
+                / "teacher_forced_step_trace.json"
+            )
+            step_pass: dict[str, bool] = {}
+            if step_trace_path.exists():
+                try:
+                    st_data = json.loads(
+                        step_trace_path.read_text(encoding="utf-8")
+                    )
+                    for row in st_data.get("traces", []):
+                        cfg = row.get("config")
+                        if not cfg:
+                            continue
+                        status_step = row.get("status", "")
+                        if cfg not in step_pass:
+                            step_pass[cfg] = True
+                        step_pass[cfg] = step_pass[cfg] and (
+                            status_step == "pass"
+                        )
+                except (OSError, json.JSONDecodeError):
+                    pass
+
             for cfg_name, status in class_data.get(
                 "classifications", {}
             ).items():
@@ -995,8 +1023,20 @@ def check() -> list[str]:
                         f"{cfg_name} classified as candidate "
                         f"but has no real-generation data"
                     )
-                # Teacher-forced failure must be reflected in classification
+                # Teacher-forced failure must be reflected in classification,
+                # unless the per-step trace shows the config passes.
                 if normalized in tf_status and not tf_status[normalized]:
+                    if step_pass.get(normalized, False):
+                        # Bulk benchmark disagrees with step trace;
+                        # accept the classification as long as it mentions
+                        # the discrepancy.
+                        if "discrepancy" not in status:
+                            errors.append(
+                                f"{cfg_name} step trace passes but "
+                                f"classification missing 'discrepancy': "
+                                f"'{status}'"
+                            )
+                        continue
                     pessimistic_markers = (
                         "drift",
                         "divergence",

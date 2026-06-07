@@ -4,36 +4,14 @@ Provides experimental scoring modes, quality audit, and quant runtime
 integration layers that wrap :class:`RFSNTurboQuantKVManager` without
 mutating existing production code paths.
 
-Also re-exports the stable production runtime from ``rfsn_v10/runtime.py``.
-Because a ``runtime/`` package shadows the sibling ``runtime.py`` module,
-we load the original module explicitly via ``importlib.util``.
+The stable production runtime lives in the sibling ``rfsn_v10/runtime.py``
+module.  It is **not** re-exported here so that importing submodules of
+``rfsn_v10.runtime`` (e.g. ``adaptive_controller``) does not force an
+MLX import on non-MLX systems.
 """
 
 from __future__ import annotations
 
-import importlib.util
-import sys
-from pathlib import Path
-
-# ---------------------------------------------------------------------------
-# Load the original rfsn_v10/runtime.py module (shadowed by this package)
-# ---------------------------------------------------------------------------
-_runtime_py = Path(__file__).parent.with_name("runtime.py")
-_spec = importlib.util.spec_from_file_location(
-    "rfsn_v10._runtime_original", _runtime_py
-)
-if _spec is None or _spec.loader is None:
-    raise ImportError("Cannot find rfsn_v10/runtime.py")
-_runtime_original = importlib.util.module_from_spec(_spec)
-sys.modules["rfsn_v10._runtime_original"] = _runtime_original
-_spec.loader.exec_module(_runtime_original)
-RFSNRuntime = _runtime_original.RFSNRuntime
-TelemetryEvent = _runtime_original.TelemetryEvent
-AdaptiveBlockSparseAttention = _runtime_original.AdaptiveBlockSparseAttention
-
-# ---------------------------------------------------------------------------
-# Experimental runtime exports
-# ---------------------------------------------------------------------------
 from .audit import (
     AuditEvent,
     AuditMetrics,
@@ -56,9 +34,6 @@ from .scoring_modes import (
 )
 
 __all__ = [
-    # stable runtime (loaded from runtime.py)
-    "RFSNRuntime",
-    "TelemetryEvent",
     # scoring_modes
     "score_attention_fp16",
     "score_attention_reconstructed",

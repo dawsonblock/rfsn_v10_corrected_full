@@ -8,9 +8,9 @@ import pytest
 
 mx = pytest.importorskip("mlx.core")
 
-import rfsn_v10.runtime as runtime_module
+from rfsn_v10.attention import AdaptiveBlockSparseAttention
 from rfsn_v10.kv_manager import RFSNTurboQuantKVManager
-from rfsn_v10.runtime import RFSNRuntime
+from rfsn_v10 import RFSNRuntime
 
 
 @pytest.fixture
@@ -282,7 +282,7 @@ def test_runtime_use_compressed_on_miss_assigns_retrieved_kv(kv_manager, monkeyp
 
     monkeypatch.setattr(kv_manager, "retrieve", fake_retrieve)
     monkeypatch.setattr(kv_manager, "store", fake_store)
-    monkeypatch.setattr(runtime_module.AdaptiveBlockSparseAttention, "execute", fake_execute)
+    monkeypatch.setattr(AdaptiveBlockSparseAttention, "execute", fake_execute)
 
     _, info = runtime.execute_decode_step(
         skill_pattern="compressed_miss",
