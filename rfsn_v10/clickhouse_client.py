@@ -2,25 +2,32 @@
 """
 RFSN v10 - ClickHouse Client for Telemetry.
 
-Simple HTTP-based client for writing telemetry batches to ClickHouse.
-Assumes tables are pre-created via DDL scripts.
+HTTPS-only HTTP-based client for writing telemetry batches to ClickHouse.
+Prompt text is SHA-256 hashed before transmission; raw text never leaves
+the process boundary.
 """
 from __future__ import annotations
 
+import atexit
+import hashlib
 import json
+import os
+import signal
+import time
+import warnings
 from typing import Any
 from urllib import error, request
 
 
 class ClickHouseClient:
-    """
-    HTTP-based ClickHouse client for telemetry ingestion.
+    """HTTPS ClickHouse client with token auth,
+    prompt hashing, and retry queue.
 
     Features:
-    - Simple POST-based inserts
-    - JSON format for telemetry events
-    - Automatic table creation (if enabled)
-    - Basic error handling and retries
+    - HTTPS-only (raises if HTTP is used over non-localhost)
+    - Token-based auth via ``RFSN-Auth`` header
+    - SHA-256 prompt hashing before serialization
+    - Exponential-backoff retry queue with SIGTERM flush to disk
     """
 
     ALLOWED_TABLES = {
@@ -31,6 +38,9 @@ class ClickHouseClient:
         "rfsn_sparsity_profiles",
     }
 
+    _SENSITIVE_KEYS = {"prompt", "text", "input_text", "user_message"}
+    _FLUSH_PATH = "/tmp/rfsn_telemetry_flush.jsonl"
+
     def __init__(
         self,
         host: str = "localhost",
@@ -38,17 +48,20 @@ class ClickHouseClient:
         username: str = "default",
         password: str = "",
         database: str = "default",
-        secure: bool = False,
+        secure: bool = True,
+        auth_token: str = "",
         create_tables: bool = False,
     ):
         """
         Args:
             host: ClickHouse server hostname.
-            port: ClickHouse HTTP port (usually 8123).
+            port: ClickHouse HTTP port (usually 8443 for HTTPS).
             username: ClickHouse username.
             password: ClickHouse password.
             database: Target database.
-            secure: Use HTTPS if True.
+            secure: Use HTTPS (default True).  HTTP is only allowed when
+                host is ``localhost``.
+            auth_token: Bearer token sent as ``RFSN-Auth`` header.
             create_tables: If True, attempt to create tables on init.
         """
         self.host = host
@@ -57,39 +70,119 @@ class ClickHouseClient:
         self.password = password
         self.database = database
         self.secure = secure
+        self.auth_token = auth_token
         self.create_tables = create_tables
 
+        if not secure and host not in ("localhost", "127.0.0.1"):
+            raise ValueError(
+                "HTTP is only allowed for localhost. "
+                "Set secure=True for remote hosts."
+            )
+
         self._base_url = f"{'https' if secure else 'http'}://{host}:{port}"
-        self._session = None  # Could reuse urllib opener for connection pooling
+        self._pending_queue: list[dict[str, Any]] = []
+        self._max_retries = 5
+        self._flush_interval = 1.0
+
+        # Register SIGTERM handler to flush queue to disk
+        self._register_flush_handlers()
+        # Replay any previously flushed events
+        self._replay_flushed_events()
 
         if create_tables:
             self._create_tables_if_not_exist()
+
+    def _register_flush_handlers(self) -> None:
+        """Register atexit and SIGTERM handlers for queue flush."""
+        atexit.register(self._flush_queue_to_disk)
+        try:
+            signal.signal(signal.SIGTERM, self._sigterm_handler)
+        except (ValueError, OSError):
+            pass  # May fail in threads or restricted environments
+
+    def _sigterm_handler(self, _signum, _frame) -> None:
+        self._flush_queue_to_disk()
+
+    def _flush_queue_to_disk(self) -> None:
+        """Write pending queue to local JSONL file."""
+        if not self._pending_queue:
+            return
+        try:
+            with open(self._FLUSH_PATH, "a", encoding="utf-8") as f:
+                for event in self._pending_queue:
+                    f.write(json.dumps(event, default=str) + "\n")
+            self._pending_queue.clear()
+        except OSError:
+            pass
+
+    def _replay_flushed_events(self) -> None:
+        """Read previously flushed events and add them to the queue."""
+        if not os.path.exists(self._FLUSH_PATH):
+            return
+        try:
+            with open(self._FLUSH_PATH, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if line:
+                        self._pending_queue.append(json.loads(line))
+            os.remove(self._FLUSH_PATH)
+        except (OSError, json.JSONDecodeError):
+            pass
+
+    @staticmethod
+    def _hash_sensitive_values(event: dict[str, Any]) -> dict[str, Any]:
+        """Replace prompt/text fields with SHA-256 hashes + length metadata."""
+        result = {}
+        for key, value in event.items():
+            if key in ClickHouseClient._SENSITIVE_KEYS and isinstance(
+                value, str
+            ):
+                result[key] = hashlib.sha256(
+                    value.encode("utf-8")
+                ).hexdigest()
+                result[f"{key}_length"] = len(value)
+            else:
+                result[key] = value
+        return result
 
     def _get_url(self, endpoint: str = "") -> str:
         """Construct full URL for ClickHouse HTTP interface."""
         return f"{self._base_url}/{endpoint.lstrip('/')}"
 
-    def _execute_query(self, query: str, params: dict[str, Any] | None = None) -> None:
-        """Execute a ClickHouse query via HTTP POST."""
-        data = query.encode('utf-8')
+    def _execute_query(
+        self, query: str, params: dict[str, Any] | None = None
+    ) -> None:
+        """Execute a ClickHouse query via HTTPS POST with token auth."""
+        data = query.encode("utf-8")
+        headers = {
+            "Content-Type": "text/plain",
+            "X-ClickHouse-User": self.username,
+            "X-ClickHouse-Key": self.password,
+        }
+        if self.auth_token:
+            headers["RFSN-Auth"] = self.auth_token
+
         req = request.Request(
             self._get_url(),
             data=data,
-            headers={
-                'Content-Type': 'text/plain',
-                'X-ClickHouse-User': self.username,
-                'X-ClickHouse-Key': self.password,
-            }
+            headers=headers,
         )
 
         try:
             with request.urlopen(req, timeout=10) as response:
                 if response.status != 200:
-                    raise RuntimeError(f"ClickHouse error: {response.status} {response.reason}")
+                    raise RuntimeError(
+                        f"ClickHouse error: {response.status} "
+                        f"{response.reason}"
+                    )
         except error.URLError as e:
-            raise RuntimeError(f"Failed to connect to ClickHouse: {e.reason}") from e
+            raise RuntimeError(
+                f"Failed to connect to ClickHouse: {e.reason}"
+            ) from e
         except Exception as e:
-            raise RuntimeError(f"ClickHouse query failed: {e}") from e
+            raise RuntimeError(
+                f"ClickHouse query failed: {e}"
+            ) from e
 
     def _create_tables_if_not_exist(self) -> None:
         """Create telemetry tables if they don't exist."""
@@ -208,9 +301,9 @@ class ClickHouseClient:
             try:
                 self._execute_query(ddl)
             except Exception as e:
-                # Log but don't fail - table might already exist or permissions issue
-                import warnings
-                warnings.warn(f"Could not create table {table_name}: {e}")
+                warnings.warn(
+                    f"Could not create table {table_name}: {e}"
+                )
 
     def write_telemetry_batch(self, events: list[dict[str, Any]]) -> None:
         """
@@ -223,16 +316,50 @@ class ClickHouseClient:
 
     def _write_events(self, table: str, events: list[dict[str, Any]]) -> None:
         if table not in self.ALLOWED_TABLES:
-            raise ValueError(f"Table is not allowed for writes: {table}")
+            raise ValueError(f"Table not allowed: {table}")
         if not events:
             return
 
+        # Hash sensitive fields before serialization
+        hashed = [
+            self._hash_sensitive_values(ev) for ev in events
+        ]
         payload = "\n".join(
-            json.dumps(event, default=str, separators=(",", ":"))
-            for event in events
+            json.dumps(ev, default=str, separators=(",", ":"))
+            for ev in hashed
         )
         query = f"INSERT INTO {table} FORMAT JSONEachRow\n" + payload
-        self._execute_query(query)
+
+        # Try with exponential backoff; on persistent failure, queue locally
+        for attempt in range(self._max_retries):
+            try:
+                self._execute_query(query)
+                # Also retry any previously queued events
+                if self._pending_queue:
+                    self._drain_pending_queue()
+                return
+            except (error.URLError, RuntimeError):
+                backoff = min(2 ** attempt, 30)
+                time.sleep(backoff)
+        self._pending_queue.extend(hashed)
+
+    def _drain_pending_queue(self) -> None:
+        """Attempt to flush queued events."""
+        if not self._pending_queue:
+            return
+        payload = "\n".join(
+            json.dumps(ev, default=str, separators=(",", ":"))
+            for ev in self._pending_queue
+        )
+        table = self._pending_queue[0].get(
+            "_table", "rfsn_attention_events"
+        )
+        query = f"INSERT INTO {table} FORMAT JSONEachRow\n" + payload
+        try:
+            self._execute_query(query)
+            self._pending_queue.clear()
+        except Exception:
+            pass
 
     def write_attention_events(self, events: list[dict[str, Any]]) -> None:
         self._write_events("rfsn_attention_events", events)
@@ -246,7 +373,9 @@ class ClickHouseClient:
     def write_failure_events(self, events: list[dict[str, Any]]) -> None:
         self._write_events("rfsn_failures", events)
 
-    def write_sparsity_profile_events(self, events: list[dict[str, Any]]) -> None:
+    def write_sparsity_profile_events(
+        self, events: list[dict[str, Any]]
+    ) -> None:
         self._write_events("rfsn_sparsity_profiles", events)
 
     def close(self) -> None:
