@@ -29,11 +29,13 @@ FORBIDDEN_PATTERNS = [
 _THIS_FILE = "test_no_placeholder_source.py"
 
 # Directories to skip (build artifacts, dependencies, etc.)
-SKIP_DIRS = {".venv", "venv", "dist", "build", ".eggs", "__pycache__", "node_modules"}
+SKIP_DIRS = {
+    ".venv", "venv", "dist", "build", ".eggs", "__pycache__", "node_modules",
+}
 
 
 def test_no_generated_placeholder_text_in_python_sources():
-    """Every .py file in the repo must be valid Python, not placeholder text."""
+    """Every .py file must be valid Python, not placeholder text."""
     root = Path(__file__).resolve().parents[1]
     offenders = []
 
@@ -56,7 +58,9 @@ def test_no_generated_placeholder_text_in_python_sources():
                 # Find the first matching line for context
                 for lineno, line in enumerate(text.splitlines(), 1):
                     if pattern in line:
-                        offenders.append(f"{rel}:{lineno}: contains {pattern!r}")
+                        offenders.append(
+                            f"{rel}:{lineno}: contains {pattern!r}"
+                        )
                         break
 
     assert not offenders, (
