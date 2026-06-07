@@ -1,12 +1,31 @@
 from __future__ import annotations
 
 import json
+import os
+import tempfile
 
 from rfsn_v10.clickhouse_client import ClickHouseClient
 
 
-def test_write_telemetry_batch_uses_jsoneachrow(monkeypatch):
-    client = ClickHouseClient()
+def _make_isolated_client(tmp_path=None, **kwargs) -> ClickHouseClient:
+    """Create a ClickHouseClient with an isolated flush path so stale events
+    left by other tests never poison this client's pending queue."""
+    client = ClickHouseClient(**kwargs)
+    if tmp_path is not None:
+        client._flush_path = str(tmp_path / "flush.jsonl")
+    else:
+        # Use a fresh temp file so _replay_flushed_events finds nothing.
+        fd, path = tempfile.mkstemp(suffix=".jsonl")
+        os.close(fd)
+        os.unlink(path)
+        client._flush_path = path
+    # Clear any events that were already replayed from the shared file.
+    client._pending_queue.clear()
+    return client
+
+
+def test_write_telemetry_batch_uses_jsoneachrow(monkeypatch, tmp_path):
+    client = _make_isolated_client(tmp_path)
     captured: list[str] = []
 
     def fake_execute(query: str, params=None):
@@ -49,8 +68,8 @@ def test_write_telemetry_batch_uses_jsoneachrow(monkeypatch):
     assert second["execution_mode"] == "dense_prefill"
 
 
-def test_write_telemetry_batch_empty_is_noop(monkeypatch):
-    client = ClickHouseClient()
+def test_write_telemetry_batch_empty_is_noop(monkeypatch, tmp_path):
+    client = _make_isolated_client(tmp_path)
     called = {"count": 0}
 
     def fake_execute(query: str, params=None):

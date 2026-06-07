@@ -237,41 +237,56 @@ class MetalBackend:
 
     @staticmethod
     def wht_transform(x):
+        """Walsh-Hadamard transform over the last dimension in blocks of 64.
+
+        The transform is self-inverse when normalised by 1/sqrt(64) = 1/8.
+
+        Raises:
+            ValueError: If the tensor is empty or last dim is not a multiple
+                of 64.
+            KernelRouteError: If the Metal kernel API is unavailable.
+        """
         ensure_mlx_available()
         if not MetalBackend.available():
             raise KernelRouteError("metal_kernel_api_unavailable")
         if x.size == 0:
-            raise KernelRouteError("Cannot WHT-transform empty tensor")
+            raise ValueError("Cannot WHT-transform empty tensor")
         if x.shape[-1] % 64 != 0:
-            raise KernelRouteError("Last dimension must be a multiple of 64")
+            raise ValueError(
+                f"Last dimension must be a multiple of 64, got {x.shape[-1]}"
+            )
 
         out_dtype = mx.float32
+        # Each threadgroup processes exactly one 64-element WHT block.
+        # lid  = lane within the block [0, 63]
+        # tgid = block index
+        # gid  = flat element index = tgid * 64 + lid
         source = """
             uint tgid = threadgroup_position_in_grid.x;
-            uint lid = thread_position_in_threadgroup.x;
-            uint gid = tgid * 64u + lid;
-            uint n = n_buf[0];
+            uint lid  = thread_position_in_threadgroup.x;
+            uint gid  = tgid * 64u + lid;
+            uint n    = n_buf[0];
 
             threadgroup float smem[64];
-            float val = 0.0f;
-            if (gid < n) {
-                val = float(x[gid]);
-            }
 
-            smem[lid] = val;
+            // Load — bounds guard for partial last block (shouldn't happen
+            // since we validated last-dim % 64 == 0, but be safe).
+            smem[lid] = (gid < n) ? float(x[gid]) : 0.0f;
             threadgroup_barrier(mem_flags::mem_threadgroup);
 
-            for (uint step = 1u; step < 64u; step *= 2u) {
-                uint partner = lid ^ step;
+            // Butterfly WHT (Hadamard order, in-place on smem).
+            for (uint step = 1u; step < 64u; step <<= 1u) {
                 float a = smem[lid];
-                float b = smem[partner];
+                float b = smem[lid ^ step];
                 threadgroup_barrier(mem_flags::mem_threadgroup);
                 smem[lid] = ((lid & step) == 0u) ? (a + b) : (b - a);
                 threadgroup_barrier(mem_flags::mem_threadgroup);
             }
 
+            // Normalise by 1/sqrt(64) = 0.125 so the transform is
+            // self-inverse (applying it twice returns the original).
             if (gid < n) {
-                out[gid] = T(smem[lid] / 8.0f);
+                out[gid] = T(smem[lid] * 0.125f);
             }
         """
 
@@ -283,15 +298,17 @@ class MetalBackend:
         )
 
         shape = x.shape
-        flat = mx.array(x.reshape(-1))
+        flat = x.reshape(-1).astype(mx.float32)
         n = int(flat.size)
+        n_blocks = n // 64  # guaranteed integer division after shape check
         n_buf = mx.array([n], dtype=mx.uint32)
-        threadgroup_x = 256 if n >= 256 else max(1, n)
+
         outputs = kernel(
             inputs=[flat, n_buf],
             template=[("T", out_dtype)],
-            grid=(n, 1, 1),
-            threadgroup=(threadgroup_x, 1, 1),
+            # One threadgroup per 64-element block; 64 threads per group.
+            grid=(n_blocks * 64, 1, 1),
+            threadgroup=(64, 1, 1),
             output_shapes=[(n,)],
             output_dtypes=[out_dtype],
         )

@@ -603,7 +603,7 @@ def test_qjl_sketch_with_isoquant(tmp_path, experimental_qjl_env):
     assert cache.k_qjl.proj_dim == 16
 
 
-def test_isoquant_memory_estimate_includes_overhead(tmp_path, experimental_polar_env):
+def test_isoquant_memory_estimate_includes_overhead(tmp_path, experimental_qjl_env):
     manager = RFSNTurboQuantKVManager(
         quant_mode="isoquant_cartesian",
         use_isoquant=True,

@@ -9,6 +9,10 @@ Tests verify:
 Requirements:
     - Docker and docker-compose installed
     - Ports 8080 and 8123 available
+
+These tests are SKIPPED by default.  Set ``RFSN_INTEGRATION_TESTS=1`` in the
+environment to opt in.  They are tagged ``@pytest.mark.integration`` so they
+can also be selected/deselected via ``-m integration``.
 """
 from __future__ import annotations
 
@@ -19,6 +23,15 @@ import time
 from pathlib import Path
 
 import pytest
+
+# Skip the entire module unless explicitly opted in.
+pytestmark = pytest.mark.skipif(
+    not os.getenv("RFSN_INTEGRATION_TESTS"),
+    reason=(
+        "Docker Compose integration tests are opt-in. "
+        "Set RFSN_INTEGRATION_TESTS=1 to enable."
+    ),
+)
 
 
 @pytest.fixture(scope="module")
@@ -34,18 +47,20 @@ def docker_compose():
         subprocess.run(
             ["docker", "compose", "version"],
             capture_output=True,
-            check=True
+            check=True,
+            timeout=10,
         )
-    except (subprocess.CalledProcessError, FileNotFoundError):
+    except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired):
         pytest.skip("Docker Compose not available")
 
-    # Start services
+    # Start services — hard timeout so a broken Docker daemon never hangs CI.
     try:
         subprocess.run(
             ["docker", "compose", "-f", str(compose_file), "up", "-d"],
             capture_output=True,
             check=True,
-            cwd=compose_file.parent
+            cwd=compose_file.parent,
+            timeout=120,
         )
 
         # Wait for services to be healthy
@@ -53,12 +68,16 @@ def docker_compose():
         start_time = time.time()
 
         while time.time() - start_time < max_wait:
-            result = subprocess.run(
-                ["docker", "compose", "ps", "--format", "json"],
-                capture_output=True,
-                text=True,
-                cwd=compose_file.parent
-            )
+            try:
+                result = subprocess.run(
+                    ["docker", "compose", "ps", "--format", "json"],
+                    capture_output=True,
+                    text=True,
+                    cwd=compose_file.parent,
+                    timeout=10,
+                )
+            except subprocess.TimeoutExpired:
+                break
 
             if result.returncode == 0:
                 try:
@@ -80,7 +99,8 @@ def docker_compose():
             subprocess.run(
                 ["docker", "compose", "down"],
                 capture_output=True,
-                cwd=compose_file.parent
+                cwd=compose_file.parent,
+                timeout=30,
             )
             pytest.skip("Services failed to become healthy")
 
@@ -90,10 +110,11 @@ def docker_compose():
         subprocess.run(
             ["docker", "compose", "down", "-v"],
             capture_output=True,
-            cwd=compose_file.parent
+            cwd=compose_file.parent,
+            timeout=60,
         )
 
-    except subprocess.CalledProcessError as e:
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as e:
         pytest.skip(f"Failed to start Docker Compose: {e}")
 
 
