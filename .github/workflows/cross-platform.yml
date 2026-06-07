@@ -24,6 +24,10 @@ jobs:
         run: |
           python -c "from rfsn_v10.kernels import backend; assert backend.name == 'metal'"
           pytest tests/test_attention.py tests/test_drift.py tests/test_bitpack_fuzz.py tests/test_stress_32k.py tests/test_integration_7b_synthetic.py -v --cov=rfsn_v10 --cov-report=term-missing
+      - name: Benchmark regression check
+        run: |
+          python benchmarks/run_deterministic.py
+          python benchmarks/check_regression.py benchmarks/results/baseline.json benchmarks/results/latest.json
 
   test-macos-x86:
     runs-on: macos-13
