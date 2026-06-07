@@ -76,6 +76,36 @@ class QuantizationConfig(BaseModel):
     enable_incoherent_signs: bool = Field(default=True)
 
 
+class BackendConfig(BaseModel):
+    """Kernel backend configuration."""
+
+    name: str = Field(
+        default="",
+        description="Backend override (metal|numpy|cuda). "
+        "Empty string lets the dispatcher choose.",
+    )
+
+
+class TelemetryConfig(BaseModel):
+    """ClickHouse telemetry configuration."""
+
+    host: str = Field(default="localhost")
+    port: int = Field(default=8123, ge=1, le=65535)
+    secure: bool = Field(default=True)
+    auth_token: str = Field(default="")
+    database: str = Field(default="default")
+
+
+class RuntimeConfig(BaseModel):
+    """Runtime flags matching default_runtime.yaml."""
+
+    default_quant_mode: str = Field(default="k8_v5_gs64")
+    allow_experimental: bool = Field(default=False)
+    qjl_enabled: bool = Field(default=False)
+    sparse_decode_enabled: bool = Field(default=False)
+    audit_enabled: bool = Field(default=True)
+
+
 class RFSNConfig(BaseModel):
     """Main RFSN configuration."""
 
@@ -88,6 +118,9 @@ class RFSNConfig(BaseModel):
     quantization: QuantizationConfig = Field(
         default_factory=QuantizationConfig
     )
+    backend: BackendConfig = Field(default_factory=BackendConfig)
+    telemetry: TelemetryConfig = Field(default_factory=TelemetryConfig)
+    runtime: RuntimeConfig = Field(default_factory=RuntimeConfig)
 
     @classmethod
     def from_env(cls) -> RFSNConfig:
@@ -102,16 +135,51 @@ class RFSNConfig(BaseModel):
                 max_gb=float(os.getenv("RFSN_MAX_MEMORY_GB", "8.0")),
                 quota_gb=float(os.getenv("RFSN_QUOTA_GB", "10.0")),
                 enable_leak_detection=(
-                    os.getenv("RFSN_ENABLE_LEAK_DETECTION", "true").lower() == "true"
+                    os.getenv("RFSN_ENABLE_LEAK_DETECTION", "true").lower()
+                    == "true"
                 ),
             ),
             cache=CacheConfig(
                 directory=os.getenv("RFSN_CACHE_DIR", "~/.cache/rfsn"),
                 enable_persistence=(
-                    os.getenv("RFSN_ENABLE_PERSISTENCE", "true").lower() == "true"
+                    os.getenv("RFSN_ENABLE_PERSISTENCE", "true").lower()
+                    == "true"
                 ),
                 enable_wal=(
                     os.getenv("RFSN_ENABLE_WAL", "true").lower() == "true"
+                ),
+            ),
+            backend=BackendConfig(
+                name=os.getenv("RFSN_BACKEND", ""),
+            ),
+            telemetry=TelemetryConfig(
+                host=os.getenv("RFSN_CLICKHOUSE_HOST", "localhost"),
+                port=int(os.getenv("RFSN_CLICKHOUSE_PORT", "8123")),
+                secure=(
+                    os.getenv("RFSN_CLICKHOUSE_SECURE", "true").lower()
+                    == "true"
+                ),
+                auth_token=os.getenv("RFSN_CLICKHOUSE_TOKEN", ""),
+                database=os.getenv("RFSN_CLICKHOUSE_DB", "default"),
+            ),
+            runtime=RuntimeConfig(
+                default_quant_mode=os.getenv(
+                    "RFSN_DEFAULT_QUANT_MODE", "k8_v5_gs64"
+                ),
+                allow_experimental=(
+                    os.getenv("RFSN_ALLOW_EXPERIMENTAL", "false").lower()
+                    == "true"
+                ),
+                qjl_enabled=(
+                    os.getenv("RFSN_QJL_ENABLED", "false").lower() == "true"
+                ),
+                sparse_decode_enabled=(
+                    os.getenv("RFSN_SPARSE_DECODE_ENABLED", "false").lower()
+                    == "true"
+                ),
+                audit_enabled=(
+                    os.getenv("RFSN_AUDIT_ENABLED", "true").lower()
+                    == "true"
                 ),
             ),
         )

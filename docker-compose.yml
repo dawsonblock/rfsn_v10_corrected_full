@@ -15,6 +15,9 @@ services:
     ports:
       - "8080:8080"
     restart: unless-stopped
+    depends_on:
+      clickhouse:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "python", "-c", "from rfsn_v10.health import get_health_checker; checker = get_health_checker(); report = checker.get_health_report(); exit(0 if report['overall_status'] == 'healthy' else 1)"]
       interval: 30s
@@ -22,6 +25,28 @@ services:
       retries: 3
       start_period: 40s
 
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.3
+    container_name: rfsn-clickhouse
+    ports:
+      - "8123:8123"
+      - "9000:9000"
+    volumes:
+      - clickhouse_data:/var/lib/clickhouse
+    environment:
+      - CLICKHOUSE_DB=default
+      - CLICKHOUSE_USER=default
+      - CLICKHOUSE_PASSWORD=
+      - CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT=1
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8123/ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
 volumes:
   rfsn_cache:
+    driver: local
+  clickhouse_data:
     driver: local
