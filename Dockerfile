@@ -1,4 +1,4 @@
-FROM python:3.12-slim
+FROM python:3.11-slim
 
 LABEL maintainer="RFSN Contributors"
 LABEL description="RFSN v10 - Quantized KV-cache + decode-time sparse-attention runtime"
@@ -32,6 +32,7 @@ RUN mkdir -p /app/.cache /app/artifacts && chown -R rfsn:rfsn /app
 
 # Set environment variables
 ENV PYTHONUNBUFFERED=1
+ENV RFSN_BACKEND=numpy
 ENV RFSN_CACHE_DIR=/app/.cache
 ENV RFSN_LOG_LEVEL=INFO
 ENV RFSN_TELEMETRY_DIR=/app/artifacts/runtime_logs
