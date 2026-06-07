@@ -92,9 +92,9 @@ class BackendConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    name: Literal["", "auto", "metal", "numpy"] = Field(
+    name: Literal["", "auto", "metal", "numpy", "mlx"] = Field(
         default="",
-        description="Backend override (metal|numpy). "
+        description="Backend override (metal|numpy|mlx). "
         "Empty string or 'auto' lets the dispatcher choose. "
         "CUDA is not implemented.",
     )
