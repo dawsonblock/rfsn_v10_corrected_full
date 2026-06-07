@@ -1,9 +1,10 @@
-# RFSN v10 — Alpha Repair Build
+# RFSN v10 — Beta Build
 
 ## Status
 
-**Strong alpha candidate.** Repair plan (Phases 0–13) applied. Not yet beta: compile
-and full packaging gates must pass on a clean build before the classifier can advance.
+**Beta candidate.** Telemetry tickets reconciled, production inference server
+(FastAPI + SSE) implemented, compile + packaging + CPU gates passing.
+MLX-dependent tests pass on Apple Silicon.
 
 To verify the current state locally:
 
@@ -24,8 +25,8 @@ python scripts/release_gate.py --cpu-only        # must print: Gate: 9 passed, 0
 | CUDA backend | **Not implemented** |
 | Full portable runtime | Not implemented — MLX required for core runtime |
 | End-to-end speedup | Not proven — decode TPS comparable, compression overhead makes total slower at short contexts |
-| Production deployment | Not supported |
-| Docker | CLI health check only — no HTTP service |
+| Production deployment | **FastAPI server** — `/v1/chat/completions` with SSE streaming |
+| Docker | HTTP service on port 8000 + ClickHouse telemetry |
 
 ---
 
@@ -72,6 +73,35 @@ pytest tests/test_attention.py tests/test_bitpack.py \
        tests/test_prefill_decode_split.py -q
 ```
 
+## Inference Server
+
+Run the OpenAI-compatible FastAPI server locally:
+
+```bash
+export RFSN_MODEL_ID=mlx-community/Llama-3-8B-Instruct-4bit
+python -m rfsn_v10.server
+# Or with uvicorn directly:
+# uvicorn rfsn_v10.server.app:app --host 0.0.0.0 --port 8000
+```
+
+Test the endpoint:
+
+```bash
+curl http://localhost:8000/health
+
+curl -X POST http://localhost:8000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{"messages":[{"role":"user","content":"Hello"}],"stream":true}'
+```
+
+Or with Docker Compose (CPU-only backend):
+
+```bash
+export RFSN_MODEL_ID=your-model-id
+export CLICKHOUSE_PASSWORD=your-password
+docker compose up -d
+```
+
 ---
 
 ## Architecture
@@ -84,9 +114,12 @@ pytest tests/test_attention.py tests/test_bitpack.py \
 - `rfsn_v10/attention_reference.py` — Canonical causal attention reference (always applies causal mask for T_q > 1)
 - `rfsn_v10/runtime/engine.py` — Orchestrator integrating KV cache, sparse attention, audit mode, and telemetry
 - `rfsn_v10/runtime/__init__.py` — Re-exports `RFSNRuntime` from `engine.py`
+- `rfsn_v10/runtime/generation.py` — `RFSNGenerator` with prefill, decode, sampling, and telemetry
 - `rfsn_v10/config.py` — Strict Pydantic config (extra='forbid' on all models)
 - `rfsn_v10/health.py` — Health check system; returns UNHEALTHY until checks have been run
 - `rfsn_v10/clickhouse_client.py` — HMAC-SHA256 prompt sanitization, recursive sanitizer, retry queue
+- `rfsn_v10/model_loader.py` — Unified model/tokenizer loading (mlx-lm / transformers)
+- `rfsn_v10/server/app.py` — FastAPI OpenAI-compatible server with SSE streaming
 
 ### Experimental Modules (disabled by default)
 

@@ -1,4 +1,4 @@
-FROM python:3.11-slim
+FROM python:3.12-slim
 
 LABEL maintainer="RFSN Contributors"
 LABEL description="RFSN v10 - Quantized KV-cache + decode-time sparse-attention runtime"
@@ -18,7 +18,7 @@ RUN groupadd -r rfsn && useradd -r -g rfsn rfsn
 COPY pyproject.toml README.md ./
 
 # Install Python dependencies (editable so local changes are reflected)
-RUN pip install --no-cache-dir -e ".[production]"
+RUN pip install --no-cache-dir -e ".[production,mlx]"
 
 # Copy source code
 COPY rfsn_v10/ ./rfsn_v10/
@@ -28,7 +28,7 @@ COPY benchmarks/ ./benchmarks/
 COPY tests/ ./tests/
 
 # Re-install to pick up any source changes
-RUN pip install --no-cache-dir -e ".[production]"
+RUN pip install --no-cache-dir -e ".[production,mlx]"
 
 # Create cache directory and fix permissions
 RUN mkdir -p /app/.cache /app/artifacts && chown -R rfsn:rfsn /app
@@ -46,5 +46,9 @@ USER rfsn
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD python -m rfsn_v10 healthcheck
 
-# Default command: CLI healthcheck (no HTTP server — this is a CLI tool)
-CMD ["python", "-m", "rfsn_v10", "healthcheck"]
+# Expose inference server port
+EXPOSE 8000
+
+# Default: run the inference server (set RFSN_MODEL_ID env var)
+# Override with docker-compose or CLI for other modes
+CMD ["python", "-m", "rfsn_v10.server"]
