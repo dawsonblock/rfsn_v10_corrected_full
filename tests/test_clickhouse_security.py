@@ -20,8 +20,15 @@ import pytest
 from rfsn_v10.clickhouse_client import ClickHouseClient
 
 
-def _expected_hmac(text: str, secret: str = "") -> str:
-    """Compute the expected HMAC-SHA256 hash used by the client."""
+def _expected_hmac(text: str, secret: str | None = None) -> str:
+    """Compute the expected HMAC-SHA256 hash used by the client.
+
+    Mirrors the logic in ``ClickHouseClient._hash_sensitive_values``:
+    when *secret* is ``None`` the ``RFSN_TELEMETRY_HMAC_KEY`` env var
+    is read (defaulting to an empty string).
+    """
+    if secret is None:
+        secret = os.environ.get("RFSN_TELEMETRY_HMAC_KEY", "")
     return hmac.new(
         secret.encode("utf-8"),
         text.encode("utf-8"),

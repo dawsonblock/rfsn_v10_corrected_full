@@ -118,7 +118,9 @@ class TestTelemetryEndToEnd:
 
         # Hash the events as the client would
         hashed = [
-            clickhouse_client._hash_sensitive_values(ev)
+            clickhouse_client._hash_sensitive_values(
+                ev, _allow_missing_key=True
+            )
             for ev in events
         ]
 
@@ -230,7 +232,9 @@ class TestTelemetryMockE2E:
 
         # Hash sensitive fields (as ClickHouseClient would)
         hashed_events = [
-            ClickHouseClient._hash_sensitive_values(ev)
+            ClickHouseClient._hash_sensitive_values(
+                ev, _allow_missing_key=True
+            )
             for ev in events
         ]
 
@@ -396,7 +400,9 @@ class TestTelemetrySecurity:
             "model": "test"
         }
 
-        hashed = ClickHouseClient._hash_sensitive_values(event)
+        hashed = ClickHouseClient._hash_sensitive_values(
+            event, _allow_missing_key=True
+        )
         output_str = json.dumps(hashed).lower()
 
         # Original sensitive values should not appear (they're hashed)

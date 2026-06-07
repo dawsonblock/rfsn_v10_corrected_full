@@ -56,9 +56,25 @@ def _compress_stable(
             strict_metal=False, max_memory_gb=2.0, cache_dir=tmpdir,
         )
         out = []
-        for layer_idx, (k_t, v_t) in enumerate(past_key_values):
+        # Handle both old tuple-list format and new DynamicCache format
+        if isinstance(past_key_values, DynamicCache):
+            layers = range(len(past_key_values.key_cache))
+        else:
+            layers = enumerate(past_key_values)
+        for layer_idx in layers:
+            if isinstance(past_key_values, DynamicCache):
+                k_t = past_key_values.key_cache[layer_idx]
+                v_t = past_key_values.value_cache[layer_idx]
+            else:
+                idx, item = layer_idx
+                layer_idx = idx
+                k_t = item[0]
+                v_t = item[1] if len(item) > 1 else None
             k_np = k_t.detach().to("cpu", dtype=torch.float32).numpy()
-            v_np = v_t.detach().to("cpu", dtype=torch.float32).numpy()
+            if v_t is not None:
+                v_np = v_t.detach().to("cpu", dtype=torch.float32).numpy()
+            else:
+                v_np = k_np
             bsz, heads, seq, dim = k_np.shape
             dim_padded = int(math.ceil(dim / 64.0) * 64)
             if dim_padded != dim:
@@ -148,7 +164,13 @@ def _teacher_forced_check(
     else:
         pytest.skip(f"No teacher-forced regression test for {config}")
 
-    quant_past = DynamicCache.from_legacy_cache(tuple(quant_past))
+    if hasattr(DynamicCache, "from_legacy_cache"):
+        quant_past = DynamicCache.from_legacy_cache(tuple(quant_past))
+    else:
+        cache = DynamicCache()
+        for layer_idx, (k, v) in enumerate(quant_past):
+            cache.update(k, v, layer_idx)
+        quant_past = cache
 
     # Compare first decode step logits with identical token
     first_tok = continuation[0] if continuation else 0

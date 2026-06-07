@@ -17,17 +17,14 @@ RUN groupadd -r rfsn && useradd -r -g rfsn rfsn
 # Copy build metadata first for layer caching
 COPY pyproject.toml README.md ./
 
-# Install Python dependencies (editable so local changes are reflected)
-RUN pip install --no-cache-dir -e ".[production,mlx]"
-
-# Copy source code
+# Copy source code before install so editable package resolves correctly
 COPY rfsn_v10/ ./rfsn_v10/
 COPY agent_core/ ./agent_core/
 COPY tools/ ./tools/
 COPY benchmarks/ ./benchmarks/
 COPY tests/ ./tests/
 
-# Re-install to pick up any source changes
+# Install package with all production + MLX dependencies
 RUN pip install --no-cache-dir -e ".[production,mlx]"
 
 # Create cache directory and fix permissions
