@@ -70,18 +70,42 @@ These are the only quantization presets validated for use:
 | `pytest tests/test_short_prompt_decode_drift.py` | PASS (4 tests) |
 | `pytest tests/test_prefill_decode_split.py` | PASS (5 tests) |
 | `pytest tests/test_short_prompt_generation_regression.py` | PASS (4 tests) |
+| `pytest tests/test_server_backend_errors.py` | PASS (6 tests) |
+| `pytest tests/test_version_exported.py` | PASS (3 tests) |
 | `RFSN_BACKEND=mlx python -m rfsn_v10 healthcheck` | PASS |
 
-Total gate tests: **882 passed, 15 skipped, 0 failed**
+Total gate tests: **893 passed, 15 skipped, 0 failed**
 
 ### Docker gate
 
 | Step | Result |
 |------|--------|
-| `docker build -t rfsn-qjl .` | Requires Docker daemon — not run in this session |
-| `docker run --rm -e RFSN_BACKEND=numpy rfsn-qjl` | Requires Docker daemon |
+| `docker build -t rfsn-qjl .` | PASS — image builds successfully |
+| `docker run --rm -e RFSN_BACKEND=numpy rfsn-qjl` | PASS — healthcheck returns degraded (expected, no MLX in container) |
 
-Docker gate must be run manually before promoting to beta.
+Docker gate: **PASS** (healthcheck-only mode verified).
+Note: docker-compose.yml runs healthcheck validation only, not the inference server.
+For server mode, use `docker-compose -f docker-compose.server.yml up -d`.
+
+### Package gate
+
+| Step | Result |
+|------|--------|
+| `SETUPTOOLS_SCM_PRETEND_VERSION=10.1.0a1 python -m build` | PASS — wheel version 10.1.0a1 (not 0.0.0) |
+| `pip install dist/*.whl && python -c "import rfsn_v10; print(rfsn_v10.__version__)"` | PASS — prints `10.1.0a1` |
+
+### Benchmark gate
+
+| Step | Result |
+|------|--------|
+| `benchmarks/benchmark_kv_cache.py` | PASS — cosine sim 0.99998, compression 0.266 (3.75x) |
+| `benchmarks/benchmark_bitpack.py` | PASS — all configs within tolerance |
+| `benchmarks/benchmark_attention.py` | PASS — attention causal mask correct |
+| `artifacts/bench/current/results.json` | Generated |
+| `artifacts/bench/current/results.csv` | Generated |
+| `artifacts/bench/current/results.md` | Generated |
+
+Quality gates: **PASS** — key cosine 0.99998 ≥ 0.999 threshold.
 
 ---
 
@@ -130,13 +154,13 @@ The classifier must remain `3 - Alpha` until **all** items below are checked:
 - [x] `python -m compileall -q rfsn_v10 tests` — PASS
 - [x] `pytest tests/test_no_placeholder_source.py` — PASS
 - [x] `pytest tests/test_runtime_import_contract.py` — PASS
-- [x] Full non-MLX test gate — PASS (882 tests)
-- [x] Full MLX gate — PASS (99 tests)
-- [x] Wheel builds and subpackages install correctly
+- [x] Full non-MLX test gate — PASS (893 tests)
+- [x] Full MLX gate — PASS (99+ tests)
+- [x] Wheel builds with correct version — PASS (10.1.0a1, not 0.0.0)
 - [x] `docker build -t rfsn-qjl . && docker run --rm rfsn-qjl` — PASS (healthcheck default CMD)
-- [x] Benchmarks re-run with quality + speed metrics - PASS (4 suites, cos >= 0.99998)
-- [x] README updated with inference server section
-- [x] Archive created with `git archive` (not Finder zip)
+- [x] Benchmarks re-run with quality metrics — PASS (KV cosine 0.99998 ≥ 0.999 threshold)
+- [x] Server backend error handling — PASS (400/503, never 500)
+- [x] `rfsn_v10.__version__` exported correctly — PASS
 
 ---
 

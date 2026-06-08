@@ -17,7 +17,7 @@ Environment variables
 RFSN_MODEL_ID
     HuggingFace model ID or local path (required).
 RFSN_BACKEND
-    ``mlx`` or ``numpy`` (default: ``mlx``).
+    ``mlx`` or ``torch`` (default: ``mlx``).
 RFSN_ENABLE_SPARSE_DECODE
     ``true`` or ``false`` (default: ``false``).
 RFSN_ENABLE_QUANTIZED_KV
@@ -164,8 +164,10 @@ async def chat_completions(
     """OpenAI-compatible chat completions endpoint with SSE streaming."""
     try:
         generator = _load_generator()
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except RuntimeError as exc:
-        raise HTTPException(status_code=503, detail=str(exc))
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
 
     # Build the prompt from messages
     messages = [

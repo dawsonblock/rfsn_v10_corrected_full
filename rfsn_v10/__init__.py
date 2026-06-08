@@ -4,6 +4,11 @@ from __future__ import annotations
 
 from importlib import import_module
 
+try:
+    from ._version import __version__
+except Exception:  # pragma: no cover
+    __version__ = "unknown"
+
 from .compat import MLX_AVAILABLE
 
 _LAZY_IMPORTS = {
@@ -28,7 +33,7 @@ _RUNTIME_IMPORTS = {
 
 _ALL_LAZY = {**_LAZY_IMPORTS, **_RUNTIME_IMPORTS}
 
-__all__ = ["MLX_AVAILABLE", *_ALL_LAZY.keys()]
+__all__ = ["MLX_AVAILABLE", "__version__", *_ALL_LAZY.keys()]
 
 
 def __getattr__(name: str):

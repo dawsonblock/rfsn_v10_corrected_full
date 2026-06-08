@@ -1,9 +1,10 @@
 version: '3.8'
 
-# NOTE: RFSN v10 inference server + ClickHouse telemetry.
-# The FastAPI server runs on port 8000.
-# For local development with ClickHouse port access, use docker-compose.dev.yml.
-# Docker uses CPU-only (numpy) backend. For MLX acceleration, run natively on macOS.
+# NOTE: RFSN v10 container validation + ClickHouse telemetry.
+# This compose file runs the CLI healthcheck and exits — it does NOT start
+# the inference server. The inference server requires mlx or torch backend;
+# numpy backend only supports healthcheck / kernel validation.
+# For server mode, use: docker compose -f docker-compose.server.yml up -d
 
 services:
   rfsn:
@@ -13,19 +14,15 @@ services:
       - ./artifacts:/app/artifacts
       - ./results:/app/results
       - rfsn_cache:/app/.cache
-    command: ["python", "-m", "rfsn_v10.server"]
+    command: ["python", "-m", "rfsn_v10", "healthcheck"]
     environment:
       - RFSN_LOG_LEVEL=INFO
       - RFSN_CACHE_DIR=/app/.cache
       - RFSN_METRICS_ENABLED=true
       - RFSN_BACKEND=numpy
-      # RFSN_MODEL_ID is required for the inference server to start.
-      - RFSN_MODEL_ID=${RFSN_MODEL_ID:-}
       # CLICKHOUSE_PASSWORD is required — compose will fail with a clear error
       # if it is unset. Use docker-compose.dev.yml override for local dev.
       - CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASSWORD:?CLICKHOUSE_PASSWORD is required. Set it in a .env file. See .env.example.}
-    ports:
-      - "8000:8000"
     depends_on:
       clickhouse:
         condition: service_healthy

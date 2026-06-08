@@ -1,10 +1,10 @@
-# RFSN v10 Main 28 — Beta Build
+# RFSN v10 Main 28 — Alpha Candidate
 
 ## Status: RFSN v10 Main 28
 
-**Beta candidate.** Telemetry tickets reconciled, production inference server
-(FastAPI + SSE) implemented, compile + packaging + CPU gates passing.
-MLX-dependent tests pass on Apple Silicon.
+**Alpha candidate.** Telemetry tickets reconciled, inference server
+(FastAPI + SSE) implemented for mlx/torch backends, compile + packaging + CPU gates passing.
+MLX-dependent tests pass on Apple Silicon. Docker compose runs healthcheck only (not inference).
 
 To verify the current state locally:
 
@@ -25,8 +25,8 @@ python scripts/release_gate.py --cpu-only        # must print: Gate: 9 passed, 0
 | CUDA backend | **Not implemented** |
 | Full portable runtime | Not implemented — MLX required for core runtime |
 | End-to-end speedup | Not proven — decode TPS comparable, compression overhead makes total slower at short contexts |
-| Production deployment | **FastAPI server** — `/v1/chat/completions` with SSE streaming |
-| Docker | HTTP service on port 8000 + ClickHouse telemetry |
+| Production deployment | FastAPI server — `/v1/chat/completions` with SSE streaming (mlx/torch only) |
+| Docker | Healthcheck validation + ClickHouse telemetry (CPU-only, no inference) |
 | >8-bit compression | Uses raw uint32 fallback — bit-packing is real for 2-8 bit only |
 | Experimental Metal | No Metal kernels exist for the experimental quantization paths |
 | Experimental throughput | No experimental throughput speedup is proven |
@@ -97,12 +97,12 @@ curl -X POST http://localhost:8000/v1/chat/completions \
   -d '{"messages":[{"role":"user","content":"Hello"}],"stream":true}'
 ```
 
-Or with Docker Compose (CPU-only backend):
+Or with Docker Compose (container validation + telemetry):
 
 ```bash
-export RFSN_MODEL_ID=your-model-id
 export CLICKHOUSE_PASSWORD=your-password
 docker compose up -d
+# Runs healthcheck and exits — inference server requires mlx/torch backend natively
 ```
 
 ---
